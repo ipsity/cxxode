@@ -1,0 +1,21 @@
+﻿# Build artifacts
+/build/
+/cmake-build-*/
+/out/
+/bin/
+/obj/
+
+# IDE
+.idea/
+
+# Logs
+*.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
