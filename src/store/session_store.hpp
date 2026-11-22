@@ -14,6 +14,7 @@ struct SessionScope {
     std::string model;
     std::string writable_path;
     std::vector<std::string> excluded;
+    bool allow_run = false;
 };
 
 // The contract driver can request a SQLite space failure before one commit.

@@ -31,6 +31,9 @@ int run(std::span<const std::string> args) {
             if (const auto* tool = std::get_if<ProposeTool>(&event)) {
                 std::cout << tool->call.id << ' ' << tool->call.name << ' '
                           << text_arg(tool->call, "path") << '\n';
+                for (const auto& argument : list_arg(tool->call, "args")) {
+                    std::cout << '[' << argument << "]\n";
+                }
             }
             return true;
         });

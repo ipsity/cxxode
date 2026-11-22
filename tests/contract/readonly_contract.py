@@ -65,7 +65,9 @@ class Handler(BaseHTTPRequestHandler):
             assert self.path == "/v1/messages"
             assert self.headers["anthropic-version"] == "2023-06-01"
             assert "x-api-key" not in self.headers
-            assert json.loads(raw)["model"] == "fixture-model"
+            payload = json.loads(raw)
+            assert payload["model"] == "fixture-model"
+            assert [tool["name"] for tool in payload["tools"]] == ["read", "search"]
             request = self.server.steps.popleft()
             self.server.timestamps.append(time.monotonic())
             self.server.requests.append(raw)
@@ -134,6 +136,9 @@ def scenarios(program, cli, server, workspace):
                      data=b"\xef\xbb\xbf" + START + b": keepalive\n\n" +
                      text(0, "中文") + tool(1, "read1", "read", {"path": SOURCE}) + stop)
     assert decoded == f"中文\nread1 read {SOURCE}\n", decoded
+    decoded, _ = run([program, "codec"], 0, data=START +
+                     tool(0, "run1", "run", {"program": "ctest", "args": ["", "中文 空格"], "path": "."}) + stop)
+    assert decoded == "run1 run .\n[]\n[中文 空格]\n", decoded
 
     def session(steps, expected, code=0, cancel_ms=0):
         server.steps = deque(steps)

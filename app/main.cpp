@@ -6,6 +6,7 @@
 #include "store/session_store.hpp"
 #include "tools/edit.hpp"
 #include "tools/read_only.hpp"
+#include "tools/run.hpp"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -42,12 +43,13 @@ struct Options {
     std::string writable;
     bool resume = false;
     bool accept_unknown = false;
+    bool allow_run = false;
 };
 
 void usage(std::ostream& stream) {
     stream << "Usage: lay-code [--truncated]\n"
            << "       lay-code --workspace PATH --model MODEL [--exclude RELATIVE_PATH ...]\n"
-           << "       Add --session ID --write FILE for editing. Reopen with --resume.\n"
+           << "       Add --session ID with --write FILE and/or --allow-run. Reopen with --resume.\n"
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n";
 }
 
@@ -68,6 +70,10 @@ Options options(std::span<const std::string> arguments) {
         }
         if (option == "--accept-unknown" && !result.accept_unknown) {
             result.accept_unknown = true;
+            continue;
+        }
+        if (option == "--allow-run" && !result.allow_run) {
+            result.allow_run = true;
             continue;
         }
         if (index == arguments.size() || arguments[index].empty()) {
@@ -95,10 +101,11 @@ Options options(std::span<const std::string> arguments) {
         })) {
         throw std::invalid_argument("Choose a workspace and a valid Anthropic model ID.");
     }
-    if (result.id.empty() != result.writable.empty() ||
+    if ((!result.id.empty()) != (!result.writable.empty() || result.allow_run) ||
         (result.resume && result.id.empty()) || (result.accept_unknown && !result.resume) ||
-        (result.model == "fixture-edit" && result.id.empty())) {
-        throw std::invalid_argument("Editing requires --session ID and --write FILE. Use --resume to reopen it.");
+        (result.model == "fixture-edit" && result.writable.empty()) ||
+        (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
+        throw std::invalid_argument("Use --session ID with --write FILE and/or --allow-run. Use --resume to reopen it.");
     }
     return result;
 }
@@ -181,9 +188,74 @@ void terminal_text(std::string_view text) {
     }
 }
 
+#ifdef LAY_WITH_ANTHROPIC
+void show_command(const lay::RunEvidence& run) {
+    std::cout << "  executable ";
+    terminal_text(lay::quoted_argument(run.program));
+    std::cout << '\n';
+    for (std::size_t index = 0; index < run.arguments.size(); ++index) {
+        std::cout << "  argument[" << index << "] ";
+        terminal_text(lay::quoted_argument(run.arguments[index]));
+        std::cout << '\n';
+    }
+    std::cout << "  working directory ";
+    terminal_text(lay::quoted_argument(run.directory));
+    std::cout << "\n  timeout " << run.timeout_ms << " ms\n";
+}
+
+void show_verification(const lay::RunEvidence& run, const lay::Verification& verification,
+                       std::size_t current_revision) {
+    const auto& process = verification.process;
+    std::cout << "[verification] " << lay::describe(process.status, process.code)
+              << " at edit revision " << run.edit_revision;
+    if (run.edit_revision < current_revision) {
+        std::cout << " (earlier workspace revision)";
+    }
+    std::cout << '\n';
+    show_command(run);
+    std::cout << "  elapsed " << process.elapsed_ms << " ms";
+    if (!verification.observed_utc.empty()) {
+        std::cout << "  observed " << verification.observed_utc;
+    }
+    std::cout << '\n';
+    for (const auto& [name, stream] : {std::pair{"stdout", &process.stdout_text},
+                                        std::pair{"stderr", &process.stderr_text}}) {
+        std::cout << "  " << name << ' ' << stream->total_bytes << " bytes, "
+                  << stream->omitted_bytes << " omitted\n";
+        const auto& tail = stream->tail.empty() ? stream->head : stream->tail;
+        auto start = tail.size() > 512 ? tail.size() - 512 : 0;
+        while (start < tail.size() && lay::continuation(static_cast<unsigned char>(tail[start]))) {
+            ++start;
+        }
+        if (start < tail.size()) {
+            terminal_text(std::string_view(tail).substr(start));
+            std::cout << '\n';
+        }
+    }
+    for (const auto* detail : {&verification.test_summary, &process.diagnostic}) {
+        if (!detail->empty()) {
+            terminal_text(*detail);
+            std::cout << '\n';
+        }
+    }
+    if (process.descendants_terminated) {
+        std::cout << "Remaining descendants were terminated.\n";
+    }
+}
+#endif
+
 int render(const lay::Session& session, bool workspace) {
+#ifdef LAY_WITH_ANTHROPIC
+    const auto revision = lay::edit_revision(session);
+#endif
     for (const auto& round : session.rounds) {
         for (const auto& record : round.tools) {
+#ifdef LAY_WITH_ANTHROPIC
+            if (record.run && record.verification) {
+                show_verification(*record.run, *record.verification, revision);
+                continue;
+            }
+#endif
             if (record.call.name == "edit" && record.result.status != lay::ToolStatus::pending) {
                 std::cout << "[edit] ";
                 terminal_text(record.result.text);
@@ -267,6 +339,44 @@ lay::Generate fixture_edit_model(std::string path) {
     };
 }
 
+lay::Generate fixture_verify_model(std::string path) {
+    return [path = std::move(path)](const lay::Request& request, const lay::EventSink& emit) -> lay::Generation {
+        using namespace lay;
+        const auto propose = [&](ToolCall call) {
+            const ModelEvent proposal = ProposeTool{std::move(call)};
+            if (emit(proposal)) {
+                emit(FinishReply{ReplyStop::tool_use});
+            }
+        };
+        const auto round = request.history.size();
+        if (round == 0 || round == 3) {
+            const auto program = request.question == "verify with missing program"
+                ? "lay-code-fixture-ctest-unavailable" : "ctest";
+            propose({"verify-" + std::to_string(round), "run", {
+                {"program", std::string(program)}, {"args", TextList{"--output-on-failure", "-R", "^empty_config$"}}}});
+            return {};
+        }
+        const auto repeat = request.question == "verify and edit again";
+        if (round == 1 || (round == 4 && repeat)) {
+            propose({"read-" + std::to_string(round), "read", {{"path", path}}});
+            return {};
+        }
+        if (round == 2 || (round == 5 && repeat)) {
+            const auto& read = request.history.back().tools.front().result;
+            if (!read.version.empty()) {
+                propose({"edit-" + std::to_string(round), "edit", {{"path", path}, {"version", read.version},
+                    {"old_text", std::string(round == 2 ? "empty_config = reject" : "empty_config = allow")},
+                    {"new_text", std::string(round == 2 ? "empty_config = allow" : "empty_config = review")}}});
+                return {};
+            }
+        }
+        if (emit(TextDelta{"The host's verification records show the command outcomes and their workspace revisions."})) {
+            emit(FinishReply{ReplyStop::end_turn});
+        }
+        return {};
+    };
+}
+
 bool interactive_input() {
 #ifdef LAY_TEST_HOOKS
     if (std::getenv("LAY_TEST_INTERACTIVE")) {
@@ -307,9 +417,18 @@ lay::StoreCheckpoint test_checkpoint() {
 int run_workspace(const Options& settings) {
     using Clock = std::chrono::steady_clock;
     auto deadline = Clock::time_point::max();
-    const lay::StopRequested cancel = [&] { return stopping() || Clock::now() >= deadline; };
-    const bool editing = !settings.id.empty();
-    const bool fixture = settings.model == "fixture-edit";
+    bool cancellation_announced = false;
+    const lay::StopRequested cancel = [&] {
+        const auto interrupted = stopping();
+        if (interrupted && !cancellation_announced) {
+            std::cout << "[session] stopping\n" << std::flush;
+            cancellation_announced = true;
+        }
+        return interrupted || Clock::now() >= deadline;
+    };
+    const bool persistent = !settings.id.empty();
+    const bool editing = !settings.writable.empty();
+    const bool fixture = settings.model == "fixture-edit" || settings.model == "fixture-verify";
     const auto root = lay::platform::path_from_utf8(settings.workspace);
     const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing);
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
@@ -332,7 +451,7 @@ int run_workspace(const Options& settings) {
         }
         std::cout << ".\n";
     };
-    if (!editing) {
+    if (!persistent) {
         const auto model = lay::anthropic_model(settings.model, cancel);
         show_scope();
         auto question = prompt();
@@ -340,9 +459,13 @@ int run_workspace(const Options& settings) {
         return finish(lay::run_session(std::move(question), model, read, cancel, {}, authorize));
     }
 
-    const lay::EditWorkspace editor(workspace, settings.writable);
-    const lay::SessionScope scope{root, editor.root_identity(), fixture ? "local" : "api.anthropic.com",
-                                  settings.model, settings.writable, settings.excluded};
+    std::optional<lay::EditWorkspace> editor;
+    if (editing) {
+        editor.emplace(workspace, settings.writable);
+    }
+    const lay::RunWorkspace runner(workspace);
+    const lay::SessionScope scope{root, workspace.root_identity(), fixture ? "local" : "api.anthropic.com",
+                                  settings.model, settings.writable, settings.excluded, settings.allow_run};
     std::optional<std::string> question;
     if (!settings.resume) {
         show_scope();
@@ -358,13 +481,8 @@ int run_workspace(const Options& settings) {
         store.save(session, "accept_unknown");
     }
     activate();
-    const lay::ReviewEdit approve = [&](const lay::EditEvidence& evidence, std::string_view diff) {
-        if (!interactive_input()) {
-            return lay::Approval::unavailable;
-        }
-        std::cout << "[edit review] before=" << evidence.before << " after-sha256=" << evidence.after_digest << '\n';
-        terminal_text(diff);
-        std::cout << "Apply this edit? [y/N] " << std::flush;
+    const auto review_answer = [&](std::string_view question) {
+        std::cout << question << std::flush;
         const auto waiting = Clock::now();
         auto answer = read_line();
         deadline += Clock::now() - waiting;
@@ -373,14 +491,43 @@ int run_workspace(const Options& settings) {
         }
         return answer == "y" || answer == "yes" ? lay::Approval::approved : lay::Approval::denied;
     };
-    const lay::SessionJournal journal{
-        [&](const auto& snapshot, auto point) { store.save(snapshot, point); },
-        [&](const auto& call, const auto& snapshot) { return editor.prepare(call, snapshot, approve, cancel); },
-        [&](const auto& evidence) { return editor.recover(evidence); },
-        [&](const auto& evidence) { editor.cleanup(evidence); },
+    const lay::ReviewEdit approve_edit = [&](const lay::EditEvidence& evidence, std::string_view diff) {
+        if (!interactive_input()) {
+            return lay::Approval::unavailable;
+        }
+        std::cout << "[edit review] before=" << evidence.before << " after-sha256=" << evidence.after_digest << '\n';
+        terminal_text(diff);
+        return review_answer("Apply this edit? [y/N] ");
     };
+    const lay::ReviewRun approve_run = [&](const lay::RunEvidence& evidence) {
+        if (!interactive_input()) {
+            return lay::Approval::unavailable;
+        }
+        std::cout << "[run review] This executable runs with the current account's permissions.\n";
+        show_command(evidence);
+        if (!fixture) {
+            std::cout << "Output excerpts will be sent to api.anthropic.com.\n";
+        }
+        return review_answer("Run this command? [y/N] ");
+    };
+    lay::SessionJournal journal{};
+    journal.save = [&](const auto& snapshot, auto point) { store.save(snapshot, point); };
+    if (editor) {
+        journal.prepare_edit = [&](const auto& call, const auto& snapshot) {
+            return editor->prepare(call, snapshot, approve_edit, cancel);
+        };
+        journal.recover_edit = [&](const auto& evidence) { return editor->recover(evidence); };
+        journal.cleanup_edit = [&](const auto& evidence) { editor->cleanup(evidence); };
+    }
+    if (settings.allow_run) {
+        journal.prepare_run = [&](const auto& call, const auto& snapshot) {
+            return runner.prepare(call, snapshot, approve_run, cancel);
+        };
+    }
     lay::Generate model;
-    if (fixture) {
+    if (settings.model == "fixture-verify") {
+        model = fixture_verify_model(settings.writable);
+    } else if (fixture) {
         model = fixture_edit_model(settings.writable);
     } else {
         // Inspection and recovery of committed evidence must work without model credentials.

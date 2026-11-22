@@ -1,6 +1,6 @@
 # Lay Code
 
-Lay Code 是一个用 C++20 实现的本地代码助手。P0 提供离线夹具闭环，P1 接入 Anthropic Messages 的工作区只读模式，P2 支持审批和恢复单文件编辑。
+Lay Code 是一个用 C++20 实现的本地代码助手。它支持工作区读取与检索、经审批的单文件编辑和本地验证命令。SQLite 记录持久会话的进度和结果。
 
 ## 离线演示
 
@@ -63,6 +63,24 @@ $demo = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath())
 收到 `effect_unknown` 时，宿主会暂停并显示恢复时观察到的文件状态及保留文件。核对后可用 `--resume --accept-unknown` 继续，原派发记录和未知结果会保留。已派发的编辑不会自动重发。
 
 编辑支持至多 2 MiB 的普通 UTF-8 文件，保留原有 BOM 和统一的 LF 或 CRLF 换行。宿主在批准后和提交前复核文件版本。最后一次复核与替换之间仍存在外部编辑器写入的竞态。Windows 使用本地 NTFS，Linux 在同目录暂存文件并同步父目录。
+
+## P3 构建与测试
+
+`--session ID --allow-run` 启用验证命令，可与 `--write FILE` 一起使用。每次启动前，CLI 展示解析后的可执行文件、逐项参数、工作目录和超时。命令以当前账户权限直接启动，使用受限继承环境，标准输入关闭。使用 Anthropic 模型时，命令输出的摘录会发给提供方。
+
+宿主单独展示退出状态、识别出的 CTest 测试结果和对应的已知编辑序号。退出码为 0 时，只有识别到测试器的通过记录才显示通过。再次编辑会将旧验证标为较早版本，外部修改由用户核对。每路输出保留头尾共 64 KiB，并记录实际遗漏的字节数。
+
+Windows 使用 Job 回收子孙进程，Linux 使用进程组。超时或 `Ctrl+C` 会触发清理。进程清理无法确认，或命令已派发但结果未提交时，重开会话会报告未知并暂停。已派发的命令不会自动重发。
+
+以下离线演示在临时目录复现空配置测试失败，应用单行编辑，再运行同一条测试。启动后输入 `fix and verify`，按提示逐次核对并批准。
+
+```powershell
+$id = 'verify-' + [guid]::NewGuid().ToString('N')
+$demo = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) $id)
+Copy-Item ./tests/fixtures/empty-config/* -Destination $demo.FullName
+cmake -S $demo.FullName -B $demo.FullName -G Ninja
+./build/readonly-release/lay-code.exe --workspace $demo.FullName --model fixture-verify --session $id --write config.txt --allow-run
+```
 
 ## P0 基准与质量题集
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/tools.hpp"
+#include "core/process.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -42,6 +43,8 @@ struct ToolRecord {
     ToolResult result;
     std::size_t text_offset = 0;
     std::optional<EditEvidence> edit{};
+    std::optional<RunEvidence> run{};
+    std::optional<Verification> verification{};
     bool operator==(const ToolRecord&) const = default;
 };
 
@@ -67,6 +70,7 @@ struct Request {
     std::span<const Round> history;
     std::size_t attempts_left;
     bool edit_enabled = false;
+    bool run_enabled = false;
 };
 
 struct GenerationFailure {
@@ -99,11 +103,19 @@ struct EditPreparation {
     bool needs_approval = false;
 };
 
+struct RunPreparation {
+    RunEvidence evidence;
+    std::optional<Verification> rejection;
+    std::function<Verification()> apply;
+    bool needs_approval = false;
+};
+
 struct SessionJournal {
     std::function<void(const Session&, std::string_view)> save;
     std::function<EditPreparation(const ToolCall&, const Session&)> prepare_edit;
     std::function<ToolResult(const EditEvidence&)> recover_edit;
     std::function<void(const EditEvidence&)> cleanup_edit;
+    std::function<RunPreparation(const ToolCall&, const Session&)> prepare_run{};
 };
 
 Session run_session(std::string question, const Generate& generate, const ExecuteTool& execute,
@@ -113,5 +125,6 @@ Session continue_session(Session session, const Generate& generate, const Execut
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal);
 std::string_view name(SessionStop stop);
+std::size_t edit_revision(const Session& session);
 
 } // namespace lay

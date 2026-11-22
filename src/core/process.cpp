@@ -1,0 +1,56 @@
+#include "core/process.hpp"
+#include "core/utf8.hpp"
+
+namespace lay {
+
+std::string describe(ProcessStatus status, std::int64_t code) {
+    switch (status) {
+        case ProcessStatus::not_started: return "command could not be started";
+        case ProcessStatus::exited: return "command exited " + std::to_string(code);
+        case ProcessStatus::signaled: return "command terminated by signal " + std::to_string(code);
+        case ProcessStatus::timed_out: return "command timed out";
+        case ProcessStatus::cancelled: return "command cancelled";
+        case ProcessStatus::unknown: return "command effect or cleanup unknown";
+    }
+    return "unknown process status";
+}
+
+std::string verification_text(const Verification& result) {
+    const auto& process = result.process;
+    std::string text = describe(process.status, process.code);
+    if (!result.test_summary.empty()) {
+        text += "\n" + result.test_summary;
+    }
+    if (!process.diagnostic.empty()) {
+        text += "\n" + process.diagnostic;
+    }
+    if (process.descendants_terminated) {
+        text += "\nRemaining descendants were terminated.";
+    }
+    const auto add = [&](std::string_view name, const CapturedOutput& output) {
+        if (output.total_bytes == 0) {
+            return;
+        }
+        constexpr std::size_t limit = 2048;
+        text += "\n" + std::string(name) + " (" + std::to_string(output.total_bytes) +
+                " bytes, " + std::to_string(output.omitted_bytes) + " omitted during capture):\n";
+        text += utf8_prefix(output.head, limit);
+        auto tail = std::string_view(output.tail.empty() ? output.head : output.tail);
+        if (output.head.size() > limit || !output.tail.empty()) {
+            text += "\n[continued in stored output]\n";
+            if (tail.size() > limit) {
+                auto start = tail.size() - limit;
+                while (continuation(static_cast<unsigned char>(tail[start]))) {
+                    ++start;
+                }
+                tail.remove_prefix(start);
+            }
+            text += tail;
+        }
+    };
+    add("stdout", process.stdout_text);
+    add("stderr", process.stderr_text);
+    return text;
+}
+
+} // namespace lay

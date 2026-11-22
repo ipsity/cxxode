@@ -146,10 +146,6 @@ EditWorkspace::EditWorkspace(const ReadOnlyWorkspace& workspace, std::string wri
     filename_ = path_.substr(separator == path_.npos ? 0 : separator + 1);
 }
 
-std::string EditWorkspace::root_identity() const {
-    return workspace_.root_.identity();
-}
-
 platform::Node EditWorkspace::parent() const {
     auto node = dirname_ == "." ? workspace_.root_.duplicate() : workspace_.open(dirname_);
     if (!node || !node.directory()) {

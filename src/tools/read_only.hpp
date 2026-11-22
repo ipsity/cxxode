@@ -11,9 +11,11 @@ public:
                       bool versions = false);
     std::string_view authorize(const ToolCall& call) const;
     ToolResult execute(const ToolCall& call, const StopRequested& stop_requested) const;
+    std::string root_identity() const { return root_.identity(); }
 
 private:
     friend class EditWorkspace;
+    friend class RunWorkspace;
     platform::Node open(std::string_view path) const;
     bool allowed(std::string_view path) const;
     ToolResult read(const platform::Node& node, const ToolCall& call) const;

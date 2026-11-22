@@ -54,10 +54,10 @@ private:
     bool finished_ = false;
 };
 
-bool preflight(Round& round, bool edit_enabled) {
+bool preflight(Round& round, bool edit_enabled, bool run_enabled) {
     bool valid = true;
     for (auto& record : round.tools) {
-        const auto error = validate(record.call, edit_enabled);
+        const auto error = validate(record.call, edit_enabled, run_enabled);
         if (!error.empty()) {
             record.result = {ToolStatus::failed, std::string(error)};
             valid = false;
@@ -77,6 +77,15 @@ void save(const SessionJournal& journal, const Session& session, std::string_vie
     if (journal.save) {
         journal.save(session, point);
     }
+}
+
+void record_process(ToolRecord& record, Verification verification) {
+    const auto& process = verification.process;
+    const auto status = process.status == ProcessStatus::unknown ? ToolStatus::unknown :
+        process.status == ProcessStatus::exited && process.code == 0 ? ToolStatus::ok : ToolStatus::failed;
+    record.result = {status, verification_text(verification) + "\nObserved at workspace edit revision " +
+                             std::to_string(record.run->edit_revision) + "."};
+    record.verification = std::move(verification);
 }
 
 void settle_tools(Session& session, const ExecuteTool& execute, const StopRequested& stop_requested,
@@ -104,6 +113,7 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
             continue;
         }
         EditPreparation edit;
+        RunPreparation run;
         if (record.call.name == "edit") {
             edit = journal.prepare_edit(record.call, session);
             record.edit = std::move(edit.evidence);
@@ -114,6 +124,20 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
                     break;
                 }
                 record.result = {ToolStatus::failed, std::move(edit.rejection)};
+                skip_reason = "prior_tool_failed";
+                save(journal, session, "result");
+                continue;
+            }
+        } else if (record.call.name == "run") {
+            run = journal.prepare_run(record.call, session);
+            record.run = std::move(run.evidence);
+            if (run.needs_approval) {
+                session.stop = stop_requested() ? SessionStop::cancelled : SessionStop::approval_required;
+                session.diagnostic = "interactive command approval required";
+                break;
+            }
+            if (run.rejection) {
+                record_process(record, std::move(*run.rejection));
                 skip_reason = "prior_tool_failed";
                 save(journal, session, "result");
                 continue;
@@ -143,7 +167,11 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
             --session.dispatches;
             throw;
         }
-        record.result = edit.apply ? edit.apply() : execute(record.call);
+        if (run.apply) {
+            record_process(record, run.apply());
+        } else {
+            record.result = edit.apply ? edit.apply() : execute(record.call);
+        }
         if (record.result.status == ToolStatus::unknown) {
             session.stop = SessionStop::effect_unknown;
         } else if (record.result.status != ToolStatus::ok) {
@@ -176,7 +204,13 @@ void recover(Session& session, const SessionJournal& journal) {
             continue;
         }
         changed = true;
-        if (record.edit) {
+        if (record.run) {
+            Verification observed;
+            observed.process.status = ProcessStatus::unknown;
+            observed.process.diagnostic = "Command was dispatched before interruption. Its effects and cleanup are unknown.";
+            record_process(record, std::move(observed));
+            session.stop = SessionStop::effect_unknown;
+        } else if (record.edit) {
             record.result = journal.recover_edit(*record.edit);
             session.stop = SessionStop::effect_unknown;
         } else {
@@ -210,6 +244,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal) {
     const bool edit_enabled = journal.save && journal.prepare_edit;
+    const bool run_enabled = journal.save && journal.prepare_run;
     try {
         recover(session, journal);
         if (session.finished || session.stop == SessionStop::effect_unknown) {
@@ -223,7 +258,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 const bool untouched = std::ranges::all_of(round.tools, [](const ToolRecord& record) {
                     return !record.dispatched && record.result.status == ToolStatus::pending;
                 });
-                if (untouched && !preflight(round, edit_enabled)) {
+                if (untouched && !preflight(round, edit_enabled, run_enabled)) {
                     save(journal, session, "result");
                 } else {
                     settle_tools(session, execute, stop_requested, limits.tool_calls, authorize, journal);
@@ -245,7 +280,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 save(journal, session, "request");
                 --session.requests;
             }
-            const auto result = generate({session.question, session.rounds, remaining, edit_enabled},
+            const auto result = generate({session.question, session.rounds, remaining, edit_enabled, run_enabled},
                                          [&](const ModelEvent& event) {
                 interrupted = interrupted || stop_requested();
                 return !interrupted && draft.receive(event);
@@ -282,6 +317,19 @@ Session continue_session(Session session, const Generate& generate, const Execut
         session.diagnostic = error.what();
     }
     return session;
+}
+
+std::size_t edit_revision(const Session& session) {
+    std::size_t revision = 0;
+    for (const auto& round : session.rounds) {
+        for (const auto& record : round.tools) {
+            if (record.edit && record.dispatched &&
+                (record.result.status == ToolStatus::ok || record.result.status == ToolStatus::unknown)) {
+                ++revision;
+            }
+        }
+    }
+    return revision;
 }
 
 std::string_view name(SessionStop stop) {

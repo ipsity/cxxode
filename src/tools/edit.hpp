@@ -11,7 +11,6 @@ class EditWorkspace {
 public:
     EditWorkspace(const ReadOnlyWorkspace& workspace, std::string writable_path);
 
-    std::string root_identity() const;
     EditPreparation prepare(const ToolCall& call, const Session& session,
                             const ReviewEdit& review, const StopRequested& stop) const;
     ToolResult recover(const EditEvidence& evidence) const;

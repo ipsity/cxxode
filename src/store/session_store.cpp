@@ -190,9 +190,13 @@ private:
 };
 
 std::string scope_record(const SessionScope& scope) {
-    return Json{{"root", utf8(fs::canonical(scope.root))}, {"identity", scope.root_identity},
+    Json result{{"root", utf8(fs::canonical(scope.root))}, {"identity", scope.root_identity},
                 {"provider", scope.provider}, {"model", scope.model}, {"write", scope.writable_path},
-                {"excluded", scope.excluded}}.dump();
+                {"excluded", scope.excluded}};
+    if (scope.allow_run) {
+        result["allow_run"] = true;
+    }
+    return result.dump();
 }
 
 Json encode_edit(const EditEvidence& edit) {
@@ -204,6 +208,45 @@ Json encode_edit(const EditEvidence& edit) {
 EditEvidence decode_edit(const Json& value) {
     return {value.at("path"), value.at("parent"), value.at("before"), value.at("before_digest"),
             value.at("after_digest"), value.at("temporary"), value.at("backup")};
+}
+
+Json encode_run(const RunEvidence& run) {
+    return {{"program", run.program}, {"arguments", run.arguments}, {"directory", run.directory},
+            {"timeout_ms", run.timeout_ms}, {"edit_revision", run.edit_revision}};
+}
+
+RunEvidence decode_run(const Json& run) {
+    return {run.at("program").get<std::string>(), run.at("arguments").get<TextList>(),
+            run.at("directory").get<std::string>(), run.at("timeout_ms").get<std::size_t>(),
+            run.at("edit_revision").get<std::size_t>()};
+}
+
+Json encode_output(const CapturedOutput& out) {
+    return {{"head", out.head}, {"tail", out.tail}, {"omitted_bytes", out.omitted_bytes},
+            {"total_bytes", out.total_bytes}};
+}
+
+CapturedOutput decode_output(const Json& out) {
+    return {out.at("head"), out.at("tail"), out.at("omitted_bytes"), out.at("total_bytes")};
+}
+
+Json encode_verification(const Verification& value) {
+    const auto& process = value.process;
+    return {{"status", static_cast<int>(process.status)}, {"code", process.code},
+            {"elapsed_ms", process.elapsed_ms}, {"diagnostic", process.diagnostic},
+            {"stdout", encode_output(process.stdout_text)}, {"stderr", encode_output(process.stderr_text)},
+            {"descendants_terminated", process.descendants_terminated},
+            {"observed_utc", value.observed_utc}, {"test_summary", value.test_summary}};
+}
+
+Verification decode_verification(const Json& value) {
+    const auto status = value.at("status").get<int>();
+    if (status < 0 || status > static_cast<int>(ProcessStatus::unknown)) {
+        throw std::runtime_error("invalid stored process status");
+    }
+    return {{static_cast<ProcessStatus>(status), value.at("code"), value.at("elapsed_ms"),
+             value.at("diagnostic"), decode_output(value.at("stdout")), decode_output(value.at("stderr")),
+             value.at("descendants_terminated")}, value.at("observed_utc"), value.at("test_summary")};
 }
 
 std::string encode_session(const Session& session) {
@@ -222,6 +265,12 @@ std::string encode_session(const Session& session) {
                 {"status", static_cast<int>(record.result.status)}, {"result", record.result.text},
                 {"version", record.result.version}, {"edit", record.edit ? encode_edit(*record.edit) : Json(nullptr)},
             });
+            if (record.run) {
+                tools.back()["run"] = encode_run(*record.run);
+            }
+            if (record.verification) {
+                tools.back()["verification"] = encode_verification(*record.verification);
+            }
         }
         rounds.push_back({{"text", round.text}, {"tools", std::move(tools)}});
     }
@@ -239,6 +288,7 @@ ArgumentValue decode_argument(const Json& item) {
         case 3: return value.get<bool>();
         case 4: return value.get<double>();
         case 5: return nullptr;
+        case 6: return value.get<TextList>();
         default: throw std::runtime_error("unsupported stored tool argument");
     }
 }
@@ -276,6 +326,12 @@ Session decode_session(std::string_view payload) {
             }
             if (!item.at("edit").is_null()) {
                 record.edit = decode_edit(item.at("edit"));
+            }
+            if (item.contains("run")) {
+                record.run = decode_run(item.at("run"));
+            }
+            if (item.contains("verification")) {
+                record.verification = decode_verification(item.at("verification"));
             }
             round.tools.push_back(std::move(record));
         }

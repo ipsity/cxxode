@@ -22,9 +22,16 @@ std::size_t number_arg(const ToolCall& call, std::string_view name, std::size_t 
     return value ? static_cast<std::size_t>(*value) : fallback;
 }
 
-std::string_view validate(const ToolCall& call, bool edit_enabled) {
+const TextList& list_arg(const ToolCall& call, std::string_view name) {
+    static const TextList empty;
+    const auto* value = std::get_if<TextList>(argument(call, name));
+    return value ? *value : empty;
+}
+
+std::string_view validate(const ToolCall& call, bool edit_enabled, bool run_enabled) {
     const auto spec = std::ranges::find(tool_specs, call.name, &ToolSpec::name);
-    if (spec == std::end(tool_specs) || (call.name == "edit" && !edit_enabled)) {
+    if (spec == std::end(tool_specs) || (call.name == "edit" && !edit_enabled) ||
+        (call.name == "run" && !run_enabled)) {
         return "unsupported_tool";
     }
     std::size_t recognized = 0;
@@ -37,10 +44,18 @@ std::string_view validate(const ToolCall& call, bool edit_enabled) {
             return "missing_tool_argument";
         }
         ++recognized;
-        if (parameter.integer) {
+        if (parameter.kind == Parameter::Kind::integer) {
             const auto* number = std::get_if<std::int64_t>(value);
             if (!number || *number < parameter.minimum || *number > parameter.maximum) {
                 return "invalid_integer_argument";
+            }
+        } else if (parameter.kind == Parameter::Kind::text_list) {
+            const auto* list = std::get_if<TextList>(value);
+            if (!list || list->size() > static_cast<std::size_t>(parameter.maximum) ||
+                std::ranges::any_of(*list, [](const auto& text) {
+                    return text.size() > 2048 || text.find('\0') != std::string::npos;
+                })) {
+                return "invalid_argument_list";
             }
         } else {
             const auto* text = std::get_if<std::string>(value);

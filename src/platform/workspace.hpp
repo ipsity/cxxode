@@ -48,6 +48,8 @@ public:
     Entries entries(std::size_t limit) const;
     std::string read(std::size_t limit) const;
     std::string identity() const;
+    std::filesystem::path current_path() const;
+    std::intptr_t descriptor() const { return handle_; }
     bool child_exists(std::string_view name) const;
     bool editable() const;
     Replacement replace(std::string_view name, std::string_view temporary, std::string_view backup,

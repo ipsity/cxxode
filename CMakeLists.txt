@@ -5,9 +5,9 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-option(LAY_WITH_ANTHROPIC "Build the Anthropic workspace and editing modes" OFF)
+option(LAY_WITH_ANTHROPIC "Build the Anthropic workspace modes" OFF)
 
-add_library(lay_core STATIC src/core/session.cpp src/core/tools.cpp)
+add_library(lay_core STATIC src/core/session.cpp src/core/tools.cpp src/core/process.cpp)
 target_compile_features(lay_core PUBLIC cxx_std_20)
 target_include_directories(lay_core PUBLIC src)
 
@@ -24,8 +24,8 @@ if(LAY_WITH_ANTHROPIC)
 
     add_library(lay_messages STATIC src/model/anthropic.cpp src/model/messages_codec.cpp)
     target_link_libraries(lay_messages PUBLIC lay_core PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
-    add_library(lay_workspace STATIC src/tools/read_only.cpp src/tools/edit.cpp
-                                     src/platform/workspace.cpp src/platform/crypto.cpp)
+    add_library(lay_workspace STATIC src/tools/read_only.cpp src/tools/edit.cpp src/tools/run.cpp
+                                     src/platform/workspace.cpp src/platform/crypto.cpp src/platform/process.cpp)
     target_link_libraries(lay_workspace PUBLIC lay_core)
     add_library(lay_store STATIC src/store/session_store.cpp)
     target_link_libraries(lay_store PUBLIC lay_core PRIVATE lay_workspace nlohmann_json::nlohmann_json)
@@ -35,11 +35,13 @@ if(LAY_WITH_ANTHROPIC)
         target_link_libraries(lay_store PRIVATE SQLite::SQLite3)
     endif()
     if(WIN32)
+        target_sources(lay_workspace PRIVATE src/platform/process_windows.cpp)
         target_compile_definitions(lay_workspace PRIVATE _WIN32_WINNT=0x0A00)
         target_link_libraries(lay_workspace PRIVATE ntdll bcrypt)
     elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "Workspace modes support Windows and Linux")
     else()
+        target_sources(lay_workspace PRIVATE src/platform/process_linux.cpp)
         find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
         target_link_libraries(lay_workspace PRIVATE OpenSSL::Crypto)
     endif()
@@ -79,5 +81,15 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/editing.py
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
         set_tests_properties(editing.recovery PROPERTIES TIMEOUT 90)
+        add_executable(process_contract tests/contract/process_contract.cpp)
+        target_link_libraries(process_contract PRIVATE lay_workspace nlohmann_json::nlohmann_json)
+        if(MINGW)
+            target_link_options(process_contract PRIVATE -municode)
+        endif()
+        add_test(NAME verification.contract COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/verification.py
+            $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver> $<TARGET_FILE:process_contract>
+            ${CMAKE_COMMAND} ${CMAKE_CTEST_COMMAND})
+        set_tests_properties(verification.contract PROPERTIES TIMEOUT 90)
     endif()
 endif()

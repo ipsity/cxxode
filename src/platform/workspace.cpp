@@ -357,6 +357,18 @@ std::string Node::identity() const {
 #endif
 }
 
+std::filesystem::path Node::current_path() const {
+#ifdef _WIN32
+    auto value = absolute_directory(native(handle_));
+    if (value.starts_with(L"\\\\?\\") && value.size() >= 7 && value[5] == L':') {
+        value.erase(0, 4);
+    }
+    return std::filesystem::path(value).lexically_normal();
+#else
+    return std::filesystem::canonical("/proc/self/fd/" + std::to_string(handle_));
+#endif
+}
+
 bool Node::child_exists(std::string_view name) const {
     if (!directory_ || !basename(name)) {
         return true;
