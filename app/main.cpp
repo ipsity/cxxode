@@ -3,6 +3,8 @@
 
 #ifdef LAY_WITH_ANTHROPIC
 #include "model/anthropic.hpp"
+#include "store/session_store.hpp"
+#include "tools/edit.hpp"
 #include "tools/read_only.hpp"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +12,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 #endif
 
@@ -17,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
@@ -33,11 +38,17 @@ struct Options {
     std::string workspace;
     std::string model;
     std::vector<std::string> excluded;
+    std::string id;
+    std::string writable;
+    bool resume = false;
+    bool accept_unknown = false;
 };
 
 void usage(std::ostream& stream) {
     stream << "Usage: lay-code [--truncated]\n"
-           << "       lay-code --workspace PATH --model ANTHROPIC_MODEL [--exclude RELATIVE_PATH ...]\n";
+           << "       lay-code --workspace PATH --model MODEL [--exclude RELATIVE_PATH ...]\n"
+           << "       Add --session ID --write FILE for editing. Reopen with --resume.\n"
+           << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n";
 }
 
 Options options(std::span<const std::string> arguments) {
@@ -51,6 +62,14 @@ Options options(std::span<const std::string> arguments) {
     }
     for (std::size_t index = 0; index < arguments.size();) {
         const auto& option = arguments[index++];
+        if (option == "--resume" && !result.resume) {
+            result.resume = true;
+            continue;
+        }
+        if (option == "--accept-unknown" && !result.accept_unknown) {
+            result.accept_unknown = true;
+            continue;
+        }
         if (index == arguments.size() || arguments[index].empty()) {
             throw std::invalid_argument("A workspace option is missing its value.");
         }
@@ -61,6 +80,10 @@ Options options(std::span<const std::string> arguments) {
             result.model = value;
         } else if (option == "--exclude" && result.excluded.size() < 32) {
             result.excluded.push_back(value);
+        } else if (option == "--session" && result.id.empty()) {
+            result.id = value;
+        } else if (option == "--write" && result.writable.empty()) {
+            result.writable = value;
         } else {
             throw std::invalid_argument("Invalid, duplicate or excessive workspace option.");
         }
@@ -71,6 +94,11 @@ Options options(std::span<const std::string> arguments) {
                 (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.';
         })) {
         throw std::invalid_argument("Choose a workspace and a valid Anthropic model ID.");
+    }
+    if (result.id.empty() != result.writable.empty() ||
+        (result.resume && result.id.empty()) || (result.accept_unknown && !result.resume) ||
+        (result.model == "fixture-edit" && result.id.empty())) {
+        throw std::invalid_argument("Editing requires --session ID and --write FILE. Use --resume to reopen it.");
     }
     return result;
 }
@@ -156,6 +184,12 @@ void terminal_text(std::string_view text) {
 int render(const lay::Session& session, bool workspace) {
     for (const auto& round : session.rounds) {
         for (const auto& record : round.tools) {
+            if (record.call.name == "edit" && record.result.status != lay::ToolStatus::pending) {
+                std::cout << "[edit] ";
+                terminal_text(record.result.text);
+                std::cout << '\n';
+                continue;
+            }
             if (record.dispatched) {
                 if (workspace) {
                     std::cout << '[' << record.call.name << "] ";
@@ -202,6 +236,169 @@ int render(const lay::Session& session, bool workspace) {
     return session.stop == lay::SessionStop::end_turn ? 0 : 1;
 }
 
+#ifdef LAY_WITH_ANTHROPIC
+lay::Generate fixture_edit_model(std::string path) {
+    return [path = std::move(path)](const lay::Request& request, const lay::EventSink& emit) -> lay::Generation {
+        using namespace lay;
+        const auto propose = [&](ToolCall call) {
+            const ModelEvent proposal = ProposeTool{std::move(call)};
+            if (emit(proposal)) {
+                emit(FinishReply{ReplyStop::tool_use});
+            }
+        };
+        if (request.history.empty()) {
+            if (request.question == "create fixture") {
+                propose({"create-1", "edit", {{"path", path}, {"version", std::string("absent")},
+                                             {"new_text", std::string("empty_config = allow\n")}}});
+            } else {
+                propose({"read-1", "read", {{"path", path}}});
+            }
+        } else {
+            const auto& previous = request.history.back().tools.front();
+            if (previous.call.name == "read" && !previous.result.version.empty()) {
+                propose({"edit-1", "edit", {{"path", path}, {"version", previous.result.version},
+                    {"old_text", std::string("empty_config = reject")},
+                    {"new_text", std::string("empty_config = allow")}}});
+            } else if (emit(TextDelta{"The host recorded the result above."})) {
+                emit(FinishReply{ReplyStop::end_turn});
+            }
+        }
+        return {};
+    };
+}
+
+bool interactive_input() {
+#ifdef LAY_TEST_HOOKS
+    if (std::getenv("LAY_TEST_INTERACTIVE")) {
+        return true;
+    }
+#endif
+#ifdef _WIN32
+    DWORD mode = 0;
+    return GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) != 0;
+#else
+    return ::isatty(STDIN_FILENO) != 0;
+#endif
+}
+
+lay::StoreCheckpoint test_checkpoint() {
+#ifdef LAY_TEST_HOOKS
+    return [](std::string_view stage, std::string_view point, const lay::Session& snapshot) {
+        if (snapshot.rounds.empty() || snapshot.rounds.back().tools.empty()) {
+            return false;
+        }
+        const auto& call = snapshot.rounds.back().tools.back().call;
+        const auto name = std::string(stage) + "_" + call.name + "_" + std::string(point);
+        if (const auto* full = std::getenv("LAY_TEST_FULL"); full && name == full) {
+            return true;
+        }
+        if (const auto* pause = std::getenv("LAY_TEST_PAUSE"); pause && name == pause) {
+            std::cout << "[checkpoint] " << name << '\n' << std::flush;
+            std::string release;
+            std::getline(std::cin, release);
+        }
+        return false;
+    };
+#else
+    return {};
+#endif
+}
+
+int run_workspace(const Options& settings) {
+    using Clock = std::chrono::steady_clock;
+    auto deadline = Clock::time_point::max();
+    const lay::StopRequested cancel = [&] { return stopping() || Clock::now() >= deadline; };
+    const bool editing = !settings.id.empty();
+    const bool fixture = settings.model == "fixture-edit";
+    const auto root = lay::platform::path_from_utf8(settings.workspace);
+    const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing);
+    const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
+    const auto authorize = [&](const lay::ToolCall& call) { return workspace.authorize(call); };
+    const auto activate = [&] {
+        std::signal(SIGINT, on_interrupt);
+        deadline = Clock::now() + std::chrono::minutes(15);
+    };
+    const auto finish = [&](lay::Session session) {
+        if (session.stop == lay::SessionStop::cancelled && !stopping()) {
+            session.stop = lay::SessionStop::time_limit;
+        }
+        return render(session, true);
+    };
+    const auto show_scope = [&] {
+        std::cout << (fixture ? "[scope] Local fixture in " : "[scope] Questions and selected file excerpts from ");
+        terminal_text(settings.workspace);
+        if (!fixture) {
+            std::cout << " go to api.anthropic.com using " << settings.model;
+        }
+        std::cout << ".\n";
+    };
+    if (!editing) {
+        const auto model = lay::anthropic_model(settings.model, cancel);
+        show_scope();
+        auto question = prompt();
+        activate();
+        return finish(lay::run_session(std::move(question), model, read, cancel, {}, authorize));
+    }
+
+    const lay::EditWorkspace editor(workspace, settings.writable);
+    const lay::SessionScope scope{root, editor.root_identity(), fixture ? "local" : "api.anthropic.com",
+                                  settings.model, settings.writable, settings.excluded};
+    std::optional<std::string> question;
+    if (!settings.resume) {
+        show_scope();
+        question = prompt();
+    }
+    lay::SessionStore store(settings.id, scope, std::move(question), test_checkpoint());
+    auto session = store.load();
+    if (settings.accept_unknown) {
+        if (session.stop != lay::SessionStop::effect_unknown) {
+            throw std::invalid_argument("Resume and review the unknown effect before accepting it.");
+        }
+        session.stop = lay::SessionStop::end_turn;
+        store.save(session, "accept_unknown");
+    }
+    activate();
+    const lay::ReviewEdit approve = [&](const lay::EditEvidence& evidence, std::string_view diff) {
+        if (!interactive_input()) {
+            return lay::Approval::unavailable;
+        }
+        std::cout << "[edit review] before=" << evidence.before << " after-sha256=" << evidence.after_digest << '\n';
+        terminal_text(diff);
+        std::cout << "Apply this edit? [y/N] " << std::flush;
+        const auto waiting = Clock::now();
+        auto answer = read_line();
+        deadline += Clock::now() - waiting;
+        if (answer.ends_with('\r')) {
+            answer.pop_back();
+        }
+        return answer == "y" || answer == "yes" ? lay::Approval::approved : lay::Approval::denied;
+    };
+    const lay::SessionJournal journal{
+        [&](const auto& snapshot, auto point) { store.save(snapshot, point); },
+        [&](const auto& call, const auto& snapshot) { return editor.prepare(call, snapshot, approve, cancel); },
+        [&](const auto& evidence) { return editor.recover(evidence); },
+        [&](const auto& evidence) { editor.cleanup(evidence); },
+    };
+    lay::Generate model;
+    if (fixture) {
+        model = fixture_edit_model(settings.writable);
+    } else {
+        // Inspection and recovery of committed evidence must work without model credentials.
+        model = [&, provider = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
+            if (!provider) {
+                try {
+                    provider = lay::anthropic_model(settings.model, cancel);
+                } catch (const std::exception& error) {
+                    return lay::Generation{0, lay::GenerationFailure{lay::SessionStop::transport_error, error.what()}};
+                }
+            }
+            return provider(request, emit);
+        };
+    }
+    return finish(lay::continue_session(std::move(session), model, read, cancel, {}, authorize, journal));
+}
+#endif
+
 int run(std::span<const std::string> arguments) {
     if (arguments.size() == 1 && arguments.front() == "--help") {
         usage(std::cout);
@@ -221,24 +418,7 @@ int run(std::span<const std::string> arguments) {
                 }, stopping), false);
         }
 #ifdef LAY_WITH_ANTHROPIC
-        using Clock = std::chrono::steady_clock;
-        auto deadline = Clock::time_point::max();
-        const lay::StopRequested cancel = [&] { return stopping() || Clock::now() >= deadline; };
-        const auto model = lay::anthropic_model(settings.model, cancel);
-        const lay::ReadOnlyWorkspace workspace(lay::platform::path_from_utf8(settings.workspace), settings.excluded);
-        std::cout << "[scope] Questions and selected file excerpts from ";
-        terminal_text(settings.workspace);
-        std::cout << " go to api.anthropic.com using " << settings.model << ".\n";
-        auto question = prompt();
-        std::signal(SIGINT, on_interrupt);
-        deadline = Clock::now() + std::chrono::minutes(15);
-        auto session = lay::run_session(std::move(question), model,
-            [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); }, cancel, {},
-            [&](const lay::ToolCall& call) { return workspace.authorize(call); });
-        if (session.stop == lay::SessionStop::cancelled && !stopping()) {
-            session.stop = lay::SessionStop::time_limit;
-        }
-        return render(session, true);
+        return run_workspace(settings);
 #else
         throw std::invalid_argument("Build with the readonly-release preset to use a real workspace.");
 #endif

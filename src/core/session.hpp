@@ -16,7 +16,8 @@ namespace lay {
 enum class ReplyStop { end_turn, tool_use };
 enum class SessionStop {
     end_turn, protocol_error, cancelled, request_limit, tool_limit,
-    http_error, transport_error, response_limit, refused, time_limit,
+    http_error, transport_error, response_limit, refused, time_limit, storage_error, effect_unknown,
+    approval_required,
 };
 
 struct TextDelta { std::string text; };
@@ -24,11 +25,23 @@ struct ProposeTool { ToolCall call; };
 struct FinishReply { ReplyStop reason; };
 using ModelEvent = std::variant<TextDelta, ProposeTool, FinishReply>;
 
+struct EditEvidence {
+    std::string path;
+    std::string parent;
+    std::string before;
+    std::string before_digest;
+    std::string after_digest;
+    std::string temporary;
+    std::string backup;
+    bool operator==(const EditEvidence&) const = default;
+};
+
 struct ToolRecord {
     ToolCall call;
     bool dispatched = false;
     ToolResult result;
     std::size_t text_offset = 0;
+    std::optional<EditEvidence> edit{};
     bool operator==(const ToolRecord&) const = default;
 };
 
@@ -45,6 +58,7 @@ struct Session {
     std::size_t dispatches = 0;
     SessionStop stop = SessionStop::end_turn;
     std::string diagnostic;
+    bool finished = false;
     bool operator==(const Session&) const = default;
 };
 
@@ -52,6 +66,7 @@ struct Request {
     std::string_view question;
     std::span<const Round> history;
     std::size_t attempts_left;
+    bool edit_enabled = false;
 };
 
 struct GenerationFailure {
@@ -77,9 +92,26 @@ using ExecuteTool = std::function<ToolResult(const ToolCall&)>;
 using AuthorizeTool = std::function<std::string_view(const ToolCall&)>;
 using StopRequested = std::function<bool()>;
 
+struct EditPreparation {
+    std::optional<EditEvidence> evidence;
+    std::string rejection;
+    std::function<ToolResult()> apply;
+    bool needs_approval = false;
+};
+
+struct SessionJournal {
+    std::function<void(const Session&, std::string_view)> save;
+    std::function<EditPreparation(const ToolCall&, const Session&)> prepare_edit;
+    std::function<ToolResult(const EditEvidence&)> recover_edit;
+    std::function<void(const EditEvidence&)> cleanup_edit;
+};
+
 Session run_session(std::string question, const Generate& generate, const ExecuteTool& execute,
                     const StopRequested& stop_requested, Limits limits = {},
                     const AuthorizeTool& authorize = {});
+Session continue_session(Session session, const Generate& generate, const ExecuteTool& execute,
+                         const StopRequested& stop_requested, Limits limits,
+                         const AuthorizeTool& authorize, const SessionJournal& journal);
 std::string_view name(SessionStop stop);
 
 } // namespace lay

@@ -22,9 +22,9 @@ std::size_t number_arg(const ToolCall& call, std::string_view name, std::size_t 
     return value ? static_cast<std::size_t>(*value) : fallback;
 }
 
-std::string_view validate(const ToolCall& call) {
+std::string_view validate(const ToolCall& call, bool edit_enabled) {
     const auto spec = std::ranges::find(tool_specs, call.name, &ToolSpec::name);
-    if (spec == std::end(tool_specs)) {
+    if (spec == std::end(tool_specs) || (call.name == "edit" && !edit_enabled)) {
         return "unsupported_tool";
     }
     std::size_t recognized = 0;
@@ -46,7 +46,8 @@ std::string_view validate(const ToolCall& call) {
             const auto* text = std::get_if<std::string>(value);
             if (!text || text->size() < static_cast<std::size_t>(parameter.minimum) ||
                 text->size() > static_cast<std::size_t>(parameter.maximum) ||
-                text->find_first_of(std::string_view("\0\r\n", 3)) != std::string::npos) {
+                text->find('\0') != std::string::npos ||
+                (!parameter.multiline && text->find_first_of("\r\n") != std::string::npos)) {
                 return "invalid_text_argument";
             }
         }

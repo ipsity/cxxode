@@ -80,7 +80,7 @@ int main() {
     const Round successful_read{"", {{expected_call, true, {ToolStatus::ok, "allowed"}}}};
     check("normal", Script::normal, {}, false, "allowed",
         {question, {successful_read, {"config/defaults.txt reports: allowed", {}}},
-         2, 1, SessionStop::end_turn, {}});
+         2, 1, SessionStop::end_turn, {}, true});
     check("truncated after one complete call", Script::truncated, {}, false, "",
         {question, {}, 1, 0, SessionStop::protocol_error, {}});
     check("cancelled before the reply commits", Script::normal, {}, true, "",
@@ -91,7 +91,7 @@ int main() {
     const Round alternate_read{"", {{expected_call, true, {ToolStatus::ok, "rejected"}}}};
     check("different evidence changes the answer", Script::normal, {}, false, "rejected",
         {question, {alternate_read, {"config/defaults.txt reports: rejected", {}}},
-         2, 1, SessionStop::end_turn, {}});
+         2, 1, SessionStop::end_turn, {}, true});
     const Round skipped_read{"", {{expected_call, false, {ToolStatus::skipped, "tool_limit"}}}};
     check("tool budget exhausted before dispatch", Script::normal, {24, 0}, false, "",
         {question, {skipped_read}, 1, 0, SessionStop::tool_limit, {}});

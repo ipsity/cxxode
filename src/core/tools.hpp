@@ -24,11 +24,12 @@ struct ToolCall {
     bool operator==(const ToolCall&) const = default;
 };
 
-enum class ToolStatus { pending, ok, failed, skipped };
+enum class ToolStatus { pending, ok, failed, skipped, unknown };
 
 struct ToolResult {
     ToolStatus status = ToolStatus::pending;
     std::string text;
+    std::string version{};
     bool operator==(const ToolResult&) const = default;
 };
 
@@ -39,6 +40,7 @@ struct Parameter {
     bool integer;
     std::int64_t minimum;
     std::int64_t maximum;
+    bool multiline = false;
 };
 
 struct ToolSpec {
@@ -62,14 +64,23 @@ inline constexpr Parameter search_parameters[] = {
      false, false, 1, 64},
     {"max_results", "Maximum matching lines. Defaults to 30.", false, true, 1, 100},
 };
+inline constexpr Parameter edit_parameters[] = {
+    read_parameters[0],
+    {"version", "The version reported by read, or absent to create a new file.", true, false, 1, 64},
+    {"old_text", "The exact unique text to replace, with LF newlines. Omit for creation.",
+     false, false, 1, 8192, true},
+    {"new_text", "Replacement or new file text, with LF newlines.", true, false, 0, 8192, true},
+};
 inline constexpr ToolSpec tool_specs[] = {
     {"read", "Read numbered UTF-8 lines or list immediate directory entries.", read_parameters},
     {"search", "Find literal text under a directory and return workspace paths and line numbers.",
      search_parameters},
+    {"edit", "Propose one file replacement for user approval. Read the current version first.",
+     edit_parameters},
 };
 
 std::string_view text_arg(const ToolCall& call, std::string_view name);
 std::size_t number_arg(const ToolCall& call, std::string_view name, std::size_t fallback);
-std::string_view validate(const ToolCall& call);
+std::string_view validate(const ToolCall& call, bool edit_enabled = false);
 
 } // namespace lay

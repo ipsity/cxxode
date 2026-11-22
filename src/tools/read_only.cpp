@@ -1,5 +1,6 @@
 #include "tools/read_only.hpp"
 #include "core/utf8.hpp"
+#include "tools/file_version.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -49,6 +50,7 @@ bool default_excluded(std::string_view name) {
     return lower == ".git" || lower == ".hg" || lower == ".svn" || lower == ".ssh" ||
         lower == ".aws" || lower == ".gnupg" || lower == ".npmrc" || lower == ".netrc" ||
         lower == "credentials.json" || lower == "id_rsa" || lower == "id_ed25519" ||
+        lower.starts_with(".lay-code-") ||
         lower.starts_with(".env") || lower.ends_with(".pem") || lower.ends_with(".key") ||
         lower.ends_with(".p12");
 }
@@ -62,12 +64,14 @@ struct Text {
     std::size_t read_bytes;
     bool truncated;
     bool supported;
+    std::string version;
 };
 
-Text read_text(const platform::Node& node, std::size_t limit) {
+Text read_text(const platform::Node& node, std::size_t limit, bool track_version = false) {
     auto bytes = node.read(limit + 1);
     const auto read_bytes = bytes.size();
     const bool truncated = read_bytes > limit;
+    auto version = track_version && !truncated ? file_version(node, bytes) : std::string{};
     if (truncated) {
         const auto newline = std::string_view(bytes).substr(0, limit).find_last_of('\n');
         bytes.resize(newline == std::string::npos ? 0 : newline + 1);
@@ -76,7 +80,7 @@ Text read_text(const platform::Node& node, std::size_t limit) {
         bytes.erase(0, 3);
     }
     const bool supported = bytes.find('\0') == std::string::npos && valid_utf8(bytes);
-    return {std::move(bytes), read_bytes, truncated, supported};
+    return {std::move(bytes), read_bytes, truncated, supported, std::move(version)};
 }
 
 template <typename Visit>
@@ -97,8 +101,9 @@ void for_lines(std::string_view text, const Visit& visit) {
 
 } // namespace
 
-ReadOnlyWorkspace::ReadOnlyWorkspace(const std::filesystem::path& root, std::vector<std::string> excluded)
-    : root_(platform::Node::root(root)), excluded_(std::move(excluded)) {
+ReadOnlyWorkspace::ReadOnlyWorkspace(const std::filesystem::path& root, std::vector<std::string> excluded,
+                                     bool versions)
+    : root_(platform::Node::root(root)), excluded_(std::move(excluded)), versions_(versions) {
     for (const auto& path : excluded_) {
         if (path.size() > 2048 || !components(path, [](std::string_view name, std::string_view) {
                 return safe_name(name);
@@ -169,6 +174,7 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
     const auto limit = number_arg(call, "line_count", 120);
     std::string output = std::string(path) + (node.directory() ? " (directory)\n" : "\n");
     std::size_t next = 0;
+    std::string version;
     auto add = [&](std::size_t line, std::string_view text) {
         if (line < start) {
             return true;
@@ -209,13 +215,15 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
             output += "[no visible entries]\n";
         }
     } else {
-        const auto text = read_text(node, file_limit);
+        auto text = read_text(node, versions_ ? editable_bytes : file_limit, versions_);
         if (!text.supported) {
             return {ToolStatus::failed, "file is binary or its encoding is not UTF-8"};
         }
         for_lines(text.bytes, add);
+        version = std::move(text.version);
         if (text.truncated) {
-            output += "[file scan limited to 1048576 bytes; partial lines omitted]\n";
+            output += "[file scan limited to " + std::to_string(versions_ ? editable_bytes : file_limit) +
+                " bytes; partial lines omitted]\n";
         } else if (text.bytes.empty()) {
             output += "[empty file]\n";
         }
@@ -223,7 +231,10 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
     if (next) {
         output += "next_line=" + std::to_string(next) + '\n';
     }
-    return {ToolStatus::ok, std::move(output)};
+    if (!version.empty()) {
+        output += "version=" + version + '\n';
+    }
+    return {ToolStatus::ok, std::move(output), std::move(version)};
 }
 
 ToolResult ReadOnlyWorkspace::search(const platform::Node& node, const ToolCall& call,

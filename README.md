@@ -1,6 +1,6 @@
 # Lay Code
 
-Lay Code 是一个用 C++20 实现的本地代码助手。P0 提供离线夹具闭环，P1 提供基于 Anthropic Messages 的工作区只读模式。
+Lay Code 是一个用 C++20 实现的本地代码助手。P0 提供离线夹具闭环，P1 接入 Anthropic Messages 的工作区只读模式，P2 支持审批和恢复单文件编辑。
 
 ## 离线演示
 
@@ -26,9 +26,9 @@ Linux 使用 `./build/release/lay-code`。也可以直接启动程序，在提�
 
 契约测试对每条固定轨迹重放 100 次，逐次比较终态、已提交回复、调用和结果。CLI 端到端测试核对退出码和终端输出。
 
-## 工作区只读模式
+## 构建工作区模式
 
-额外依赖 libcurl 7.85+ 和 nlohmann-json 3.11+。Windows 可用 vcpkg manifest，在 MSVC x64 开发者终端配置 vcpkg 工具链。Ubuntu 24.04 可使用 `libcurl4-openssl-dev` 和 `nlohmann-json3-dev`，然后直接配置同名 preset。契约测试需要 Python 3。
+额外依赖 libcurl 7.85+、nlohmann-json 3.11+ 和 SQLite 3.37+。Windows 可在 MSVC x64 开发者终端使用 vcpkg manifest。Ubuntu 24.04 可安装 `libcurl4-openssl-dev`、`nlohmann-json3-dev`、`libsqlite3-dev` 和 `libssl-dev`，再直接配置同名 preset。契约测试需要 Python 3。
 
 ```powershell
 cmake --preset readonly-release "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
@@ -43,6 +43,26 @@ ctest --preset readonly-release
 `--workspace` 选定文件范围，`--exclude` 可重复指定要排除的工作区相对路径。问题和工具选中的摘录会发给 `api.anthropic.com`。`read` 列举一层目录或读取带行号的 UTF-8 文本，`search` 返回字面匹配的相对路径和行号。链接、重解析点、多硬链接文件、版本库元数据及常见凭据路径会被排除。工具各自报告截断或覆盖范围，`Ctrl+C` 取消当前请求。Windows 工作区使用本地 NTFS，Linux 需要 `openat2` 和 `/proc/self/fd`。
 
 本地回环契约测试覆盖逐字节 SSE、检索和读取回填、批次预检、429 重试、断流及取消。真实服务检索验收需可用的 Anthropic 凭据与模型 ID。
+
+## P2 单文件编辑与恢复
+
+`--session ID --write FILE` 启用一个持久会话，并将写入范围限定为一条工作区相对文件路径。每次编辑先展示差异、已读取的版本和预期结果的摘要。输入 `y` 批准当前差异。非交互输入会在等待批准时暂停，可在终端重新打开同一会话。
+
+以下离线演示在临时目录将 `empty_config = reject` 改为 `empty_config = allow`。启动后输入 `fix fixture`，核对差异再批准。
+
+```powershell
+$id = 'demo-' + [guid]::NewGuid().ToString('N')
+$demo = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) $id)
+'empty_config = reject' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $demo.FullName 'config.txt')
+./build/readonly-release/lay-code.exe --workspace $demo.FullName --model fixture-edit --session $id --write config.txt
+./build/readonly-release/lay-code.exe --workspace $demo.FullName --model fixture-edit --session $id --write config.txt --resume
+```
+
+使用真实模型时，将 `fixture-edit` 换成账户可调用的 Anthropic 模型 ID。重开时须提供相同的工作区、模型和文件范围。SQLite 会话存放在 Windows 的 `%LOCALAPPDATA%/LayCode/sessions` 或 Linux 的 `${XDG_STATE_HOME:-$HOME/.local/state}/lay-code/sessions`，目录位于工作区之外。每个会话由一个 CLI 持有写入锁。
+
+收到 `effect_unknown` 时，宿主会暂停并显示恢复时观察到的文件状态及保留文件。核对后可用 `--resume --accept-unknown` 继续，原派发记录和未知结果会保留。已派发的编辑不会自动重发。
+
+编辑支持至多 2 MiB 的普通 UTF-8 文件，保留原有 BOM 和统一的 LF 或 CRLF 换行。宿主在批准后和提交前复核文件版本。最后一次复核与替换之间仍存在外部编辑器写入的竞态。Windows 使用本地 NTFS，Linux 在同目录暂存文件并同步父目录。
 
 ## P0 基准与质量题集
 
