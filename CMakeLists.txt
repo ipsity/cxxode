@@ -66,6 +66,8 @@ if(BUILD_TESTING)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/offline.cmake)
     if(LAY_WITH_ANTHROPIC)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_test(NAME quality.scoring COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_live_quality.py)
         add_executable(readonly_contract tests/contract/readonly_contract.cpp)
         target_link_libraries(readonly_contract PRIVATE lay_messages lay_workspace)
         if(MINGW)

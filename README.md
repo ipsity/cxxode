@@ -139,7 +139,7 @@ python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $m
 
 长会话保留原始问题和最近的完整工具组，请求超限时以本地事实清单替换更早的轮次。完整证据仍保存在 SQLite。P2 和 P3 会话可用 `lay-code.exe --migrate-session ID` 离线升至格式 2，备份保存在会话目录。
 
-完成服务商的密钥和模型配置后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。
+完成服务商的密钥和模型配置后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。定位题接受 `path:line` 或相邻的文件和行号字段，并在 `citation_format` 中单独统计 `path:line` 合规次数。
 
 ```powershell
 python -B bench/live_quality.py --cli ./build/windows-rc1/lay-code.exe --provider passion --model YOUR_MODEL_ID --output ./out/quality-run

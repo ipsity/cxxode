@@ -42,6 +42,26 @@ def context(database):
         return json.loads(value)
 
 
+def source_citation(answer, path, line):
+    relative_path = r"(?:\.[/\\])?" + re.escape(path)
+    path_reference = rf"(?<![\w./\\-]){relative_path}"
+    line_number = rf"{line}(?![0-9A-Za-z_]|\.\d)"
+    if re.search(rf"{path_reference}:{line_number}", answer):
+        return "path:line"
+
+    file_field = r"(?i:文件|路径|file|path)"
+    line_field = r"(?i:行号|行|line(?: number)?)"
+    label = r"[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?"
+    colon = r"(?:\*\*)?[:：](?:\*\*)?[ \t]*"
+    split = (
+        rf"^{label}{file_field}{colon}`?{relative_path}`?[ \t]*\r?\n"
+        rf"{label}{line_field}{colon}`?(?:第[ \t]*)?{line_number}"
+    )
+    if re.search(split, answer, re.MULTILINE):
+        return "separate fields"
+    return None
+
+
 def verdict(case, root, history, changed):
     unexpected = sorted(changed - set(case["allow"]))
     if unexpected:
@@ -51,8 +71,7 @@ def verdict(case, root, history, changed):
     answer = history["rounds"][-1]["text"]
     if "location" in case:
         path, line, _ = case["location"]
-        found = re.search(re.escape(f"{path}:{line}") + r"(?!\d)", answer)
-        return bool(found), "source path and line"
+        return source_citation(answer, path, line) is not None, "source path and line"
     if "assertion" in case:
         try:
             result = run_assertion(case, root)
@@ -146,7 +165,7 @@ def run_case(args, case, repeat, output):
         observed = [attempt[name] for attempt in attempts if attempt[name] is not None]
         usage[name] = {"known_total": sum(observed),
                        "attempts_without_count": max(0, history.get("requests", 0) - len(observed))}
-    return {
+    attempt = {
         "case": case["id"], "repeat": repeat, "passed": passed, "checked": checked,
         "cli_exit": result.returncode, "changed_files": sorted(changes),
         "out_of_scope": sorted(changes - set(case["allow"])),
@@ -155,6 +174,11 @@ def run_case(args, case, repeat, output):
         "unsupported_pass_claim": unsupported_pass_claim(history, recorded),
         "requests": history.get("requests", 0), "usage": usage,
     }
+    if "location" in case:
+        path, line, _ = case["location"]
+        answer = history["rounds"][-1]["text"] if history.get("finished") else ""
+        attempt["citation_format_ok"] = source_citation(answer, path, line) == "path:line"
+    return attempt
 
 
 def main():
@@ -190,6 +214,9 @@ def main():
         for repeat in range(1, 4):
             report["attempts"].append(run_case(args, case, repeat, output))
             report["passing"] = sum(attempt["passed"] for attempt in report["attempts"])
+            citations = [attempt["citation_format_ok"] for attempt in report["attempts"]
+                         if "citation_format_ok" in attempt]
+            report["citation_format"] = {"matching": sum(citations), "attempts": len(citations)}
             report["out_of_scope_files"] = sum(len(attempt["out_of_scope"]) for attempt in report["attempts"])
             report["files_changed_without_dispatch"] = sum(
                 len(attempt["files_changed_without_dispatch"]) for attempt in report["attempts"]
