@@ -71,8 +71,10 @@ def verdict(case, root, history, changed):
         else:
             stderr = verification.get("stderr", {})
             output = stderr.get("head", "") + stderr.get("tail", "")
+            # Python quotes Windows paths in this error, doubling their backslashes.
+            output = re.sub(r"[\\/]+", "/", output)
             evidence |= (verification.get("status") == 1 and verification.get("code") == 2 and
-                         spec["script"] in output.replace("\\", "/") and any(
+                         spec["script"] in output and any(
                              argument.replace("\\", "/").endswith(spec["script"])
                              for argument in run.get("arguments", [])
                          ))
