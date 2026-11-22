@@ -6,7 +6,7 @@
 namespace {
 
 const std::string question = "Can the parser accept an empty configuration?";
-const lay::ReadCall expected_call{"read-1", std::string(lay::fixture_path)};
+const lay::ToolCall expected_call{"read-1", "read", {{"path", std::string(lay::fixture_path)}}};
 
 void require(bool condition, std::string_view message) {
     if (!condition) {
@@ -23,23 +23,23 @@ struct Step {
 void check(std::string_view label, lay::Script script, lay::Limits limits, bool interrupt,
            std::string fixture, const lay::Session& expected) {
     std::vector<std::vector<Step>> requests;
-    std::vector<lay::ReadRecord> observations;
+    std::vector<lay::ToolRecord> observations;
     bool cancelled = false;
     const auto model = lay::scripted_model(script);
     const auto original = lay::run_session(question,
         [&](const lay::Request& request, const lay::EventSink& emit) {
             require(request.question == question, "The model received a different question");
             auto& steps = requests.emplace_back();
-            model(request, [&](const lay::ModelEvent& event) {
-                cancelled = interrupt && std::holds_alternative<lay::PathDelta>(event);
+            return model(request, [&](const lay::ModelEvent& event) {
+                cancelled = interrupt && std::holds_alternative<lay::ProposeTool>(event);
                 steps.push_back({event, cancelled});
                 return emit(event);
             });
         },
-        [&](const lay::ReadCall& call) {
+        [&](const lay::ToolCall& call) {
             require(call == expected_call, "Unexpected fixture dispatch");
-            return observations.emplace_back(lay::ReadRecord{call, true,
-                {lay::ReadStatus::ok, fixture}}).result;
+            return observations.emplace_back(lay::ToolRecord{call, true,
+                {lay::ToolStatus::ok, fixture}}).result;
         }, [&] { return cancelled; }, limits);
 
     std::cout << label << '\n';
@@ -59,8 +59,9 @@ void check(std::string_view label, lay::Script script, lay::Limits limits, bool 
                         break;
                     }
                 }
+                return lay::Generation{};
             },
-            [&](const lay::ReadCall& call) {
+            [&](const lay::ToolCall& call) {
                 require(next_observation < observations.size(), "Replay dispatched an unrecorded call");
                 const auto& observation = observations[next_observation++];
                 require(observation.call == call, "Replay dispatched a different call");
@@ -76,22 +77,22 @@ void check(std::string_view label, lay::Script script, lay::Limits limits, bool 
 
 int main() {
     using namespace lay;
-    const Round successful_read{"", {{expected_call, true, {ReadStatus::ok, "allowed"}}}};
+    const Round successful_read{"", {{expected_call, true, {ToolStatus::ok, "allowed"}}}};
     check("normal", Script::normal, {}, false, "allowed",
         {question, {successful_read, {"config/defaults.txt reports: allowed", {}}},
-         2, 1, SessionStop::end_turn});
+         2, 1, SessionStop::end_turn, {}});
     check("truncated after one complete call", Script::truncated, {}, false, "",
-        {question, {}, 1, 0, SessionStop::protocol_error});
-    check("cancelled mid-call", Script::normal, {}, true, "",
-        {question, {}, 1, 0, SessionStop::cancelled});
+        {question, {}, 1, 0, SessionStop::protocol_error, {}});
+    check("cancelled before the reply commits", Script::normal, {}, true, "",
+        {question, {}, 1, 0, SessionStop::cancelled, {}});
     check("request budget exhausted after read", Script::normal, {1, 64}, false, "allowed",
-        {question, {successful_read}, 1, 1, SessionStop::request_limit});
+        {question, {successful_read}, 1, 1, SessionStop::request_limit, {}});
 
-    const Round alternate_read{"", {{expected_call, true, {ReadStatus::ok, "rejected"}}}};
+    const Round alternate_read{"", {{expected_call, true, {ToolStatus::ok, "rejected"}}}};
     check("different evidence changes the answer", Script::normal, {}, false, "rejected",
         {question, {alternate_read, {"config/defaults.txt reports: rejected", {}}},
-         2, 1, SessionStop::end_turn});
-    const Round skipped_read{"", {{expected_call, false, {ReadStatus::skipped, "tool_limit"}}}};
+         2, 1, SessionStop::end_turn, {}});
+    const Round skipped_read{"", {{expected_call, false, {ToolStatus::skipped, "tool_limit"}}}};
     check("tool budget exhausted before dispatch", Script::normal, {24, 0}, false, "",
-        {question, {skipped_read}, 1, 0, SessionStop::tool_limit});
+        {question, {skipped_read}, 1, 0, SessionStop::tool_limit, {}});
 }

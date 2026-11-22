@@ -9,15 +9,24 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "readonly-release",
+      "inherits": "release",
+      "cacheVariables": { "LAY_WITH_ANTHROPIC": true }
     }
   ],
-  "buildPresets": [{ "name": "release", "configurePreset": "release" }],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "readonly-release", "configurePreset": "readonly-release" }
+  ],
   "testPresets": [
     {
       "name": "release",
       "configurePreset": "release",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
-    }
+    },
+    { "name": "readonly-release", "inherits": "release", "configurePreset": "readonly-release" }
   ]
 }
