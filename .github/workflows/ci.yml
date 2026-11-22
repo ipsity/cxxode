@@ -1,0 +1,24 @@
+name: C++ contracts
+
+on: [push, pull_request]
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake --preset release
+      - run: cmake --build --preset release
+      - run: ctest --preset release
+      - run: python3 bench/quality.py verify
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64
+      - run: cmake --build build/ci --config Release
+      - run: ctest --test-dir build/ci -C Release --output-on-failure
+      - run: python bench/quality.py verify
