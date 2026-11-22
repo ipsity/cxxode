@@ -1,4 +1,10 @@
-# Lay Code 0.1.0-rc2
+# Lay Code 0.1.0-rc3
+
+- CLI 收到模型的首段文字后通过 stderr 显示 `[preview]`。完整答复及工具派发仍须通过协议校验。
+- Passion API 有时会在 Responses 流结束时替换响应 ID。只有完整闭合的输出项与终止事件逐项匹配，宿主才提交该轮回复。
+- Windows 回环的 20 次 Responses 样本中，从首段 SSE 发出到读取预览的 P95 为 **0.18 ms**。夹具间隔为 120 ms，目标为 30 ms，采样使用 stderr 管道。原始样本位于源码仓库的 `bench/windows-rc3-preview.json`。
+
+## Lay Code 0.1.0-rc2
 
 Windows x64 便携候选包新增 OpenAI 和自定义服务商。自定义配置支持 Responses 和 Chat Completions，可查询模型列表并保存默认模型。Windows 密钥可通过隐藏输入保存到当前用户的凭据管理器。
 

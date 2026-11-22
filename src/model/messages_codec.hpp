@@ -23,7 +23,8 @@ bool rejected_context(std::string_view error_body);
 
 class Stream {
 public:
-    explicit Stream(Protocol protocol = Protocol::anthropic) : protocol_(protocol) {}
+    explicit Stream(Protocol protocol = Protocol::anthropic, const TextPreview& preview = {})
+        : protocol_(protocol), preview_(preview) {}
     bool push(std::string_view bytes);
     std::optional<GenerationFailure> finish(const EventSink& emit);
     const std::optional<GenerationFailure>& failure() const { return failure_; }
@@ -36,6 +37,7 @@ private:
     bool chat_event();
     bool responses_event();
     bool fail(SessionStop stop, std::string_view detail);
+    void preview_text(std::string_view text) noexcept;
 
     struct Block {
         enum class Kind { text, tool } kind;
@@ -58,6 +60,7 @@ private:
     };
 
     Protocol protocol_;
+    TextPreview preview_;
     std::string line_;
     std::string event_;
     std::string data_;
@@ -68,6 +71,7 @@ private:
     std::vector<ResponseItem> response_items_;
     std::string response_id_;
     bool done_marker_ = false;
+    bool preview_sent_ = false;
     std::optional<Block> block_;
     std::optional<ReplyStop> stop_;
     std::optional<GenerationFailure> failure_;

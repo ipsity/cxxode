@@ -208,12 +208,13 @@ public:
         }
     }
 
-    Attempt post(const std::string& request, const EventSink& emit, const StopRequested& stop_requested) {
+    Attempt post(const std::string& request, const EventSink& emit, const StopRequested& stop_requested,
+                 const TextPreview& preview) {
         EasyHandle easy(curl_easy_init(), curl_easy_cleanup);
         if (!easy) {
             throw std::runtime_error("could not initialize HTTP request");
         }
-        Transfer transfer{easy.get(), messages::Stream(provider_.protocol), Clock::now(), {}, {}, 0, false, false};
+        Transfer transfer{easy.get(), messages::Stream(provider_.protocol, preview), Clock::now(), {}, {}, 0, false, false};
         HeaderList headers;
         headers.add("content-type: application/json");
         headers.add("accept: text/event-stream");
@@ -415,12 +416,12 @@ std::vector<std::string> list_models(const Provider& provider) {
     }
 }
 
-Generate provider_model(const Provider& provider, StopRequested stop_requested) {
+Generate provider_model(const Provider& provider, StopRequested stop_requested, TextPreview preview) {
     if (provider.model.empty()) {
         throw std::invalid_argument("Choose --model MODEL or set model in the provider profile. Use --list-models to see available IDs.");
     }
     auto transport = std::make_shared<Transport>(provider);
-    return [provider, transport = std::move(transport),
+    return [provider, transport = std::move(transport), preview = std::move(preview),
             stop_requested = std::move(stop_requested)](const Request& request, const EventSink& emit) {
         Generation generation{0, {}};
         try {
@@ -433,7 +434,7 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested) 
             bool repaired = false;
             for (std::size_t attempt = 0; attempt < limit; ++attempt) {
                 ++generation.attempts;
-                auto result = transport->post(projection.body, emit, stop_requested);
+                auto result = transport->post(projection.body, emit, stop_requested, preview);
                 auto layout = projection.layout;
                 layout.input_tokens = result.input_tokens;
                 layout.output_tokens = result.output_tokens;

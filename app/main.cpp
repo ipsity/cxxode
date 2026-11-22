@@ -14,6 +14,7 @@
 #endif
 #include <windows.h>
 #else
+#include <pthread.h>
 #include <unistd.h>
 #endif
 #endif
@@ -22,9 +23,13 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -206,7 +211,7 @@ std::string prompt() {
     return question_input(read_line());
 }
 
-void terminal_text(std::string_view text) {
+void terminal_characters(std::string_view text, auto put) {
     for (std::size_t i = 0; i < text.size(); ++i) {
         const auto byte = static_cast<unsigned char>(text[i]);
         if (byte == 0xc2 && i + 1 < text.size() &&
@@ -214,12 +219,68 @@ void terminal_text(std::string_view text) {
             static_cast<unsigned char>(text[i + 1]) <= 0x9f) {
             ++i;
         } else if (byte == '\n' || byte == '\t' || (byte >= 32 && byte != 127)) {
-            std::cout.put(text[i]);
+            put(text[i]);
         }
     }
 }
 
+void terminal_text(std::string_view text) {
+    terminal_characters(text, [](char byte) { std::cout.put(byte); });
+}
+
 #ifdef LAY_WITH_ANTHROPIC
+class PreviewOutput {
+public:
+    void offer(std::string_view text) {
+        auto lock = std::unique_lock(mutex_, std::try_to_lock);
+        if (!lock || !pending_.empty()) {
+            return;
+        }
+        text.remove_prefix(std::min(text.find_first_not_of(" \t\r\n"), text.size()));
+        const auto shown = lay::utf8_prefix(text.substr(0, text.find_first_of("\r\n")), 240);
+        std::string frame = "[preview] ";
+        const auto prefix = frame.size();
+        terminal_characters(shown, [&](char byte) { frame += byte; });
+        if (frame.size() == prefix) {
+            return;
+        }
+        frame += shown.size() < text.size() ? "…\n" : "\n";
+        pending_ = std::move(frame);
+        lock.unlock();
+        ready_.notify_one();
+    }
+
+private:
+    void write(std::stop_token stop) {
+#ifndef _WIN32
+        sigset_t ignored;
+        sigemptyset(&ignored);
+        sigaddset(&ignored, SIGPIPE);
+        if (pthread_sigmask(SIG_BLOCK, &ignored, nullptr) != 0) {
+            return;
+        }
+#endif
+        while (true) {
+            std::string frame;
+            {
+                auto lock = std::unique_lock(mutex_);
+                if (!ready_.wait(lock, stop, [&] { return !pending_.empty(); })) {
+                    return;
+                }
+                frame.swap(pending_);
+            }
+            if (std::fwrite(frame.data(), 1, frame.size(), stderr) != frame.size() || std::fflush(stderr) != 0) {
+                return;
+            }
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable_any ready_;
+    std::string pending_;
+    std::jthread writer_{[this](std::stop_token stop) { write(stop); }};
+};
+
 void show_command(const lay::RunEvidence& run) {
     std::cout << "  executable ";
     terminal_text(lay::quoted_argument(run.program));
@@ -502,8 +563,21 @@ int run_workspace(const Options& settings) {
         }
         std::cout << ".\n";
     };
+    std::optional<PreviewOutput> preview_output;
+    if (!fixture) {
+        try {
+            preview_output.emplace();
+        } catch (const std::system_error&) {
+            // Streaming previews are optional when the writer cannot start.
+        }
+    }
+    const auto preview = [&](std::string_view text) {
+        if (preview_output) {
+            preview_output->offer(text);
+        }
+    };
     if (!persistent) {
-        const auto model = lay::provider_model(selected, cancel);
+        const auto model = lay::provider_model(selected, cancel, preview);
         show_scope();
         auto question = settings.question ? question_input(*settings.question) : prompt();
         activate();
@@ -587,7 +661,7 @@ int run_workspace(const Options& settings) {
         model = [&, generate = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
             if (!generate) {
                 try {
-                    generate = lay::provider_model(selected, cancel);
+                    generate = lay::provider_model(selected, cancel, preview);
                 } catch (const std::exception& error) {
                     return lay::Generation{0, lay::GenerationFailure{lay::SessionStop::transport_error, error.what()}};
                 }

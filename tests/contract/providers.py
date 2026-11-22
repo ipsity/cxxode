@@ -160,7 +160,7 @@ def tests(executable, base, server):
         body += response("response.function_call_arguments.delta", output_index=1, delta=serialized)
         body += response("response.output_item.done", output_index=1, item=item)
         body += response("response.metadata")
-        return body + completed([native, item]), 200, "text/event-stream"
+        return body + completed([native, item], "resp_gateway"), 200, "text/event-stream"
 
     def final_response(payload):
         state, proposed, observed = payload["input"][-3:]
@@ -173,10 +173,20 @@ def tests(executable, base, server):
         ("POST", "/relay/v1/responses", initial_response), ("POST", "/relay/v1/responses", final_response),
     ])
     assert "Responses 完成" in stdout and "dispatches=1" in stdout
-    incomplete = (response("response.output_item.added", output_index=0, item={**item, "arguments": ""})
+    incomplete = (response("response.output_text.delta", delta="未提交的预览")
+                  + response("response.output_item.added", output_index=0, item={**item, "arguments": ""})
                   + completed([item]))
-    broken, _ = cli(starting, [("POST", "/relay/v1/responses", stream(incomplete))], 1)
+    broken, preview = cli(starting, [("POST", "/relay/v1/responses", stream(incomplete))], 1)
     assert "protocol_error" in broken and "dispatches=0" in broken
+    assert "未提交的预览" not in broken and preview == "[preview] 未提交的预览\n"
+    mismatch = response("response.created", response={"id": "resp_start"}) + completed([item], "resp_other")
+    broken, _ = cli(starting, [("POST", "/relay/v1/responses", stream(mismatch))], 1)
+    assert "could not be matched to the stream" in broken and "dispatches=0" in broken
+    mismatch = (response("response.created", response={"id": "resp_start"})
+                + response("response.output_item.done", output_index=0, item=item)
+                + completed([{**item, "id": "fc_other"}], "resp_other"))
+    broken, _ = cli(starting, [("POST", "/relay/v1/responses", stream(mismatch))], 1)
+    assert "output item did not finish" in broken and "dispatches=0" in broken
     profiles["providers"]["relay"]["base_url"] = host + "/other/v1"
     config.write_text(json.dumps(profiles), encoding="utf-8")
     _, error = cli(["--workspace", root, "--session", "provider-contract", "--resume"], [], 2)
