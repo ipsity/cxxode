@@ -15,6 +15,8 @@
 #endif
 #include <windows.h>
 #else
+#include <cerrno>
+#include <poll.h>
 #include <pthread.h>
 #include <unistd.h>
 #endif
@@ -39,6 +41,16 @@ std::atomic_flag interrupted;
 
 void on_interrupt(int) { interrupted.test_and_set(std::memory_order_relaxed); }
 bool stopping() { return interrupted.test(std::memory_order_relaxed); }
+
+#if defined(_WIN32) && defined(LAY_WITH_ANTHROPIC)
+BOOL WINAPI on_console_control(DWORD event) {
+    if (event != CTRL_C_EVENT && event != CTRL_BREAK_EVENT) {
+        return FALSE;
+    }
+    on_interrupt(SIGINT);
+    return TRUE;
+}
+#endif
 
 struct Options {
     lay::Script script = lay::Script::normal;
@@ -500,6 +512,74 @@ bool interactive_input() {
 #endif
 }
 
+std::optional<std::string> read_approval() {
+#ifdef _WIN32
+    const auto input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if (GetConsoleMode(input, &mode)) {
+        std::string answer;
+        while (!stopping()) {
+            const auto ready = WaitForSingleObject(input, 10);
+            if (ready == WAIT_TIMEOUT) {
+                continue;
+            }
+            INPUT_RECORD record{};
+            DWORD read = 0;
+            if (ready != WAIT_OBJECT_0 || !ReadConsoleInputW(input, &record, 1, &read)) {
+                return std::nullopt;
+            }
+            if (!read || record.EventType != KEY_EVENT || !record.Event.KeyEvent.bKeyDown) {
+                continue;
+            }
+            const auto& key = record.Event.KeyEvent;
+            const auto ch = key.uChar.UnicodeChar;
+            if (ch == L'\r' || ch == L'\n') {
+                std::cout << '\n' << std::flush;
+                return answer;
+            }
+            if (ch == 3) {
+                on_interrupt(SIGINT);
+                break;
+            }
+            if (ch == 26) {
+                break;
+            }
+            for (WORD repeat = 0; repeat < key.wRepeatCount; ++repeat) {
+                if (ch == L'\b' && !answer.empty()) {
+                    answer.pop_back();
+                    std::cout << "\b \b";
+                } else if (ch == L'\t' || ch >= 32) {
+                    if (answer.size() >= 32 * 1024) {
+                        throw std::invalid_argument("Approval input exceeds 32768 bytes.");
+                    }
+                    const auto visible = ch < 127 ? static_cast<char>(ch) : '?';
+                    answer += visible;
+                    std::cout.put(visible);
+                }
+            }
+            std::cout << std::flush;
+        }
+        std::cout << '\n' << std::flush;
+        return std::nullopt;
+    }
+#else
+    if (::isatty(STDIN_FILENO)) {
+        pollfd input{STDIN_FILENO, POLLIN, 0};
+        while (!stopping()) {
+            const auto ready = ::poll(&input, 1, 10);
+            if (ready > 0) {
+                return stopping() ? std::nullopt : std::optional{read_line()};
+            }
+            if (ready < 0 && errno != EINTR) {
+                return std::nullopt;
+            }
+        }
+        return std::nullopt;
+    }
+#endif
+    return stopping() ? std::nullopt : std::optional{read_line()};
+}
+
 lay::StoreCheckpoint test_checkpoint() {
 #ifdef LAY_TEST_HOOKS
     return [](std::string_view stage, std::string_view point, const lay::Session& snapshot) {
@@ -553,7 +633,13 @@ int run_workspace(const Options& settings) {
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
     const auto authorize = [&](const lay::ToolCall& call) { return workspace.authorize(call); };
     const auto activate = [&] {
+#ifdef _WIN32
+        if (!SetConsoleCtrlHandler(on_console_control, TRUE)) {
+            std::signal(SIGINT, on_interrupt);
+        }
+#else
         std::signal(SIGINT, on_interrupt);
+#endif
         deadline = Clock::now() + std::chrono::minutes(15);
     };
     const auto finish = [&](lay::Session session) {
@@ -619,12 +705,15 @@ int run_workspace(const Options& settings) {
     const auto review_answer = [&](std::string_view question) {
         std::cout << question << std::flush;
         const auto waiting = Clock::now();
-        auto answer = read_line();
+        auto answer = read_approval();
         deadline += Clock::now() - waiting;
-        if (answer.ends_with('\r')) {
-            answer.pop_back();
+        if (!answer || stopping()) {
+            return lay::Approval::unavailable;
         }
-        return answer == "y" || answer == "yes" ? lay::Approval::approved : lay::Approval::denied;
+        if (answer->ends_with('\r')) {
+            answer->pop_back();
+        }
+        return *answer == "y" || *answer == "yes" ? lay::Approval::approved : lay::Approval::denied;
     };
     const lay::ReviewEdit approve_edit = [&](const lay::EditEvidence& evidence, std::string_view diff) {
         if (!interactive_input()) {

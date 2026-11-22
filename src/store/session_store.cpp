@@ -258,6 +258,7 @@ Json encode_attempt(const ModelAttempt& attempt) {
         {"template_version", attempt.template_version},
         {"input_tokens", attempt.input_tokens ? Json(*attempt.input_tokens) : Json(nullptr)},
         {"output_tokens", attempt.output_tokens ? Json(*attempt.output_tokens) : Json(nullptr)},
+        {"first_byte_us", attempt.first_byte_us ? Json(*attempt.first_byte_us) : Json(nullptr)},
     };
 }
 
@@ -267,7 +268,8 @@ ModelAttempt decode_attempt(const Json& value) {
         return field.is_null() ? std::nullopt : std::optional(field.get<std::size_t>());
     };
     return {value.at("first_round"), value.at("retained_rounds"), value.at("body_bytes"),
-            value.at("budget_bytes"), value.at("template_version"), count("input_tokens"), count("output_tokens")};
+            value.at("budget_bytes"), value.at("template_version"), count("input_tokens"), count("output_tokens"),
+            value.contains("first_byte_us") ? count("first_byte_us") : std::nullopt};
 }
 
 std::string encode_session(const Session& session) {

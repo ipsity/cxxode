@@ -16,6 +16,8 @@ if mode == "arguments":
         "stdin_closed": sys.stdin.read() == "",
     }))
 elif mode == "flood":
+    if len(sys.argv) > 2:
+        Path(sys.argv[2]).write_text(str(os.getpid()), encoding="ascii")
     out = sys.stdout.buffer
     err = sys.stderr.buffer
     out.write(b"STDOUT-START\n")
@@ -28,6 +30,16 @@ elif mode == "flood":
 elif mode == "linger":
     subprocess.Popen([sys.executable, __file__, "hold"])
     print("leader exited")
+elif mode == "flood-until-cancelled":
+    descendant = subprocess.Popen([sys.executable, "-B", __file__, "hold"])
+    out, err = sys.stdout.buffer, sys.stderr.buffer
+    block = b"x" * 65536
+    out.write(block)
+    err.write(block)
+    Path(sys.argv[2]).write_text(json.dumps([os.getpid(), descendant.pid]), encoding="ascii")
+    while True:
+        out.write(block)
+        err.write(block)
 elif mode == "hold":
     if os.name != "nt":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)

@@ -191,6 +191,7 @@ def run_case(args, case, repeat, output):
         "repeated_unknown_dispatches": repeated_unknown,
         "unsupported_pass_claim": unsupported_pass_claim(history, recorded),
         "requests": history.get("requests", 0), "usage": usage,
+        "first_byte_us": [attempt.get("first_byte_us") for attempt in attempts],
     }
     if "location" in case:
         path, line, _ = case["location"]

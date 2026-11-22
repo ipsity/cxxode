@@ -182,6 +182,7 @@ def tests(executable, base, server):
     try:
         snapshot = json.loads(database.execute("SELECT snapshot FROM session").fetchone()[0])
         assert snapshot["rounds"][-1]["text"] == split
+        assert all(attempt["first_byte_us"] > 0 for attempt in snapshot["model_attempts"])
     finally:
         database.close()
     replayed, _ = cli(["--workspace", root, "--session", "provider-contract", "--resume"], [])

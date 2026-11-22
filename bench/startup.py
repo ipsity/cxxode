@@ -27,6 +27,15 @@ class MemoryCounters(ctypes.Structure):
 
 
 def memory_reader():
+    if platform.system() == "Linux":
+        def private_bytes(pid):
+            resident = Path(f"/proc/{pid}/smaps_rollup").read_text(encoding="ascii")
+            counts = (line.split()[1] for line in resident.splitlines()
+                      if line.startswith(("Private_Clean:", "Private_Dirty:", "Private_Hugetlb:")))
+            return sum(int(count) for count in counts) * 1024
+
+        return private_bytes
+
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
@@ -77,8 +86,8 @@ def main():
     parser.add_argument("executable", type=Path)
     parser.add_argument("--compiler", required=True)
     args = parser.parse_args()
-    if platform.system() != "Windows":
-        parser.error("The baseline samples Windows private bytes")
+    if platform.system() not in {"Windows", "Linux"}:
+        parser.error("Startup memory measurement supports Windows and Linux.")
     executable = args.executable.resolve(strict=True)
     private_bytes = memory_reader()
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -93,6 +102,7 @@ def main():
         "compiler": args.compiler,
         "build": "CMake Release",
         "stdout": "pipe",
+        "memory_metric": "Windows private bytes" if platform.system() == "Windows" else "Linux private resident bytes",
         "executable_bytes": executable.stat().st_size,
         "first": {"ms": first[0], "private_bytes": first[1]},
         "warm": {

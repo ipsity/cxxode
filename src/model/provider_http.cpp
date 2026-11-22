@@ -192,6 +192,7 @@ struct Attempt {
     std::optional<std::chrono::milliseconds> retry_after;
     std::optional<std::size_t> input_tokens{};
     std::optional<std::size_t> output_tokens{};
+    std::optional<std::size_t> first_byte_us{};
 };
 
 class Transport {
@@ -271,10 +272,15 @@ public:
         };
         long status = 0;
         curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &status);
+        curl_off_t transfer_start = 0;
+        curl_easy_getinfo(easy.get(), CURLINFO_STARTTRANSFER_TIME_T, &transfer_start);
+        const auto first_byte = transfer_start > 0
+            ? std::optional(static_cast<std::size_t>(transfer_start)) : std::nullopt;
         if (status != 0 && status != 200) {
             const auto reason = status == 400 && messages::rejected_context(transfer.error_body)
                 ? SessionStop::context_limit : SessionStop::http_error;
             Attempt result{GenerationFailure{reason, diagnostic("HTTP " + std::to_string(status))}, {}};
+            result.first_byte_us = first_byte;
             if (status == 429 || status == 500 || status == 502 || status == 503 || status == 504 || status == 529) {
                 result.retry_after = transfer.retry_after.value_or(0s);
             }
@@ -283,7 +289,7 @@ public:
         if (transfer.stream.failure()) {
             auto failure = *transfer.stream.failure();
             failure.diagnostic = diagnostic(std::move(failure.diagnostic));
-            return {std::move(failure), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens()};
+            return {std::move(failure), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens(), first_byte};
         }
         if (transfer.invalid_content_type || transfer.callback_error) {
             return {GenerationFailure{SessionStop::protocol_error, diagnostic("invalid model response")}, {}};
@@ -295,7 +301,7 @@ public:
             return {GenerationFailure{SessionStop::transport_error, diagnostic(curl_easy_strerror(code))},
                     transient ? std::optional(0ms) : std::nullopt};
         }
-        return {transfer.stream.finish(emit), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens()};
+        return {transfer.stream.finish(emit), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens(), first_byte};
     }
 
 private:
@@ -438,6 +444,7 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
                 auto layout = projection.layout;
                 layout.input_tokens = result.input_tokens;
                 layout.output_tokens = result.output_tokens;
+                layout.first_byte_us = result.first_byte_us;
                 generation.observations.push_back(layout);
                 generation.failure = std::move(result.failure);
                 if (!repaired && generation.failure && generation.failure->reason == SessionStop::context_limit &&

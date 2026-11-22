@@ -72,6 +72,7 @@ struct ModelAttempt {
     std::size_t template_version = 1;
     std::optional<std::size_t> input_tokens;
     std::optional<std::size_t> output_tokens;
+    std::optional<std::size_t> first_byte_us{};
     bool operator==(const ModelAttempt&) const = default;
 };
 
