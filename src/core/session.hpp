@@ -19,6 +19,7 @@ enum class SessionStop {
     end_turn, protocol_error, cancelled, request_limit, tool_limit,
     http_error, transport_error, response_limit, refused, time_limit, storage_error, effect_unknown,
     approval_required,
+    context_limit,
 };
 
 struct TextDelta { std::string text; };
@@ -54,6 +55,17 @@ struct Round {
     bool operator==(const Round&) const = default;
 };
 
+struct ModelAttempt {
+    std::size_t first_round = 0;
+    std::size_t retained_rounds = 0;
+    std::size_t body_bytes = 0;
+    std::size_t budget_bytes = 0;
+    std::size_t template_version = 1;
+    std::optional<std::size_t> input_tokens;
+    std::optional<std::size_t> output_tokens;
+    bool operator==(const ModelAttempt&) const = default;
+};
+
 struct Session {
     std::string question;
     std::vector<Round> rounds;
@@ -62,6 +74,7 @@ struct Session {
     SessionStop stop = SessionStop::end_turn;
     std::string diagnostic;
     bool finished = false;
+    std::vector<ModelAttempt> model_attempts{};
     bool operator==(const Session&) const = default;
 };
 
@@ -81,6 +94,7 @@ struct GenerationFailure {
 struct Generation {
     std::size_t attempts = 1;
     std::optional<GenerationFailure> failure;
+    std::vector<ModelAttempt> observations{};
 };
 
 struct Limits {

@@ -79,6 +79,7 @@ struct Transfer {
     std::size_t discarded = 0;
     bool invalid_content_type = false;
     bool callback_error = false;
+    std::string error_body{};
 };
 
 std::size_t read_header(char* bytes, std::size_t size, std::size_t count, void* context) noexcept {
@@ -131,6 +132,9 @@ std::size_t read_body(char* bytes, std::size_t size, std::size_t count, void* co
         curl_easy_getinfo(transfer.easy, CURLINFO_RESPONSE_CODE, &status);
         if (status != 200) {
             transfer.discarded += length;
+            if (status == 400 && transfer.error_body.size() < 8192) {
+                transfer.error_body.append(bytes, std::min(length, 8192 - transfer.error_body.size()));
+            }
             return transfer.discarded <= 128 * 1024 ? length : 0;
         }
         char* content_type = nullptr;
@@ -150,6 +154,8 @@ std::size_t read_body(char* bytes, std::size_t size, std::size_t count, void* co
 struct Attempt {
     std::optional<GenerationFailure> failure;
     std::optional<std::chrono::milliseconds> retry_after;
+    std::optional<std::size_t> input_tokens{};
+    std::optional<std::size_t> output_tokens{};
 };
 
 class Transport {
@@ -243,7 +249,9 @@ public:
         long status = 0;
         curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &status);
         if (status != 0 && status != 200) {
-            Attempt result{GenerationFailure{SessionStop::http_error, diagnostic("HTTP " + std::to_string(status))}, {}};
+            const auto reason = status == 400 && messages::rejected_context(transfer.error_body)
+                ? SessionStop::context_limit : SessionStop::http_error;
+            Attempt result{GenerationFailure{reason, diagnostic("HTTP " + std::to_string(status))}, {}};
             if (status == 429 || status == 500 || status == 502 || status == 503 || status == 504 || status == 529) {
                 result.retry_after = transfer.retry_after.value_or(0s);
             }
@@ -252,7 +260,7 @@ public:
         if (transfer.stream.failure()) {
             auto failure = *transfer.stream.failure();
             failure.diagnostic = diagnostic(std::move(failure.diagnostic));
-            return {std::move(failure), {}};
+            return {std::move(failure), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens()};
         }
         if (transfer.invalid_content_type || transfer.callback_error) {
             return {GenerationFailure{SessionStop::protocol_error, diagnostic("invalid model response")}, {}};
@@ -264,7 +272,7 @@ public:
             return {GenerationFailure{SessionStop::transport_error, diagnostic(curl_easy_strerror(code))},
                     transient ? std::optional(0ms) : std::nullopt};
         }
-        return {transfer.stream.finish(emit), {}};
+        return {transfer.stream.finish(emit), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens()};
     }
 
 private:
@@ -281,16 +289,33 @@ Generate make_model(std::string model, std::string url, std::string key, bool lo
             stop_requested = std::move(stop_requested)](const Request& request, const EventSink& emit) {
         Generation generation{0, {}};
         try {
-            const auto body = messages::encode(request, model);
-            if (body.size() > 192 * 1024) {
-                generation.failure = GenerationFailure{SessionStop::request_limit, "request exceeds 196608 bytes"};
+            auto projection = messages::project(request, model);
+            if (projection.body.empty()) {
+                generation.failure = GenerationFailure{SessionStop::context_limit, std::move(projection.diagnostic)};
                 return generation;
             }
             const auto limit = std::min<std::size_t>(3, request.attempts_left);
+            bool repaired = false;
             for (std::size_t attempt = 0; attempt < limit; ++attempt) {
                 ++generation.attempts;
-                auto result = transport->post(body, emit, stop_requested);
+                auto result = transport->post(projection.body, emit, stop_requested);
+                auto layout = projection.layout;
+                layout.input_tokens = result.input_tokens;
+                layout.output_tokens = result.output_tokens;
+                generation.observations.push_back(layout);
                 generation.failure = std::move(result.failure);
+                if (!repaired && generation.failure && generation.failure->reason == SessionStop::context_limit &&
+                    attempt + 1 < limit && request.history.size() > 1) {
+                    messages::ContextLimits smaller;
+                    smaller.body_bytes = projection.body.size() / 2;
+                    auto candidate = messages::project(request, model, smaller);
+                    if (!candidate.body.empty()) {
+                        repaired = true;
+                        projection = std::move(candidate);
+                        continue;
+                    }
+                    generation.failure->diagnostic += ". " + candidate.diagnostic;
+                }
                 if (!result.retry_after || attempt + 1 == limit || *result.retry_after > 60s) {
                     return generation;
                 }

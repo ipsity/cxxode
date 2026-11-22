@@ -94,3 +94,22 @@ python bench/quality.py list
 python bench/quality.py verify
 python bench/quality.py prepare fix-empty-config ./build/fix-empty-config
 ```
+
+## P4 便携候选包与验收
+
+Windows x64 便携包解压即可使用。发布范围、实测数据和待验收项见 [发布说明](RELEASE_NOTES.md)。本地打包需要 MSYS2 UCRT64 的 GCC、SQLite、nlohmann-json，以及 PATH 上的 CMake、Ninja 和 Python 3.11+。以下命令将依赖和编译产物写入构建目录或临时目录。
+
+```powershell
+$mingw = 'C:/msys64/ucrt64'
+$deps = Join-Path $env:TEMP 'lay-code-p4-deps'
+./packaging/build_windows.ps1 -Mingw $mingw -JsonPrefix $mingw -Scratch $deps
+python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $mingw --curl (Join-Path $deps 'curl-install') --curl-license (Join-Path $deps 'curl-8.23.0/COPYING') --curl-source (Join-Path $deps 'curl-8.23.0.tar.xz') --json-license (Join-Path $mingw 'share/licenses/json/LICENSE.MIT') --output ./out --build 'MinGW UCRT Release'
+```
+
+长会话保留原始问题和最近的完整工具组，请求超限时以本地事实清单替换更早的轮次。完整证据仍保存在 SQLite。P2 和 P3 会话可用 `lay-code.exe --migrate-session ID` 离线升至格式 2，备份保存在会话目录。
+
+设置环境中的 `ANTHROPIC_API_KEY` 后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。
+
+```powershell
+python -B bench/live_quality.py --cli ./build/windows-rc1/lay-code.exe --model YOUR_MODEL_ID --output ./out/quality-run
+```

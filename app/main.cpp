@@ -41,6 +41,7 @@ struct Options {
     std::vector<std::string> excluded;
     std::string id;
     std::string writable;
+    std::optional<std::string> question;
     bool resume = false;
     bool accept_unknown = false;
     bool allow_run = false;
@@ -49,8 +50,10 @@ struct Options {
 void usage(std::ostream& stream) {
     stream << "Usage: lay-code [--truncated]\n"
            << "       lay-code --workspace PATH --model MODEL [--exclude RELATIVE_PATH ...]\n"
-           << "       Add --session ID with --write FILE and/or --allow-run. Reopen with --resume.\n"
-           << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n";
+           << "       Use --session ID to keep a workspace session. Enable --write FILE or --allow-run as needed.\n"
+           << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
+           << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
+           << "       lay-code --migrate-session ID\n";
 }
 
 Options options(std::span<const std::string> arguments) {
@@ -90,6 +93,8 @@ Options options(std::span<const std::string> arguments) {
             result.id = value;
         } else if (option == "--write" && result.writable.empty()) {
             result.writable = value;
+        } else if (option == "--question" && !result.question) {
+            result.question = value;
         } else {
             throw std::invalid_argument("Invalid, duplicate or excessive workspace option.");
         }
@@ -101,11 +106,11 @@ Options options(std::span<const std::string> arguments) {
         })) {
         throw std::invalid_argument("Choose a workspace and a valid Anthropic model ID.");
     }
-    if ((!result.id.empty()) != (!result.writable.empty() || result.allow_run) ||
-        (result.resume && result.id.empty()) || (result.accept_unknown && !result.resume) ||
+    if ((result.id.empty() && (!result.writable.empty() || result.allow_run || result.resume)) ||
+        (result.accept_unknown && !result.resume) || (result.question && result.resume) ||
         (result.model == "fixture-edit" && result.writable.empty()) ||
         (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
-        throw std::invalid_argument("Use --session ID with --write FILE and/or --allow-run. Use --resume to reopen it.");
+        throw std::invalid_argument("Use --session ID for editing, running or resuming. Supply --question only when starting.");
     }
     return result;
 }
@@ -160,19 +165,23 @@ std::string read_line() {
     return question;
 }
 
-std::string prompt() {
-    std::cout << "lay-code> " << std::flush;
-    auto question = read_line();
+std::string question_input(std::string question) {
     if (question.ends_with('\r')) {
         question.pop_back();
     }
     if (question.size() > 32 * 1024) {
         throw std::invalid_argument("Question exceeds 32768 bytes.");
     }
-    if (question.empty() || !lay::valid_utf8(question) || question.find('\0') != question.npos) {
+    if (question.empty() || !lay::valid_utf8(question) ||
+        question.find_first_of(std::string_view("\0\r\n", 3)) != question.npos) {
         throw std::invalid_argument("Enter one non-empty UTF-8 question.");
     }
     return question;
+}
+
+std::string prompt() {
+    std::cout << "lay-code> " << std::flush;
+    return question_input(read_line());
 }
 
 void terminal_text(std::string_view text) {
@@ -293,6 +302,13 @@ int render(const lay::Session& session, bool workspace) {
                 terminal_text(round.text);
                 std::cout << '\n';
             }
+        }
+    }
+    for (const auto& attempt : session.model_attempts) {
+        if (attempt.first_round > 0) {
+            std::cout << "[context] " << attempt.first_round << " older rounds projected as host facts. "
+                      << attempt.retained_rounds << " complete rounds retained ("
+                      << attempt.body_bytes << '/' << attempt.budget_bytes << " bytes)\n";
         }
     }
     std::cout << "[session] " << lay::name(session.stop) << " requests=" << session.requests
@@ -454,7 +470,7 @@ int run_workspace(const Options& settings) {
     if (!persistent) {
         const auto model = lay::anthropic_model(settings.model, cancel);
         show_scope();
-        auto question = prompt();
+        auto question = settings.question ? question_input(*settings.question) : prompt();
         activate();
         return finish(lay::run_session(std::move(question), model, read, cancel, {}, authorize));
     }
@@ -469,7 +485,7 @@ int run_workspace(const Options& settings) {
     std::optional<std::string> question;
     if (!settings.resume) {
         show_scope();
-        question = prompt();
+        question = settings.question ? question_input(*settings.question) : prompt();
     }
     lay::SessionStore store(settings.id, scope, std::move(question), test_checkpoint());
     auto session = store.load();
@@ -552,6 +568,19 @@ int run(std::span<const std::string> arguments) {
         return 0;
     }
     try {
+#ifdef LAY_WITH_ANTHROPIC
+        if (arguments.size() == 2 && arguments[0] == "--migrate-session") {
+            const auto backup = lay::SessionStore::migrate(arguments[1]);
+            if (backup.empty()) {
+                std::cout << "Session format 2 is already current.\n";
+            } else {
+                std::cout << "Migrated session to format 2. Backup ";
+                terminal_text(backup);
+                std::cout << '\n';
+            }
+            return 0;
+        }
+#endif
         const auto settings = options(arguments);
         if (settings.workspace.empty()) {
             auto question = prompt();

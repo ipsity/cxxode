@@ -226,11 +226,42 @@ def cases(base, cli, driver):
     future = new("future")
     future.command(data=b"fix fixture\nn\n")
     with closing(sqlite3.connect(future.db)) as db:
-        db.execute("PRAGMA user_version=2")
+        db.execute("PRAGMA user_version=3")
         db.commit()
     assert "unsupported session database format" in future.command(2, resume=True, data=b"")
     with closing(sqlite3.connect(future.db)) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+
+    migration = new("migration")
+    process = migration.paused("after_edit_dispatch")
+    try:
+        wait_for(process, b"[checkpoint] after_edit_dispatch")
+        locked = subprocess.run([cli, "--migrate-session", "migration"], env=migration.env,
+                                capture_output=True, timeout=5)
+        assert locked.returncode == 2 and b"active writer" in locked.stderr, locked.stderr
+    finally:
+        finish(process, kill=True)
+    old, checkpoints = migration.saved()
+    del old["model_attempts"]
+    payload = json.dumps(old)
+    with closing(sqlite3.connect(migration.db)) as db:
+        db.execute("UPDATE session SET snapshot=?", (payload,))
+        db.execute("PRAGMA user_version=1")
+        db.commit()
+    assert "--migrate-session" in migration.command(2, resume=True, data=b"", driver=False)
+    migrated = subprocess.run([cli, "--migrate-session", "migration"], env=migration.env,
+                              capture_output=True, timeout=5)
+    assert migrated.returncode == 0 and b"Migrated session" in migrated.stdout, migrated
+    backup, = migration.db.parent.glob("session-migration.v1-*.sqlite3")
+    with closing(sqlite3.connect(backup)) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("SELECT snapshot FROM session").fetchone()[0] == payload
+        assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    updated, phases = migration.saved()
+    assert updated.pop("model_attempts") == [] and updated == old
+    assert phases == checkpoints + ["migrated_v1_to_v2"]
+    assert "effect_unknown" in migration.command(1, resume=True, data=b"", driver=False)
+    assert migration.file.read_bytes() == OLD and migration.saved()[1].count("dispatch") == 2
 
 
 if __name__ == "__main__":

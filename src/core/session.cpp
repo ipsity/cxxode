@@ -286,6 +286,8 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 return !interrupted && draft.receive(event);
             });
             session.requests += result.attempts;
+            session.model_attempts.insert(session.model_attempts.end(), result.observations.begin(),
+                                          result.observations.end());
             if (interrupted || stop_requested()) {
                 session.stop = SessionStop::cancelled;
                 break;
@@ -347,6 +349,7 @@ std::string_view name(SessionStop stop) {
         case SessionStop::storage_error: return "storage_error";
         case SessionStop::effect_unknown: return "effect_unknown";
         case SessionStop::approval_required: return "approval_required";
+        case SessionStop::context_limit: return "context_limit";
     }
     return "unknown";
 }

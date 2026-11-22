@@ -1,4 +1,5 @@
 #include "store/session_store.hpp"
+#include "platform/crypto.hpp"
 #include "platform/workspace.hpp"
 
 #include <nlohmann/json.hpp>
@@ -25,6 +26,7 @@ namespace {
 
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
+constexpr std::int64_t current_format = 2;
 
 std::string utf8(const fs::path& path) {
     const auto bytes = path.u8string();
@@ -51,9 +53,9 @@ fs::path session_directory(const fs::path& root) {
         throw std::runtime_error("the private state directory must be absolute");
     }
     const auto canonical = fs::weakly_canonical(directory);
-    const auto workspace = fs::canonical(root);
+    const auto workspace = root.empty() ? fs::path{} : fs::canonical(root);
     const auto outside = [&](const fs::path& candidate) {
-        return std::ranges::mismatch(candidate, workspace, [](const auto& a, const auto& b) {
+        return workspace.empty() || std::ranges::mismatch(candidate, workspace, [](const auto& a, const auto& b) {
             return platform::path_equal(utf8(a), utf8(b));
         }).in2 != workspace.end();
     };
@@ -249,6 +251,25 @@ Verification decode_verification(const Json& value) {
              value.at("descendants_terminated")}, value.at("observed_utc"), value.at("test_summary")};
 }
 
+Json encode_attempt(const ModelAttempt& attempt) {
+    return {
+        {"first_round", attempt.first_round}, {"retained_rounds", attempt.retained_rounds},
+        {"body_bytes", attempt.body_bytes}, {"budget_bytes", attempt.budget_bytes},
+        {"template_version", attempt.template_version},
+        {"input_tokens", attempt.input_tokens ? Json(*attempt.input_tokens) : Json(nullptr)},
+        {"output_tokens", attempt.output_tokens ? Json(*attempt.output_tokens) : Json(nullptr)},
+    };
+}
+
+ModelAttempt decode_attempt(const Json& value) {
+    const auto count = [&](std::string_view name) -> std::optional<std::size_t> {
+        const auto& field = value.at(name);
+        return field.is_null() ? std::nullopt : std::optional(field.get<std::size_t>());
+    };
+    return {value.at("first_round"), value.at("retained_rounds"), value.at("body_bytes"),
+            value.at("budget_bytes"), value.at("template_version"), count("input_tokens"), count("output_tokens")};
+}
+
 std::string encode_session(const Session& session) {
     auto rounds = Json::array();
     for (const auto& round : session.rounds) {
@@ -274,9 +295,14 @@ std::string encode_session(const Session& session) {
         }
         rounds.push_back({{"text", round.text}, {"tools", std::move(tools)}});
     }
+    auto attempts = Json::array();
+    for (const auto& attempt : session.model_attempts) {
+        attempts.push_back(encode_attempt(attempt));
+    }
     return Json{{"question", session.question}, {"rounds", std::move(rounds)}, {"requests", session.requests},
                 {"dispatches", session.dispatches}, {"stop", static_cast<int>(session.stop)},
-                {"diagnostic", session.diagnostic}, {"finished", session.finished}}.dump();
+                {"diagnostic", session.diagnostic}, {"finished", session.finished},
+                {"model_attempts", std::move(attempts)}}.dump();
 }
 
 ArgumentValue decode_argument(const Json& item) {
@@ -300,12 +326,17 @@ Session decode_session(std::string_view payload) {
     session.requests = json.at("requests");
     session.dispatches = json.at("dispatches");
     const auto stop = json.at("stop").get<int>();
-    if (stop < 0 || stop > static_cast<int>(SessionStop::approval_required)) {
+    if (stop < 0 || stop > static_cast<int>(SessionStop::context_limit)) {
         throw std::runtime_error("invalid stored session stop reason");
     }
     session.stop = static_cast<SessionStop>(stop);
     session.diagnostic = json.at("diagnostic");
     session.finished = json.at("finished");
+    if (json.contains("model_attempts")) {
+        for (const auto& attempt : json.at("model_attempts")) {
+            session.model_attempts.push_back(decode_attempt(attempt));
+        }
+    }
     for (const auto& saved : json.at("rounds")) {
         Round round{saved.at("text"), {}};
         for (const auto& item : saved.at("tools")) {
@@ -350,6 +381,57 @@ std::string database_name(std::string_view id) {
     return "session-" + std::string(id);
 }
 
+using Connection = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>;
+
+Connection connect(const fs::path& path, bool create) {
+    sqlite3* opened = nullptr;
+    const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW | (create ? SQLITE_OPEN_CREATE : 0);
+    const auto status = sqlite3_open_v2(utf8(path).c_str(), &opened, flags, nullptr);
+    Connection db(opened, sqlite3_close);
+    check(db.get(), status);
+    return db;
+}
+
+std::int64_t format(sqlite3* db) {
+    Statement query(db, "PRAGMA user_version");
+    query.step(SQLITE_ROW);
+    return query.integer(0);
+}
+
+void verify_database(sqlite3* db) {
+    Statement integrity(db, "PRAGMA quick_check");
+    integrity.step(SQLITE_ROW);
+    if (integrity.text(0) != "ok") {
+        throw std::runtime_error("session database failed SQLite quick_check");
+    }
+}
+
+void configure(sqlite3* connection) {
+    sql(connection, "PRAGMA trusted_schema=OFF");
+    Statement journal(connection, "PRAGMA journal_mode=DELETE");
+    journal.step(SQLITE_ROW);
+    if (journal.text(0) != "delete") {
+        throw std::runtime_error("SQLite rollback journal mode is unavailable");
+    }
+    sql(connection, "PRAGMA synchronous=EXTRA");
+}
+
+void reserve_backup(const fs::path& path) {
+#ifdef _WIN32
+    const auto handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("could not create the migration backup");
+    }
+    CloseHandle(handle);
+#else
+    const auto fd = ::open(path.c_str(), O_CREAT | O_EXCL | O_CLOEXEC | O_WRONLY, 0600);
+    if (fd == -1) {
+        throw std::runtime_error("could not create the migration backup");
+    }
+    ::close(fd);
+#endif
+}
+
 } // namespace
 
 struct SessionStore::Impl {
@@ -364,36 +446,22 @@ struct SessionStore::Impl {
         if (!question && (!fs::is_regular_file(status) || fs::hard_link_count(path) != 1)) {
             throw std::runtime_error("unsupported session database file");
         }
-        sqlite3* opened = nullptr;
-        const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW | (question ? SQLITE_OPEN_CREATE : 0);
-        const auto result = sqlite3_open_v2(utf8(path).c_str(), &opened, flags, nullptr);
-        db.reset(opened);
-        check(db.get(), result);
+        db = connect(path, question.has_value());
         auto* connection = db.get();
-        std::int64_t version = 0;
-        {
-            Statement format(connection, "PRAGMA user_version");
-            format.step(SQLITE_ROW);
-            version = format.integer(0);
+        const auto version = format(connection);
+        if (!question && version == 1) {
+            throw std::runtime_error("Session format 1 requires offline migration with --migrate-session ID.");
         }
-        if (version != (question ? 0 : 1)) {
+        if (version != (question ? 0 : current_format)) {
             throw std::runtime_error("unsupported session database format");
         }
-        sql(connection, "PRAGMA trusted_schema=OFF");
-        {
-            Statement journal(connection, "PRAGMA journal_mode=DELETE");
-            journal.step(SQLITE_ROW);
-            if (journal.text(0) != "delete") {
-                throw std::runtime_error("SQLite rollback journal mode is unavailable");
-            }
-        }
-        sql(connection, "PRAGMA synchronous=EXTRA");
+        configure(connection);
         if (question) {
             Transaction transaction(connection);
             sql(connection, "CREATE TABLE session(id INTEGER PRIMARY KEY CHECK(id=1), scope TEXT NOT NULL,"
                             " revision INTEGER NOT NULL, snapshot TEXT NOT NULL) STRICT");
             sql(connection, "CREATE TABLE checkpoints(revision INTEGER PRIMARY KEY, phase TEXT NOT NULL) STRICT");
-            sql(connection, "PRAGMA user_version=1");
+            sql(connection, "PRAGMA user_version=2");
             Session initial;
             initial.question = *question;
             Statement insert(connection, "INSERT INTO session VALUES(1, ?, 0, ?)");
@@ -413,7 +481,7 @@ struct SessionStore::Impl {
 
     WriterLock lock;
     StoreCheckpoint checkpoint;
-    std::unique_ptr<sqlite3, decltype(&sqlite3_close)> db{nullptr, sqlite3_close};
+    Connection db{nullptr, sqlite3_close};
     std::int64_t revision = 0;
 };
 
@@ -428,6 +496,78 @@ Session SessionStore::load() const {
     Statement session(state_->db.get(), "SELECT snapshot FROM session WHERE id=1");
     session.step(SQLITE_ROW);
     return decode_session(session.text(0));
+}
+
+std::string SessionStore::migrate(std::string_view id) {
+    const auto directory = session_directory({});
+    const auto name = database_name(id);
+    const WriterLock lock(directory / (name + ".lock"));
+    const auto path = directory / (name + ".sqlite3");
+    if (!fs::is_regular_file(fs::symlink_status(path)) || fs::hard_link_count(path) != 1) {
+        throw std::runtime_error("could not locate a regular session database");
+    }
+    const auto db = connect(path, false);
+    const auto version = format(db.get());
+    if (version == current_format) {
+        return {};
+    }
+    if (version != 1) {
+        throw std::runtime_error("unsupported session database format");
+    }
+    sql(db.get(), "PRAGMA trusted_schema=OFF");
+    verify_database(db.get());
+    std::string original;
+    std::string scope;
+    std::int64_t revision = 0;
+    {
+        Statement input(db.get(), "SELECT snapshot, scope, revision FROM session WHERE id=1");
+        input.step(SQLITE_ROW);
+        original = input.text(0);
+        scope = input.text(1);
+        revision = input.integer(2);
+    }
+    const auto snapshot = decode_session(original);
+    const auto backup_path = directory / (name + ".v1-" + platform::random_suffix() + ".sqlite3");
+    reserve_backup(backup_path);
+    {
+        const auto backup = connect(backup_path, false);
+        configure(backup.get());
+        auto* copying = sqlite3_backup_init(backup.get(), "main", db.get(), "main");
+        if (!copying) {
+            check(backup.get(), sqlite3_errcode(backup.get()));
+            throw std::runtime_error("could not initialize the migration backup");
+        }
+        const auto copied = sqlite3_backup_step(copying, -1);
+        const auto finished = sqlite3_backup_finish(copying);
+        check(backup.get(), copied, SQLITE_DONE);
+        check(backup.get(), finished);
+        verify_database(backup.get());
+        Statement saved(backup.get(), "SELECT snapshot, scope, revision FROM session WHERE id=1");
+        saved.step(SQLITE_ROW);
+        if (format(backup.get()) != 1 || saved.text(0) != original || saved.text(1) != scope ||
+            saved.integer(2) != revision) {
+            throw std::runtime_error("migration backup differs from the original session");
+        }
+    }
+
+    configure(db.get());
+    Transaction transaction(db.get());
+    const auto upgraded = encode_session(snapshot);
+    Statement update(db.get(), "UPDATE session SET snapshot=?, revision=revision+1 WHERE id=1 AND revision=? AND snapshot=?");
+    update.bind(1, upgraded);
+    update.bind(2, revision);
+    update.bind(3, original);
+    update.step(SQLITE_DONE);
+    if (sqlite3_changes(db.get()) != 1 || decode_session(upgraded) != snapshot) {
+        throw std::runtime_error("session changed or could not be verified during migration");
+    }
+    Statement checkpoint(db.get(), "INSERT INTO checkpoints VALUES(?, 'migrated_v1_to_v2')");
+    checkpoint.bind(1, revision + 1);
+    checkpoint.step(SQLITE_DONE);
+    sql(db.get(), "PRAGMA user_version=2");
+    verify_database(db.get());
+    transaction.commit();
+    return utf8(backup_path);
 }
 
 void SessionStore::save(const Session& session, std::string_view point) {

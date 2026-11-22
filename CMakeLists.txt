@@ -91,5 +91,8 @@ if(BUILD_TESTING)
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver> $<TARGET_FILE:process_contract>
             ${CMAKE_COMMAND} ${CMAKE_CTEST_COMMAND})
         set_tests_properties(verification.contract PROPERTIES TIMEOUT 90)
+        add_executable(context_contract tests/contract/context_contract.cpp)
+        target_link_libraries(context_contract PRIVATE lay_messages nlohmann_json::nlohmann_json)
+        add_test(NAME context.contract COMMAND context_contract)
     endif()
 endif()

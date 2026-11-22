@@ -43,7 +43,7 @@ int run(std::span<const std::string> args) {
         }
         return 0;
     }
-    if (args.size() != 4 || args[0] != "session") {
+    if (args.size() != 4 || (args[0] != "session" && args[0] != "context")) {
         return 2;
     }
     const ReadOnlyWorkspace workspace(platform::path_from_utf8(args[2]), {"private"});
@@ -54,13 +54,29 @@ int run(std::span<const std::string> args) {
     };
     const auto model = messages::loopback_model("fixture-model", static_cast<std::uint16_t>(std::stoi(args[1])),
                                                 cancelled);
-    const auto session = run_session("Find the source location", model,
+    Session initial;
+    initial.question = "Find the source location";
+    if (args[0] == "context") {
+        for (int i = 0; i < 6; ++i) {
+            const auto id = "past-" + std::to_string(i);
+            const auto size = i == 5 ? 1024 : 16000;
+            initial.rounds.push_back({"", {{{id, "read", {{"path", std::string("src.txt")}}}, true,
+                {ToolStatus::ok, std::string(size, 'x')}}}});
+        }
+    }
+    const auto session = continue_session(std::move(initial), model,
         [&](const auto& call) { return workspace.execute(call, cancelled); }, cancelled, {},
-        [&](const auto& call) { return workspace.authorize(call); });
+        [&](const auto& call) { return workspace.authorize(call); }, {});
     for (const auto& round : session.rounds) {
         std::cout << round.text;
         for (const auto& record : round.tools) {
             std::cout << '[' << record.call.id << "] " << record.result.text << '\n';
+        }
+    }
+    if (args[0] == "context") {
+        for (const auto& attempt : session.model_attempts) {
+            std::cout << "projection " << attempt.first_round << ' ' << attempt.retained_rounds << ' '
+                      << attempt.input_tokens.value_or(0) << ' ' << attempt.output_tokens.value_or(0) << '\n';
         }
     }
     std::cout << name(session.stop) << " requests=" << session.requests

@@ -140,12 +140,12 @@ def scenarios(program, cli, server, workspace):
                      tool(0, "run1", "run", {"program": "ctest", "args": ["", "中文 空格"], "path": "."}) + stop)
     assert decoded == "run1 run .\n[]\n[中文 空格]\n", decoded
 
-    def session(steps, expected, code=0, cancel_ms=0):
+    def session(steps, expected, code=0, cancel_ms=0, mode="session"):
         server.steps = deque(steps)
         server.errors = []
         server.requests = []
         server.timestamps = []
-        stdout, _ = run([program, "session", str(server.server_port), workspace, str(cancel_ms)], code)
+        stdout, _ = run([program, mode, str(server.server_port), workspace, str(cancel_ms)], code)
         assert not server.steps and not server.errors, (server.steps, server.errors)
         assert expected in stdout, stdout
         assert "PRIVATE_SENTINEL" not in stdout, stdout
@@ -237,6 +237,31 @@ def scenarios(program, cli, server, workspace):
     assert server.late_delivery.wait(2), "the server never attempted the late reply"
     session([lambda handler, request: handler.respond(b"", 401)],
             "http_error requests=1 dispatches=0 HTTP 401 (request-id req_fixture)", 1)
+
+    rejected = json.dumps({"type": "error", "error": {
+        "type": "invalid_request_error", "message": "Prompt is too long for this model."
+    }}).encode()
+
+    def repair_context(handler, request):
+        messages = request["messages"]
+        assert messages[0]["content"][0]["text"] == "Find the source location", messages[0]
+        assert "Host facts" in messages[0]["content"][1]["text"]
+        assert 3 <= len(messages) < 13
+        for proposed, observed in zip(messages[1::2], messages[2::2]):
+            assert proposed["content"][0]["id"] == observed["content"][0]["tool_use_id"]
+        assert messages[-1]["content"][0]["tool_use_id"] == "past-5"
+        handler.respond(event("message_start", message={
+            "role": "assistant", "content": [], "stop_reason": None,
+            "usage": {"input_tokens": 23, "cache_read_input_tokens": 11, "output_tokens": 1},
+        }) + text(0, "context repaired") + event("message_delta", delta={"stop_reason": "end_turn"},
+                                                  usage={"output_tokens": 7}) + event("message_stop"))
+
+    output = session([lambda handler, request: handler.respond(rejected, 400), repair_context],
+                     "end_turn requests=2 dispatches=0", mode="context")
+    assert "projection 0 6 0 0" in output and " 34 7" in output
+    assert len(server.requests[1]) < len(server.requests[0])
+    session([lambda handler, request: handler.respond(rejected, 400)] * 2,
+            "context_limit requests=2 dispatches=0", 1, mode="context")
 
     environment = os.environ.copy()
     environment.pop("ANTHROPIC_API_KEY", None)

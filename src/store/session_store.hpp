@@ -28,6 +28,7 @@ public:
 
     Session load() const;
     void save(const Session& session, std::string_view point);
+    static std::string migrate(std::string_view id);
 
 private:
     struct Impl;
