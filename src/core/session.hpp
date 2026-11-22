@@ -24,8 +24,9 @@ enum class SessionStop {
 
 struct TextDelta { std::string text; };
 struct ProposeTool { ToolCall call; };
+struct ProviderItem { std::string json; };
 struct FinishReply { ReplyStop reason; };
-using ModelEvent = std::variant<TextDelta, ProposeTool, FinishReply>;
+using ModelEvent = std::variant<TextDelta, ProposeTool, ProviderItem, FinishReply>;
 
 struct EditEvidence {
     std::string path;
@@ -49,9 +50,17 @@ struct ToolRecord {
     bool operator==(const ToolRecord&) const = default;
 };
 
+struct ProviderItemPosition {
+    std::string json;
+    std::size_t text_offset;
+    std::size_t tools_before;
+    bool operator==(const ProviderItemPosition&) const = default;
+};
+
 struct Round {
     std::string text;
     std::vector<ToolRecord> tools;
+    std::vector<ProviderItemPosition> provider_items{};
     bool operator==(const Round&) const = default;
 };
 

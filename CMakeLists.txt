@@ -5,7 +5,7 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-option(LAY_WITH_ANTHROPIC "Build the Anthropic workspace modes" OFF)
+option(LAY_WITH_ANTHROPIC "Build the workspace and online provider modes" OFF)
 
 add_library(lay_core STATIC src/core/session.cpp src/core/tools.cpp src/core/process.cpp)
 target_compile_features(lay_core PUBLIC cxx_std_20)
@@ -22,8 +22,12 @@ if(LAY_WITH_ANTHROPIC)
     find_package(nlohmann_json 3.11 REQUIRED CONFIG)
     find_package(SQLite3 3.37 REQUIRED)
 
-    add_library(lay_messages STATIC src/model/anthropic.cpp src/model/messages_codec.cpp)
+    add_library(lay_messages STATIC src/model/provider_http.cpp src/model/provider_config.cpp
+                                    src/model/provider_credentials.cpp src/model/messages_codec.cpp)
     target_link_libraries(lay_messages PUBLIC lay_core PRIVATE CURL::libcurl nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(lay_messages PRIVATE advapi32)
+    endif()
     add_library(lay_workspace STATIC src/tools/read_only.cpp src/tools/edit.cpp src/tools/run.cpp
                                      src/platform/workspace.cpp src/platform/crypto.cpp src/platform/process.cpp)
     target_link_libraries(lay_workspace PUBLIC lay_core)
@@ -71,6 +75,9 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/contract/readonly_contract.py
             $<TARGET_FILE:readonly_contract> $<TARGET_FILE:lay-code>)
         set_tests_properties(readonly.contract PROPERTIES TIMEOUT 45)
+        add_test(NAME providers.contract COMMAND Python3::Interpreter
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/contract/providers.py $<TARGET_FILE:lay-code>)
+        set_tests_properties(providers.contract PROPERTIES TIMEOUT 45)
         add_executable(edit_fault_driver app/main.cpp)
         target_compile_definitions(edit_fault_driver PRIVATE LAY_WITH_ANTHROPIC LAY_TEST_HOOKS)
         target_link_libraries(edit_fault_driver PRIVATE lay_scripted_model lay_messages lay_workspace lay_store)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/session.hpp"
+#include "model/provider.hpp"
 
 namespace lay::messages {
 
@@ -18,10 +18,12 @@ struct Projection {
 };
 
 Projection project(const Request& request, std::string_view model, ContextLimits limits = {});
+Projection project(const Request& request, const Provider& provider, ContextLimits limits = {});
 bool rejected_context(std::string_view error_body);
 
 class Stream {
 public:
+    explicit Stream(Protocol protocol = Protocol::anthropic) : protocol_(protocol) {}
     bool push(std::string_view bytes);
     std::optional<GenerationFailure> finish(const EventSink& emit);
     const std::optional<GenerationFailure>& failure() const { return failure_; }
@@ -31,6 +33,8 @@ public:
 private:
     bool line();
     bool event();
+    bool chat_event();
+    bool responses_event();
     bool fail(SessionStop stop, std::string_view detail);
 
     struct Block {
@@ -41,11 +45,29 @@ private:
         bool initial_input = false;
     };
 
+    struct ChatCall {
+        std::string id;
+        std::string name;
+        std::string arguments;
+    };
+
+    struct ResponseItem {
+        std::string id;
+        std::string type;
+        bool closed = false;
+    };
+
+    Protocol protocol_;
     std::string line_;
     std::string event_;
     std::string data_;
     std::vector<ModelEvent> events_;
     std::vector<std::string> tool_ids_;
+    std::vector<ChatCall> chat_calls_;
+    std::string chat_text_;
+    std::vector<ResponseItem> response_items_;
+    std::string response_id_;
+    bool done_marker_ = false;
     std::optional<Block> block_;
     std::optional<ReplyStop> stop_;
     std::optional<GenerationFailure> failure_;

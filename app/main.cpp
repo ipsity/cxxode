@@ -2,7 +2,7 @@
 #include "model/scripted_model.hpp"
 
 #ifdef LAY_WITH_ANTHROPIC
-#include "model/anthropic.hpp"
+#include "model/provider.hpp"
 #include "store/session_store.hpp"
 #include "tools/edit.hpp"
 #include "tools/read_only.hpp"
@@ -38,6 +38,8 @@ struct Options {
     lay::Script script = lay::Script::normal;
     std::string workspace;
     std::string model;
+    std::string provider;
+    std::string provider_config;
     std::vector<std::string> excluded;
     std::string id;
     std::string writable;
@@ -45,11 +47,15 @@ struct Options {
     bool resume = false;
     bool accept_unknown = false;
     bool allow_run = false;
+    bool list_models = false;
+    bool set_provider_key = false;
 };
 
 void usage(std::ostream& stream) {
     stream << "Usage: lay-code [--truncated]\n"
-           << "       lay-code --workspace PATH --model MODEL [--exclude RELATIVE_PATH ...]\n"
+           << "       lay-code --workspace PATH [--provider NAME] [--model MODEL] [--exclude RELATIVE_PATH ...]\n"
+           << "       lay-code --list-models [--provider NAME] [--provider-config PATH]\n"
+           << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
            << "       Use --session ID to keep a workspace session. Enable --write FILE or --allow-run as needed.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
@@ -79,6 +85,14 @@ Options options(std::span<const std::string> arguments) {
             result.allow_run = true;
             continue;
         }
+        if (option == "--list-models" && !result.list_models) {
+            result.list_models = true;
+            continue;
+        }
+        if (option == "--set-provider-key" && !result.set_provider_key) {
+            result.set_provider_key = true;
+            continue;
+        }
         if (index == arguments.size() || arguments[index].empty()) {
             throw std::invalid_argument("A workspace option is missing its value.");
         }
@@ -87,6 +101,10 @@ Options options(std::span<const std::string> arguments) {
             result.workspace = value;
         } else if (option == "--model" && result.model.empty()) {
             result.model = value;
+        } else if (option == "--provider" && result.provider.empty()) {
+            result.provider = value;
+        } else if (option == "--provider-config" && result.provider_config.empty()) {
+            result.provider_config = value;
         } else if (option == "--exclude" && result.excluded.size() < 32) {
             result.excluded.push_back(value);
         } else if (option == "--session" && result.id.empty()) {
@@ -99,12 +117,16 @@ Options options(std::span<const std::string> arguments) {
             throw std::invalid_argument("Invalid, duplicate or excessive workspace option.");
         }
     }
-    if (result.workspace.empty() || result.model.empty() || result.model.size() > 128 ||
-        !std::ranges::all_of(result.model, [](unsigned char byte) {
-            return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
-                (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.';
-        })) {
-        throw std::invalid_argument("Choose a workspace and a valid Anthropic model ID.");
+    if (result.list_models || result.set_provider_key) {
+        if ((result.list_models && result.set_provider_key) || !result.workspace.empty() || !result.model.empty() ||
+            !result.excluded.empty() || !result.id.empty() || !result.writable.empty() || result.question ||
+            result.resume || result.accept_unknown || result.allow_run) {
+            throw std::invalid_argument("Model listing and key setup accept only provider selection options.");
+        }
+        return result;
+    }
+    if (result.workspace.empty()) {
+        throw std::invalid_argument("Choose a workspace with --workspace PATH.");
     }
     if ((result.id.empty() && (!result.writable.empty() || result.allow_run || result.resume)) ||
         (result.accept_unknown && !result.resume) || (result.question && result.resume) ||
@@ -445,6 +467,16 @@ int run_workspace(const Options& settings) {
     const bool persistent = !settings.id.empty();
     const bool editing = !settings.writable.empty();
     const bool fixture = settings.model == "fixture-edit" || settings.model == "fixture-verify";
+    lay::Provider selected;
+    if (!fixture) {
+        selected = lay::load_provider(settings.provider, settings.model,
+                                     lay::platform::path_from_utf8(settings.provider_config));
+        if (selected.model.empty()) {
+            throw std::invalid_argument("Choose --model MODEL or set model in the provider profile. Use --list-models to see available IDs.");
+        }
+    } else {
+        selected.model = settings.model;
+    }
     const auto root = lay::platform::path_from_utf8(settings.workspace);
     const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing);
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
@@ -463,12 +495,15 @@ int run_workspace(const Options& settings) {
         std::cout << (fixture ? "[scope] Local fixture in " : "[scope] Questions and selected file excerpts from ");
         terminal_text(settings.workspace);
         if (!fixture) {
-            std::cout << " go to api.anthropic.com using " << settings.model;
+            std::cout << " go to ";
+            terminal_text(selected.endpoint);
+            std::cout << " using ";
+            terminal_text(selected.model);
         }
         std::cout << ".\n";
     };
     if (!persistent) {
-        const auto model = lay::anthropic_model(settings.model, cancel);
+        const auto model = lay::provider_model(selected, cancel);
         show_scope();
         auto question = settings.question ? question_input(*settings.question) : prompt();
         activate();
@@ -480,8 +515,8 @@ int run_workspace(const Options& settings) {
         editor.emplace(workspace, settings.writable);
     }
     const lay::RunWorkspace runner(workspace);
-    const lay::SessionScope scope{root, workspace.root_identity(), fixture ? "local" : "api.anthropic.com",
-                                  settings.model, settings.writable, settings.excluded, settings.allow_run};
+    const lay::SessionScope scope{root, workspace.root_identity(), fixture ? "local" : lay::provider_scope(selected),
+                                  selected.model, settings.writable, settings.excluded, settings.allow_run};
     std::optional<std::string> question;
     if (!settings.resume) {
         show_scope();
@@ -522,7 +557,9 @@ int run_workspace(const Options& settings) {
         std::cout << "[run review] This executable runs with the current account's permissions.\n";
         show_command(evidence);
         if (!fixture) {
-            std::cout << "Output excerpts will be sent to api.anthropic.com.\n";
+            std::cout << "Output excerpts will be sent to ";
+            terminal_text(selected.endpoint);
+            std::cout << ".\n";
         }
         return review_answer("Run this command? [y/N] ");
     };
@@ -547,18 +584,55 @@ int run_workspace(const Options& settings) {
         model = fixture_edit_model(settings.writable);
     } else {
         // Inspection and recovery of committed evidence must work without model credentials.
-        model = [&, provider = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
-            if (!provider) {
+        model = [&, generate = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
+            if (!generate) {
                 try {
-                    provider = lay::anthropic_model(settings.model, cancel);
+                    generate = lay::provider_model(selected, cancel);
                 } catch (const std::exception& error) {
                     return lay::Generation{0, lay::GenerationFailure{lay::SessionStop::transport_error, error.what()}};
                 }
             }
-            return provider(request, emit);
+            return generate(request, emit);
         };
     }
     return finish(lay::continue_session(std::move(session), model, read, cancel, {}, authorize, journal));
+}
+
+int provider_command(const Options& settings) {
+    const auto selected = lay::load_provider(settings.provider, {},
+                                            lay::platform::path_from_utf8(settings.provider_config));
+    if (settings.list_models) {
+        for (const auto& model : lay::list_models(selected)) {
+            terminal_text(model);
+            std::cout << '\n';
+        }
+        return 0;
+    }
+#ifdef _WIN32
+    const auto input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if (!GetConsoleMode(input, &mode) || !SetConsoleMode(input, mode & ~ENABLE_ECHO_INPUT)) {
+        throw std::invalid_argument("Open this command in a Windows console to enter a hidden API key.");
+    }
+    struct RestoreConsole {
+        HANDLE input;
+        DWORD mode;
+        ~RestoreConsole() { SetConsoleMode(input, mode); }
+    } restore{input, mode};
+    std::cout << "API key for " << selected.name << " (input hidden): " << std::flush;
+    auto key = read_line();
+    struct EraseKey {
+        std::string& key;
+        ~EraseKey() { SecureZeroMemory(key.data(), key.size()); }
+    } erase{key};
+    if (key.ends_with('\r')) key.pop_back();
+    std::cout << '\n';
+    lay::save_provider_key(selected, key);
+    std::cout << "Saved the API key in Windows Credential Manager for " << selected.name << ".\n";
+    return 0;
+#else
+    throw std::invalid_argument("Set " + selected.api_key_env + " in your terminal environment.");
+#endif
 }
 #endif
 
@@ -582,6 +656,13 @@ int run(std::span<const std::string> arguments) {
         }
 #endif
         const auto settings = options(arguments);
+        if (settings.list_models || settings.set_provider_key) {
+#ifdef LAY_WITH_ANTHROPIC
+            return provider_command(settings);
+#else
+            throw std::invalid_argument("Build with the readonly-release preset for online providers.");
+#endif
+        }
         if (settings.workspace.empty()) {
             auto question = prompt();
             std::signal(SIGINT, on_interrupt);

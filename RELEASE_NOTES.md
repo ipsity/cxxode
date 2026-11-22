@@ -1,10 +1,16 @@
-# Lay Code 0.1.0-rc1
+# Lay Code 0.1.0-rc2
+
+Windows x64 便携候选包新增 OpenAI 和自定义服务商。自定义配置支持 Responses 和 Chat Completions，可查询模型列表并保存默认模型。Windows 密钥可通过隐藏输入保存到当前用户的凭据管理器。
+
+配置位置及调用示例见 [README](README.md)。契约测试使用本地回环服务覆盖两种 OpenAI 协议的工具调用和流中断。真实服务的调用取决于账户凭据及模型权限。下面保留 RC1 的参考机数据。
+
+## Lay Code 0.1.0-rc1
 
 这是供本地验证的 Windows x64 便携候选包。解压后运行同目录下的 `lay-code.exe`。`manifest.json` 记录随包二进制的大小和 SHA-256，`licenses` 包含第三方许可文本。
 
 解压目录里运行 `./lay-code.exe --help` 可查看入口。连接 Anthropic 时在本地环境设置 `ANTHROPIC_API_KEY`，再运行 `./lay-code.exe --workspace PATH --model MODEL`。选定 `--session ID` 可保留会话，`--write FILE` 和 `--allow-run` 分别启用需要逐次审批的编辑与命令。
 
-## 验证范围
+### RC1 验证范围
 
 - 工作区读取与检索，逐次批准的单文件编辑与验证命令，以及 SQLite 会话恢复。
 - 在相同工作区和授权范围内，以 `--resume` 重开会话。旧格式通过 `lay-code.exe --migrate-session ID` 离线迁移，程序会验证并保留升级前的 SQLite 备份。
@@ -13,7 +19,7 @@
 
 Windows x64 NTFS 是便携包的验证平台。Linux 用于本地契约验证。运行项目自己的构建或测试时，项目所需编译器、Python、CMake 等由项目环境提供。
 
-## Windows 参考机实测
+### RC1 Windows 参考机实测
 
 使用 Ryzen 9 8945HX、32 GiB 内存的 Windows 11 主机，MinGW UCRT GCC 15.2.0 Release 构建。程序为 1,427,823 字节，随附 DLL 共 5,272,324 字节。原始样本位于源码仓库的 `bench/windows-p4.json`。
 

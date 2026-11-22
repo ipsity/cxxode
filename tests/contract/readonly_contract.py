@@ -265,7 +265,8 @@ def scenarios(program, cli, server, workspace):
 
     environment = os.environ.copy()
     environment.pop("ANTHROPIC_API_KEY", None)
-    _, stderr = run([cli, "--workspace", workspace, "--model", "fixture-model"], 2, env=environment)
+    _, stderr = run([cli, "--workspace", workspace, "--provider", "anthropic", "--model", "fixture-model"],
+                    2, env=environment)
     assert "Set ANTHROPIC_API_KEY" in stderr, stderr
 
 

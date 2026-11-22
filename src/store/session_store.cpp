@@ -294,6 +294,14 @@ std::string encode_session(const Session& session) {
             }
         }
         rounds.push_back({{"text", round.text}, {"tools", std::move(tools)}});
+        if (!round.provider_items.empty()) {
+            auto items = Json::array();
+            for (const auto& item : round.provider_items) {
+                items.push_back({{"json", item.json}, {"text_offset", item.text_offset},
+                                 {"tools_before", item.tools_before}});
+            }
+            rounds.back()["provider_items"] = std::move(items);
+        }
     }
     auto attempts = Json::array();
     for (const auto& attempt : session.model_attempts) {
@@ -365,6 +373,18 @@ Session decode_session(std::string_view payload) {
                 record.verification = decode_verification(item.at("verification"));
             }
             round.tools.push_back(std::move(record));
+        }
+        if (saved.contains("provider_items")) {
+            for (const auto& item : saved.at("provider_items")) {
+                ProviderItemPosition position{item.at("json"), item.at("text_offset"), item.at("tools_before")};
+                if (position.text_offset > round.text.size() || position.tools_before > round.tools.size() ||
+                    (!round.provider_items.empty() &&
+                     (position.text_offset < round.provider_items.back().text_offset ||
+                      position.tools_before < round.provider_items.back().tools_before))) {
+                    throw std::runtime_error("invalid stored provider item");
+                }
+                round.provider_items.push_back(std::move(position));
+            }
         }
         session.rounds.push_back(std::move(round));
     }

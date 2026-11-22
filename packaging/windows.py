@@ -108,8 +108,9 @@ def package(args):
     sources = {"lay-code.exe": app, **libraries}
     for name, source in sources.items():
         shutil.copyfile(source, stage / name)
-    for name in ("README.md", "RELEASE_NOTES.md"):
-        shutil.copyfile(REPO / name, stage / name)
+    for relative in ("README.md", "RELEASE_NOTES.md", "packaging/setup_provider.ps1"):
+        source = REPO / relative
+        shutil.copyfile(source, stage / source.name)
     licenses = stage / "licenses"
     licenses.mkdir()
     for group in sorted({MINGW[name] for name in libraries if name in MINGW}):

@@ -42,6 +42,14 @@ private:
         return true;
     }
 
+    bool accept(const ProviderItem& value) {
+        if (round_.provider_items.size() >= 32 || value.json.size() > 256 * 1024 - provider_bytes_) {
+            return false;
+        }
+        provider_bytes_ += value.json.size();
+        round_.provider_items.push_back({value.json, round_.text.size(), round_.tools.size()});
+        return true;
+    }
     bool accept(const FinishReply& value) {
         finished_ = value.reason == ReplyStop::tool_use
             ? !round_.tools.empty()
@@ -50,6 +58,7 @@ private:
     }
 
     Round round_;
+    std::size_t provider_bytes_ = 0;
     bool valid_ = true;
     bool finished_ = false;
 };

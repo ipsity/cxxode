@@ -1,4 +1,4 @@
-"""Run the frozen quality suite with a real Anthropic model and terminal approvals."""
+"""Run the frozen quality suite with a configured model and terminal approvals."""
 
 import argparse
 from contextlib import closing
@@ -115,6 +115,10 @@ def run_case(args, case, repeat, output):
         database_dir = state / "lay-code" / "sessions"
     command = [args.cli, "--workspace", root, "--model", args.model, "--session", session_id,
                "--question", case["task"]]
+    if args.provider:
+        command += ["--provider", args.provider]
+    if args.provider_config:
+        command += ["--provider-config", args.provider_config]
     if case["allow"]:
         command += ["--write", case["allow"][0]]
     if "verification" in case:
@@ -155,19 +159,31 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", type=Path, required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--provider")
+    parser.add_argument("--provider-config", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if not os.environ.get("ANTHROPIC_API_KEY") or not sys.stdin.isatty():
-        parser.error("Use an interactive terminal with ANTHROPIC_API_KEY configured.")
+    if not sys.stdin.isatty():
+        parser.error("Use an interactive terminal for command and edit approvals.")
     if args.model in {"fixture-edit", "fixture-verify"}:
-        parser.error("Choose a real Anthropic model ID.")
+        parser.error("Choose a real provider model ID.")
     args.cli = args.cli.resolve(strict=True)
+    if not args.provider_config:
+        if os.name == "nt":
+            candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "LayCode/providers.json"
+        else:
+            candidate = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "lay-code/providers.json"
+        if candidate.is_file():
+            args.provider_config = candidate
+    if args.provider_config:
+        args.provider_config = args.provider_config.resolve(strict=True)
     output = args.output.resolve()
     output.mkdir()
     cases = json.loads(CATALOG.read_text(encoding="utf-8"))
     if len(cases) != 12:
         raise RuntimeError("Expected the frozen catalog of 12 cases")
-    report = {"model": args.model, "target": {"passing": 30, "attempts": 36}, "attempts": []}
+    report = {"model": args.model, "provider": args.provider or "configured default",
+              "target": {"passing": 30, "attempts": 36}, "attempts": []}
     for case in cases:
         for repeat in range(1, 4):
             report["attempts"].append(run_case(args, case, repeat, output))

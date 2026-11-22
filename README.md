@@ -35,14 +35,43 @@ cmake --preset readonly-release "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/
 cmake --build --preset readonly-release
 ctest --preset readonly-release
 
-./build/readonly-release/lay-code.exe --workspace . --model YOUR_MODEL_ID --exclude private
+./build/readonly-release/lay-code.exe --workspace . --provider openai --model YOUR_MODEL_ID --exclude private
 ```
 
-将 `YOUR_MODEL_ID` 替换为账户可调用的模型 ID，并在本地环境设置 `ANTHROPIC_API_KEY`。Linux 可执行文件为 `./build/readonly-release/lay-code`。程序使用 Anthropic Messages API 的 `2023-06-01` 协议版本与文本、客户端工具子集。
+将 `YOUR_MODEL_ID` 替换为账户可调用的模型 ID。Linux 可执行文件为 `./build/readonly-release/lay-code`。内置 `openai` 使用 Chat Completions 和 `OPENAI_API_KEY`，内置 `anthropic` 使用 Messages API 和 `ANTHROPIC_API_KEY`。没有设置默认服务商时，程序沿用 `anthropic`。
 
-`--workspace` 选定文件范围，`--exclude` 可重复指定要排除的工作区相对路径。问题和工具选中的摘录会发给 `api.anthropic.com`。`read` 列举一层目录或读取带行号的 UTF-8 文本，`search` 返回字面匹配的相对路径和行号。链接、重解析点、多硬链接文件、版本库元数据及常见凭据路径会被排除。工具各自报告截断或覆盖范围，`Ctrl+C` 取消当前请求。Windows 工作区使用本地 NTFS，Linux 需要 `openat2` 和 `/proc/self/fd`。
+`--workspace` 选定文件范围，`--exclude` 可重复指定要排除的工作区相对路径。问题和工具选中的摘录会发给选定的服务商。`read` 列举一层目录或读取带行号的 UTF-8 文本，`search` 返回字面匹配的相对路径和行号。链接、重解析点、多硬链接文件、版本库元数据及常见凭据路径会被排除。工具各自报告截断或覆盖范围，`Ctrl+C` 取消当前请求。Windows 工作区使用本地 NTFS，Linux 需要 `openat2` 和 `/proc/self/fd`。
 
-本地回环契约测试覆盖逐字节 SSE、检索和读取回填、批次预检、429 重试、断流及取消。真实服务检索验收需可用的 Anthropic 凭据与模型 ID。
+本地回环契约测试覆盖逐字节 SSE、检索和读取回填、批次预检、429 重试、断流及取消。
+
+### 自定义服务商
+
+Windows 在 `%LOCALAPPDATA%/LayCode/providers.json` 读取配置。Linux 使用 `${XDG_CONFIG_HOME:-$HOME/.config}/lay-code/providers.json`。`--provider-config PATH` 可以选用其他配置文件。
+
+```json
+{
+  "default_provider": "passion",
+  "providers": {
+    "passion": {
+      "protocol": "responses",
+      "base_url": "https://api.passionapi.com",
+      "api_key_env": "PASSION_API_KEY"
+    }
+  }
+}
+```
+
+自定义服务商支持 `responses` 和 `chat-completions`。对于只填写域名的 HTTPS 地址，程序会补上 `/v1`。自定义 Chat Completions 默认使用 `max_tokens`，提供方支持 `max_completion_tokens` 和流末尾用量统计时，可以设置 `"openai_chat_options": true`。本地无鉴权服务可将 `api_key_env` 设为 `null`。
+
+Windows 用户可在终端运行 `--set-provider-key`，隐藏录入的密钥会保存在当前用户的 Windows 凭据管理器，也可使用配置指定的环境变量。Linux 从环境变量读取密钥。
+
+```powershell
+./lay-code.exe --set-provider-key --provider passion
+./lay-code.exe --list-models --provider passion
+./lay-code.exe --workspace . --provider passion --model YOUR_MODEL_ID
+```
+
+模型列表来自服务商的 `/models` 接口。也可在便携包目录运行 `./setup_provider.ps1 -Provider passion`，录入密钥后从列表选模型，由脚本保存到该服务商的 `model` 字段。源码仓库里的同一脚本位于 `packaging/setup_provider.ps1`，可通过 `-Executable` 指定构建产物。设置默认服务商和对应模型后，`./lay-code.exe --workspace .` 会直接使用该配置。
 
 ## P2 单文件编辑与恢复
 
@@ -58,7 +87,7 @@ $demo = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath())
 ./build/readonly-release/lay-code.exe --workspace $demo.FullName --model fixture-edit --session $id --write config.txt --resume
 ```
 
-使用真实模型时，将 `fixture-edit` 换成账户可调用的 Anthropic 模型 ID。重开时须提供相同的工作区、模型和文件范围。SQLite 会话存放在 Windows 的 `%LOCALAPPDATA%/LayCode/sessions` 或 Linux 的 `${XDG_STATE_HOME:-$HOME/.local/state}/lay-code/sessions`，目录位于工作区之外。每个会话由一个 CLI 持有写入锁。
+使用真实模型时，将 `fixture-edit` 换成账户可调用的模型 ID。重开时须提供相同的工作区、服务商、模型和文件范围。SQLite 会话存放在 Windows 的 `%LOCALAPPDATA%/LayCode/sessions` 或 Linux 的 `${XDG_STATE_HOME:-$HOME/.local/state}/lay-code/sessions`，目录位于工作区之外。每个会话由一个 CLI 持有写入锁。
 
 收到 `effect_unknown` 时，宿主会暂停并显示恢复时观察到的文件状态及保留文件。核对后可用 `--resume --accept-unknown` 继续，原派发记录和未知结果会保留。已派发的编辑不会自动重发。
 
@@ -66,7 +95,7 @@ $demo = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath())
 
 ## P3 构建与测试
 
-`--session ID --allow-run` 启用验证命令，可与 `--write FILE` 一起使用。每次启动前，CLI 展示解析后的可执行文件、逐项参数、工作目录和超时。命令以当前账户权限直接启动，使用受限继承环境，标准输入关闭。使用 Anthropic 模型时，命令输出的摘录会发给提供方。
+`--session ID --allow-run` 启用验证命令，可与 `--write FILE` 一起使用。每次启动前，CLI 展示解析后的可执行文件、逐项参数、工作目录和超时。命令以当前账户权限直接启动，使用受限继承环境，标准输入关闭。使用真实模型时，命令输出的摘录会发给选定的提供方。
 
 宿主单独展示退出状态、识别出的 CTest 测试结果和对应的已知编辑序号。退出码为 0 时，只有识别到测试器的通过记录才显示通过。再次编辑会将旧验证标为较早版本，外部修改由用户核对。每路输出保留头尾共 64 KiB，并记录实际遗漏的字节数。
 
@@ -103,13 +132,13 @@ Windows x64 便携包解压即可使用。发布范围、实测数据和待验�
 $mingw = 'C:/msys64/ucrt64'
 $deps = Join-Path $env:TEMP 'lay-code-p4-deps'
 ./packaging/build_windows.ps1 -Mingw $mingw -JsonPrefix $mingw -Scratch $deps
-python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $mingw --curl (Join-Path $deps 'curl-install') --curl-license (Join-Path $deps 'curl-8.23.0/COPYING') --curl-source (Join-Path $deps 'curl-8.23.0.tar.xz') --json-license (Join-Path $mingw 'share/licenses/json/LICENSE.MIT') --output ./out --build 'MinGW UCRT Release'
+python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $mingw --curl (Join-Path $deps 'curl-install') --curl-license (Join-Path $deps 'curl-8.23.0/COPYING') --curl-source (Join-Path $deps 'curl-8.23.0.tar.xz') --json-license (Join-Path $mingw 'share/licenses/json/LICENSE.MIT') --output ./out --build 'MinGW UCRT Release' --version 0.1.0-rc2
 ```
 
 长会话保留原始问题和最近的完整工具组，请求超限时以本地事实清单替换更早的轮次。完整证据仍保存在 SQLite。P2 和 P3 会话可用 `lay-code.exe --migrate-session ID` 离线升至格式 2，备份保存在会话目录。
 
-设置环境中的 `ANTHROPIC_API_KEY` 后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。
+完成服务商的密钥和模型配置后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。
 
 ```powershell
-python -B bench/live_quality.py --cli ./build/windows-rc1/lay-code.exe --model YOUR_MODEL_ID --output ./out/quality-run
+python -B bench/live_quality.py --cli ./build/windows-rc1/lay-code.exe --provider passion --model YOUR_MODEL_ID --output ./out/quality-run
 ```
