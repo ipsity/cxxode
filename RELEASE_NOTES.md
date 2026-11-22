@@ -1,4 +1,8 @@
-# Lay Code 0.1.0-rc3
+# Lay Code 0.1.0-rc4
+
+CLI 为相邻的文件和行号字段补充 `[citation] path:line`，前提是成功的文件读取返回了对应行。评测分别记录终端显示与模型原文的引用格式。
+
+## Lay Code 0.1.0-rc3
 
 - CLI 收到模型的首段文字后通过 stderr 显示 `[preview]`。完整答复及工具派发仍须通过协议校验。
 - Passion API 有时会在 Responses 流结束时替换响应 ID。只有完整闭合的输出项与终止事件逐项匹配，宿主才提交该轮回复。

@@ -4,6 +4,7 @@
 #ifdef LAY_WITH_ANTHROPIC
 #include "model/provider.hpp"
 #include "store/session_store.hpp"
+#include "tools/citations.hpp"
 #include "tools/edit.hpp"
 #include "tools/read_only.hpp"
 #include "tools/run.hpp"
@@ -387,6 +388,15 @@ int render(const lay::Session& session, bool workspace) {
             }
         }
     }
+#ifdef LAY_WITH_ANTHROPIC
+    if (workspace) {
+        for (const auto& citation : lay::verified_source_citations(session)) {
+            std::cout << "[citation] ";
+            terminal_text(citation);
+            std::cout << '\n';
+        }
+    }
+#endif
     for (const auto& attempt : session.model_attempts) {
         if (attempt.first_round > 0) {
             std::cout << "[context] " << attempt.first_round << " older rounds projected as host facts. "

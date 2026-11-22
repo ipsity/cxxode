@@ -1,6 +1,9 @@
+from contextlib import redirect_stdout
+import io
 import json
+import os
 from pathlib import Path
-import subprocess
+import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -46,18 +49,32 @@ class CitationTest(unittest.TestCase):
         case = next(case for case in json.loads(live_quality.CATALOG.read_text(encoding="utf-8"))
                     if case["id"] == "locate-output-name")
         args = SimpleNamespace(cli=Path("lay-code"), model="fixture", provider=None, provider_config=None)
-        with TemporaryDirectory() as directory, patch.object(live_quality, "prepare"), \
-                patch.object(live_quality.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
-            for answer, passed, formatted in (
-                (SPLIT_ANSWER, True, False),
-                ("`names.py:1`", True, True),
-                ("`names.py:10`", False, False),
+        with TemporaryDirectory() as directory, patch.object(live_quality, "prepare"), redirect_stdout(io.StringIO()):
+            for answer, rendered_answer, citations, expected in (
+                (SPLIT_ANSWER, SPLIT_ANSWER, set(), (True, False, False)),
+                (SPLIT_ANSWER, SPLIT_ANSWER, {"names.py:1"}, (True, False, True)),
+                ("`names.py:1`", "`names.py:1`", set(), (True, True, True)),
+                ("`names.py:1`", "", set(), (True, True, False)),
+                ("`names.py:10`", "`names.py:10`", set(), (False, False, False)),
             ):
-                with self.subTest(answer=answer):
+                with self.subTest(answer=answer, citations=citations):
                     history = {"finished": True, "rounds": [{"text": answer, "tools": []}]}
-                    with patch.object(live_quality, "context", return_value=history):
+                    with (patch.object(live_quality, "context", return_value=history),
+                          patch.object(live_quality, "run_location", return_value=(0, rendered_answer, citations))):
                         attempt = live_quality.run_case(args, case, 1, Path(directory))
-                    self.assertEqual((attempt["passed"], attempt["citation_format_ok"]), (passed, formatted))
+                    self.assertEqual(
+                        (attempt["passed"], attempt["model_citation_format_ok"], attempt["citation_format_ok"]), expected
+                    )
+
+    def test_collecting_citations_from_cli(self):
+        command = [sys.executable, "-B", "-c",
+                   "print('[assistant]\\n> earlier\\n[assistant]\\n> [citation] fake.py:4\\n[citation] names.py:1')"]
+        with redirect_stdout(io.StringIO()) as output:
+            code, answer, citations = live_quality.run_location(command, os.environ)
+        self.assertEqual(code, 0)
+        self.assertEqual(answer, "[citation] fake.py:4\n")
+        self.assertEqual(citations, {"names.py:1"})
+        self.assertIn("> [citation] fake.py:4", output.getvalue())
 
 
 if __name__ == "__main__":

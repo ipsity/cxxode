@@ -28,7 +28,7 @@ if(LAY_WITH_ANTHROPIC)
     if(WIN32)
         target_link_libraries(lay_messages PRIVATE advapi32)
     endif()
-    add_library(lay_workspace STATIC src/tools/read_only.cpp src/tools/edit.cpp src/tools/run.cpp
+    add_library(lay_workspace STATIC src/tools/read_only.cpp src/tools/citations.cpp src/tools/edit.cpp src/tools/run.cpp
                                      src/platform/workspace.cpp src/platform/crypto.cpp src/platform/process.cpp)
     target_link_libraries(lay_workspace PUBLIC lay_core)
     add_library(lay_store STATIC src/store/session_store.cpp)

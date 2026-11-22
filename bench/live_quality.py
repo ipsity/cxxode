@@ -121,6 +121,21 @@ def unsupported_pass_claim(history, tools):
     )
 
 
+def run_location(command, env):
+    citations = set()
+    answer = []
+    with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, encoding="utf-8") as process:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            if line == "[assistant]\n":
+                answer.clear()
+            elif line.startswith("> "):
+                answer.append(line[2:])
+            elif line.startswith("[citation] "):
+                citations.add(line.removeprefix("[citation] ").rstrip("\n"))
+        return process.wait(), "".join(answer), citations
+
+
 def run_case(args, case, repeat, output):
     session_id = f'{case["id"]}-{repeat}'
     root = output / session_id
@@ -145,7 +160,10 @@ def run_case(args, case, repeat, output):
     if "verification" in case:
         command += ["--allow-run"]
     print(f"\n{session_id}\n{case['task']}\n", flush=True)
-    result = subprocess.run(command, env=env)
+    if "location" in case:
+        cli_exit, rendered_answer, rendered_citations = run_location(command, env)
+    else:
+        cli_exit = subprocess.run(command, env=env).returncode
     history = context(database_dir / f"session-{session_id}.sqlite3")
     after = snapshot(root)
     changes = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
@@ -167,7 +185,7 @@ def run_case(args, case, repeat, output):
                        "attempts_without_count": max(0, history.get("requests", 0) - len(observed))}
     attempt = {
         "case": case["id"], "repeat": repeat, "passed": passed, "checked": checked,
-        "cli_exit": result.returncode, "changed_files": sorted(changes),
+        "cli_exit": cli_exit, "changed_files": sorted(changes),
         "out_of_scope": sorted(changes - set(case["allow"])),
         "files_changed_without_dispatch": sorted(changes) if not side_effects else [],
         "repeated_unknown_dispatches": repeated_unknown,
@@ -177,7 +195,10 @@ def run_case(args, case, repeat, output):
     if "location" in case:
         path, line, _ = case["location"]
         answer = history["rounds"][-1]["text"] if history.get("finished") else ""
-        attempt["citation_format_ok"] = source_citation(answer, path, line) == "path:line"
+        attempt["model_citation_format_ok"] = source_citation(answer, path, line) == "path:line"
+        attempt["citation_format_ok"] = bool(history.get("finished")) and (
+            source_citation(rendered_answer, path, line) == "path:line" or f"{path}:{line}" in rendered_citations
+        )
     return attempt
 
 
@@ -214,9 +235,10 @@ def main():
         for repeat in range(1, 4):
             report["attempts"].append(run_case(args, case, repeat, output))
             report["passing"] = sum(attempt["passed"] for attempt in report["attempts"])
-            citations = [attempt["citation_format_ok"] for attempt in report["attempts"]
-                         if "citation_format_ok" in attempt]
-            report["citation_format"] = {"matching": sum(citations), "attempts": len(citations)}
+            for metric in ("citation_format", "model_citation_format"):
+                key = metric + "_ok"
+                citations = [attempt[key] for attempt in report["attempts"] if key in attempt]
+                report[metric] = {"matching": sum(citations), "attempts": len(citations)}
             report["out_of_scope_files"] = sum(len(attempt["out_of_scope"]) for attempt in report["attempts"])
             report["files_changed_without_dispatch"] = sum(
                 len(attempt["files_changed_without_dispatch"]) for attempt in report["attempts"]

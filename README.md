@@ -73,7 +73,7 @@ Windows 用户可在终端运行 `--set-provider-key`，隐藏录入的密钥会
 
 模型列表来自服务商的 `/models` 接口。也可在便携包目录运行 `./setup_provider.ps1 -Provider passion`，录入密钥后从列表选模型，由脚本保存到该服务商的 `model` 字段。源码仓库里的同一脚本位于 `packaging/setup_provider.ps1`，可通过 `-Executable` 指定构建产物。设置默认服务商和对应模型后，`./lay-code.exe --workspace .` 会直接使用该配置。
 
-真实回复的首段文字会通过 stderr 显示为 `[preview]`。完整且通过协议校验的回复及工具记录会由 stdout 输出。
+真实回复的首段文字会通过 stderr 显示为 `[preview]`。完整且通过协议校验的回复及工具记录会由 stdout 输出。回复分开给出相邻的文件和行号字段时，CLI 可以根据本轮读取记录补出 `[citation] path:line`。
 
 ## P2 单文件编辑与恢复
 
@@ -134,12 +134,12 @@ Windows x64 便携包解压即可使用。发布范围、实测数据和待验�
 $mingw = 'C:/msys64/ucrt64'
 $deps = Join-Path $env:TEMP 'lay-code-p4-deps'
 ./packaging/build_windows.ps1 -Mingw $mingw -JsonPrefix $mingw -Scratch $deps
-python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $mingw --curl (Join-Path $deps 'curl-install') --curl-license (Join-Path $deps 'curl-8.23.0/COPYING') --curl-source (Join-Path $deps 'curl-8.23.0.tar.xz') --json-license (Join-Path $mingw 'share/licenses/json/LICENSE.MIT') --output ./out --build 'MinGW UCRT Release' --version 0.1.0-rc3
+python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $mingw --curl (Join-Path $deps 'curl-install') --curl-license (Join-Path $deps 'curl-8.23.0/COPYING') --curl-source (Join-Path $deps 'curl-8.23.0.tar.xz') --json-license (Join-Path $mingw 'share/licenses/json/LICENSE.MIT') --output ./out --build 'MinGW UCRT Release' --version 0.1.0-rc4
 ```
 
 长会话保留原始问题和最近的完整工具组，请求超限时以本地事实清单替换更早的轮次。完整证据仍保存在 SQLite。P2 和 P3 会话可用 `lay-code.exe --migrate-session ID` 离线升至格式 2，备份保存在会话目录。
 
-完成服务商的密钥和模型配置后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。定位题接受 `path:line` 或相邻的文件和行号字段，并在 `citation_format` 中单独统计 `path:line` 合规次数。
+完成服务商的密钥和模型配置后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。定位题接受 `path:line` 或相邻的文件和行号字段。报告分别用 `citation_format` 和 `model_citation_format` 记录 CLI 输出与模型原文的格式合规次数。
 
 ```powershell
 python -B bench/live_quality.py --cli ./build/windows-rc1/lay-code.exe --provider passion --model YOUR_MODEL_ID --output ./out/quality-run

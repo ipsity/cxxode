@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -162,17 +163,42 @@ def tests(executable, base, server):
         body += response("response.metadata")
         return body + completed([native, item], "resp_gateway"), 200, "text/event-stream"
 
-    def final_response(payload):
+    def final_response(payload, answer):
         state, proposed, observed = payload["input"][-3:]
         assert state == native and proposed["type"] == "function_call"
         assert proposed["call_id"] == observed["call_id"] == "call_file"
         assert observed["type"] == "function_call_output" and "gateway evidence" in observed["output"]
-        return completed([message("Responses 完成")]), 200, "text/event-stream"
+        return completed([message(answer)]), 200, "text/event-stream"
 
+    split = f"Responses 完成\n- 文件：`{SOURCE}`\n- 行号：第 1 行"
     stdout, _ = cli([*starting, "--session", "provider-contract"], [
-        ("POST", "/relay/v1/responses", initial_response), ("POST", "/relay/v1/responses", final_response),
+        ("POST", "/relay/v1/responses", initial_response),
+        ("POST", "/relay/v1/responses", lambda payload: final_response(payload, split)),
     ])
-    assert "Responses 完成" in stdout and "dispatches=1" in stdout
+    citation = f"[citation] {SOURCE}:1\n"
+    assert "Responses 完成" in stdout and "dispatches=1" in stdout and citation in stdout
+    database_dir = state / ("LayCode" if os.name == "nt" else "lay-code") / "sessions"
+    database = sqlite3.connect(database_dir / "session-provider-contract.sqlite3")
+    try:
+        snapshot = json.loads(database.execute("SELECT snapshot FROM session").fetchone()[0])
+        assert snapshot["rounds"][-1]["text"] == split
+    finally:
+        database.close()
+    replayed, _ = cli(["--workspace", root, "--session", "provider-contract", "--resume"], [])
+    assert citation in replayed
+    for answer, repaired in (
+        (split.replace("第 1 行", "第 2 行"), False),
+        (split + f"\n依据 `./{SOURCE}:1`", False),
+        (split + f"\n错误的写法是 `{SOURCE}:1.5`", True),
+    ):
+        stdout, _ = cli(starting, [
+            ("POST", "/relay/v1/responses", initial_response),
+            ("POST", "/relay/v1/responses", lambda payload: final_response(payload, answer)),
+        ])
+        assert (citation in stdout) == repaired
+    stdout, _ = cli(starting, [("POST", "/relay/v1/responses", stream(completed([message(split)])))])
+    assert "[citation]" not in stdout
+
     incomplete = (response("response.output_text.delta", delta="未提交的预览")
                   + response("response.output_item.added", output_index=0, item={**item, "arguments": ""})
                   + completed([item]))
