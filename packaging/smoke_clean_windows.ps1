@@ -1,7 +1,8 @@
 param(
     [string]$Archive = (Join-Path $PSScriptRoot 'candidate.zip'),
     [string]$SerialPort,
-    [string]$TuiProbe
+    [string]$TuiProbe,
+    [string]$DualFixture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,6 +94,13 @@ try {
         $result.tui_edit_approved = $true
         $result.tui_follow_up = $true
         $result.shared_session_reopened = $true
+    }
+    if ($DualFixture) {
+        if (!$TuiProbe) { throw 'Dual fixture requires the native TUI probe.' }
+        $dual = (& $DualFixture -Application $exe -Probe $TuiProbe -Scratch $scratch | Out-String)
+        if ($dual -notmatch 'DUAL_CLEAN_PASS') { throw "Dual-file guest smoke failed $dual" }
+        $result.tui_two_files_verified = $true
+        $result.cli_reopened_two_file_verification = $true
     }
     $json = $result | ConvertTo-Json -Compress
     if ($port) {
