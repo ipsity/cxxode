@@ -199,3 +199,5 @@ python -B bench/usage_audit.py "$env:LOCALAPPDATA/LayCode/sessions/session-parse
 ```
 
 `provider_usage` 保存供应方上报的已识别数值字段，字段缺失和回报零各自保留。Responses 与 Chat 的缓存细项已包含在主计数中。Claude 输入小计使用已报告的输入、缓存读和缓存写分项。报告的 `verified_cost` 留空，费用以服务商的可核对账单为准。
+
+开发构建可通过 `-DLAY_BENCHMARK_METRICS=ON` 启用本地投影与检查点计时。Windows 上用 PyWinPTY 运行 `python -B bench/mixed_history.py PATH_TO_EXE PATH_TO_CTEST`，可在固定回环服务下复现 100 任务的混合轨迹与重开采样。源码仓库中的 `bench/p11-mixed-history.json` 保留对照结果。
