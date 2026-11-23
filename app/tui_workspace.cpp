@@ -30,7 +30,8 @@ void captured(std::string& detail, std::string_view name, const CapturedOutput& 
     if (!output.total_bytes) return;
     detail += "\n" + std::string(name) + " · " + std::to_string(output.total_bytes) + " bytes\n" + output.head;
     if (output.omitted_bytes) {
-        detail += "\n[" + std::to_string(output.omitted_bytes) + " bytes omitted]\n";
+        detail += "\n[" + std::to_string(output.omitted_bytes) +
+            " bytes omitted during capture. Only the stored head and tail are available.]\n";
     }
     detail += output.tail;
 }
@@ -47,6 +48,7 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
         output.cards.push_back({safe_text(title, ascii), safe_text(detail, ascii, true)});
     };
     std::size_t task = 0;
+    std::string task_files;
     const auto tasks_at = [&](std::size_t round) {
         while (task < snapshot.tasks.size() && snapshot.tasks[task].first_round == round) {
             const auto& item = snapshot.tasks[task++];
@@ -62,6 +64,17 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
             auto title = tool.call.name + "  " + short_line(target) + "  [" + std::string(tool_state(tool)) + "]";
             std::string detail = "task " + std::to_string(task) + " · round " + std::to_string(round + 1) +
                 " · call " + tool.call.id;
+            if (!command && !target.empty()) detail += "\npath " + quoted_argument(target);
+            if (task == snapshot.tasks.size() && task && tool.call.name == "edit") {
+                if (!task_files.empty()) task_files += "\n\n";
+                task_files += detail + "\n" + std::string(tool_state(tool));
+                if (tool.edit) task_files += "\nbefore " + tool.edit->before;
+                else if (const auto proposed = text_arg(tool.call, "version"); !proposed.empty()) {
+                    task_files += "\nproposed version " + std::string(proposed);
+                }
+                if (!tool.result.version.empty()) task_files += "\nversion " + tool.result.version;
+                if (!tool.result.text.empty()) task_files += "\n" + tool.result.text;
+            }
             if (tool.edit) {
                 detail += "\n" + edit_review_details(*tool.edit);
                 if (task == snapshot.tasks.size() && tool.dispatched && tool.result.status == ToolStatus::ok) {
@@ -78,6 +91,9 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
             }
             if (tool.verification && tool.run) {
                 const auto& result = *tool.verification;
+                if (tool.dispatched && result.process.status == ProcessStatus::exited && result.process.code != 0) {
+                    output.latest_failed_check = output.cards.size();
+                }
                 title += "  " + describe(result.process.status, result.process.code);
                 detail += "\n" + verification_reference(result, *tool.run, current_revision);
                 if (!result.test_summary.empty()) {
@@ -100,7 +116,10 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
         if (!item.text.empty()) {
             auto text = utf8_prefix(item.text, 64 * 1024);
             auto detail = std::string(text);
-            if (text.size() < item.text.size()) detail += "\n[full reply in saved session]";
+            if (text.size() < item.text.size()) {
+                detail += "\n[" + std::to_string(item.text.size() - text.size()) +
+                    " bytes omitted from this view. Full saved reply available with --resume --inspect.]";
+            }
             add((ascii ? "Assistant  " : "助手  ") + short_line(text), detail);
             if (round < source_notes.size()) {
                 for (const auto& note : source_notes[round]) add(short_line(note), note);
@@ -108,6 +127,13 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
         }
     }
     tasks_at(snapshot.rounds.size());
+    if (!snapshot.tasks.empty()) {
+        const auto title = std::string(ascii ? "Files in task " : "本任务文件改动 · 任务 ") +
+            std::to_string(snapshot.tasks.size());
+        output.task_files = Card{title,
+            task_files.empty() ? std::string(ascii ? "No file edits recorded." : "本任务暂无文件编辑记录。") :
+                                 safe_text(task_files, ascii, true)};
+    }
     for (const auto& note : edits) add(short_line(note), note);
     for (std::size_t i = 0; i < snapshot.tasks.size(); ++i) {
         if (const auto& input = snapshot.tasks[i].supplement) {

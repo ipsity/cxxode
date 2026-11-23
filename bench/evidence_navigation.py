@@ -20,6 +20,10 @@ END = ESC + "[F"
 PAGE_UP = ESC + "[5~"
 PAGE_DOWN = ESC + "[6~"
 EXPAND = "\x0f"
+REVIEW = ESC + "[18~"
+FAILURE = ESC + "[19~"
+FILES = ESC + "[20~"
+BACK = ESC + "[21~"
 DRAFT = "return-to-this-draft"
 FAILED_CALL = "call_1_run"
 
@@ -92,20 +96,80 @@ def baseline(app, args, env, database, tracefile, task, server):
     }
 
 
+def live_review(terminal, database, server):
+    saved = context(database)
+    assert len(saved["tasks"]) == 100
+    posts = sum(map(len, server.request_sizes.values()))
+    terminal.key(FAILURE, "call " + FAILED_CALL)
+    terminal.key("navigation-draft", "> navigation-draft")
+    terminal.key(REVIEW, "任务 100  /  call_100_edit")
+    terminal.key(BACK, "call " + FAILED_CALL)
+    terminal.key(FILES, "本任务文件改动 · 任务 100")
+    terminal.expect("call call_100_edit")
+    terminal.key(BACK, "任务 100  /  call_100_edit")
+    assert context(database) == saved and sum(map(len, server.request_sizes.values())) == posts
+    return {"task": 100, "approval_call": "call_100_edit", "failure_call": FAILED_CALL, "file_call": "call_100_edit",
+            "matched_targets": 3, "extra_posts": 0, "extra_dispatches": 0}
+
+
+def direct(app, args, env, database, tracefile, task, server):
+    saved = context(database)
+    posts = sum(map(len, server.request_sizes.values()))
+    recorded = len(tracefile.read_text().splitlines()) if tracefile.is_file() else 0
+    jumps, opens, pages, returns = [], [], [], []
+    with console(str(app), ["--tui", *args, "--resume", "--mono"], 16, 48, env) as terminal:
+        terminal.expect(COMPLETE, timeout=8)
+        terminal.key(DRAFT, "> " + DRAFT)
+        terminal.quiet()
+        count = len(terminal.text)
+        terminal.quiet()
+        assert len(terminal.text) == count
+        terminal.key(EXPAND, "Saved files")
+        initial = dict(PAINT.findall(terminal.text))
+        terminal.key(FILES, f"本任务文件改动 · 任务 {task}")
+        terminal.expect(f"call call_{task}_edit", count)
+        terminal.key(BACK, "Saved files")
+        restored = dict(PAINT.findall(terminal.text))
+        assert {key: initial[key] for key in map(str, range(3, 11))} == {key: restored[key] for key in map(str, range(3, 11))}
+        for _ in range(100):
+            jumped, screen = paint(terminal, FAILURE)
+            assert "call " + FAILED_CALL in screen
+            jumps.append(jumped)
+            opens.append(paint(terminal, EXPAND)[0])
+            returns.append(paint(terminal, BACK)[0])
+        terminal.key(FAILURE, "call " + FAILED_CALL)
+        for i in range(100):
+            pages.append(paint(terminal, PAGE_DOWN if i % 2 == 0 else PAGE_UP)[0])
+        terminal.key(BACK, "Saved files")
+        assert "> " + DRAFT in dict(PAINT.findall(terminal.text)).values()
+    assert context(database) == saved and sum(map(len, server.request_sizes.values())) == posts
+    return {
+        "tasks": task, "failed_call": FAILED_CALL, "correct": True, "search_and_return_keys": 2,
+        "extra_posts": 0, "extra_dispatches": 0, "idle_redraws": 0,
+        "conpty_observed": {"jump": measurements(jumps), "page": measurements(pages),
+                            "expand": measurements(opens), "return": measurements(returns)},
+        "host_input_to_terminal_write": trace(tracefile, recorded),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("ctest", type=Path)
+    parser.add_argument("--candidate", action="store_true")
     options = parser.parse_args()
     app = options.executable.resolve(strict=True)
     with TemporaryDirectory(prefix="lay-navigation-") as directory, ThreadingHTTPServer(("127.0.0.1", 0), Relay) as server:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
-            samples = run(app, options.ctest.resolve(strict=True), 1, Path(directory), server, True, baseline)
+            samples = run(app, options.ctest.resolve(strict=True), 1, Path(directory), server, True,
+                          direct if options.candidate else baseline, live_review if options.candidate else None)
         finally:
             server.shutdown()
-    print(json.dumps({"mode": "sequential baseline", "executable_sha256": hashlib.sha256(app.read_bytes()).hexdigest(),
-                      "terminal": "Windows PyWinPTY / ConPTY", "viewport": [48, 16], "samples": samples}, indent=2))
+    print(json.dumps({"mode": "direct" if options.candidate else "sequential baseline",
+                      "executable_sha256": hashlib.sha256(app.read_bytes()).hexdigest(),
+                      "terminal": "Windows PyWinPTY / ConPTY", "viewport": [48, 16], "samples": samples,
+                      "live_review": getattr(server, "review_navigation", None)}, indent=2))
 
 
 if __name__ == "__main__":

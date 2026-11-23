@@ -23,6 +23,10 @@ F2 = ESC + "OQ"
 F3 = ESC + "OR"
 F4 = ESC + "OS"
 F5 = ESC + "[15~"
+F7 = ESC + "[18~"
+F8 = ESC + "[19~"
+F9 = ESC + "[20~"
+F10 = ESC + "[21~"
 
 
 def approve(terminal):
@@ -621,6 +625,57 @@ def draft_input(base, cli, driver):
         assert saved["requests"] == 2 and saved["dispatches"] == 1
 
 
+def evidence_navigation(base, cli, driver, cmake, ctest):
+    fixture = VerificationFixture(base, "navigation", cli, driver, cmake, ctest)
+    fixture.command(data=b"fix and verify\ny\ny\ny\n")
+    original = fixture.saved()
+    for rows, columns, flags in ((32, 120, ()), (24, 80, ("--mono",)), (16, 48, ("--mono", "--ascii"))):
+        ascii_ = "--ascii" in flags
+        with console(cli, ["--tui", *fixture.args, "--resume", *flags], rows, columns, fixture.env) as screen:
+            screen.expect("Complete / Saved revision" if ascii_ else "已完成")
+            screen.key("draft to keep", "> draft to keep")
+            screen.key("\x0f", "Saved files")
+            screen.key(F8, "call verify-0")
+            screen.expect("command exited 8")
+            screen.key(F10, "Saved files")
+            screen.key(F9, "Files in task 1" if ascii_ else "本任务文件改动 · 任务 1")
+            screen.expect("call edit-2")
+            screen.key(F10, "Saved files")
+            assert "> draft to keep" in dict(PAINT.findall(screen.text)).values()
+            assert all(code not in screen.text for code in (ESC + "[30m", ESC + "[40m", ESC + "[31m", ESC + "[32m"))
+            if ascii_:
+                assert screen.text.isascii()
+            if columns == 48:
+                screen.resize(10, 30)
+                screen.expect("--resume --inspect")
+    assert fixture.saved() == original and fixture.count() == 2
+
+    from supplement_live import Gate
+    first = original[0]["requests"] + 1
+    gate = Gate(fixture, f"after_request_{first}")
+    with console(driver, ["--tui", *fixture.args, "--resume", "--mono"], 24, 80, fixture.env) as screen:
+        screen.expect("已完成")
+        submit(screen, "Run one more check")
+        gate.wait()
+        screen.key(F8, "call verify-0")
+        gate.open()
+        screen.expect("正在查看历史 · F7 待审批")
+        assert "任务 2  /  follow-up-2" not in screen.text
+        screen.key("new draft", "> new draft")
+        screen.key(F7, "任务 2  /  follow-up-2")
+        screen.expect("参数 1")
+        screen.key(F10, "call verify-0")
+        screen.expect("> new draft")
+        screen.key(ESC + "[F", "任务 2  /  follow-up-2")
+        screen.key("\t", "空回车拒绝")
+        screen.send("\r")
+        screen.expect("已完成", screen.text.index("任务 2"))
+    assert fixture.count() == 2
+    final, _ = fixture.saved()
+    assert final["dispatches"] == original[0]["dispatches"]
+    assert final["rounds"][-2]["tools"][0]["verification"]["diagnostic"] == "command denied by user"
+
+
 if __name__ == "__main__":
     if os.name == "nt":
         from tui import PtyProcess
@@ -638,4 +693,5 @@ if __name__ == "__main__":
         previews(base, program)
         shared_evidence(base, program, driver, cmake, ctest)
         receipt_replay(base, program, driver, cmake, ctest)
+        evidence_navigation(base, program, driver, cmake, ctest)
     print("Verified TUI/CLI facts, fresh approval, cancellation, crash recovery and retry preview isolation.")

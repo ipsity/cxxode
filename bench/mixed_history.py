@@ -90,7 +90,7 @@ class Relay(BaseHTTPRequestHandler):
         self.wfile.write(reply)
 
 
-def add_task(terminal, task, navigation=False):
+def add_task(terminal, task, navigation=False, during_review=None):
     terminal.text = ""
     prompt = f"Mixed task {task:03d} inspect the fixture"
     if task in TARGETS:
@@ -104,6 +104,8 @@ def add_task(terminal, task, navigation=False):
         reviews.append(("待批准 · 运行", True))
     for review, approve in reviews:
         terminal.expect(review, timeout=10)
+        if during_review:
+            during_review(terminal)
         terminal.key("\t", "空回车拒绝")
         if approve:
             terminal.key("y", "> y")
@@ -160,7 +162,7 @@ def sample(app, args, env, database, metrics, task, request_sizes, repeats):
             "edits_denied": operations["edit", True], "verifications": operations["run", False]}
 
 
-def run(app, ctest, repeats, base, server, packaged, navigation_sample=None):
+def run(app, ctest, repeats, base, server, packaged, navigation_sample=None, review_sample=None):
     root = base / "workspace"
     root.mkdir()
     seed, config = root / SEED, root / CONFIG
@@ -204,7 +206,11 @@ def run(app, ctest, repeats, base, server, packaged, navigation_sample=None):
                         failure_marker.unlink()
                 if task % 10 == 0:
                     config.write_text(f"value=external-{task:03d}" + padding, encoding="utf-8")
-                add_task(terminal, task, server.navigation)
+                during_review = None
+                if task == 100 and review_sample:
+                    def during_review(screen):
+                        server.review_navigation = review_sample(screen, database, server)
+                add_task(terminal, task, server.navigation, during_review)
         if navigation_sample:
             samples[str(target)] = navigation_sample(app, args, env, database, metrics, target, server)
         else:

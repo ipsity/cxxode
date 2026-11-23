@@ -17,7 +17,8 @@ namespace {
 
 enum class Key {
     text, enter, escape, tab, stop, details, submit, up, down, left, right, first, last,
-    previous_page, next_page, backspace, erase, paste, paste_space, acknowledge, edit_scope, resume, supplement
+    previous_page, next_page, backspace, erase, paste, paste_space, acknowledge, edit_scope, resume, supplement,
+    current_review, failed_check, task_files, return_to_reading
 };
 
 struct Event {
@@ -106,6 +107,8 @@ private:
                 {"OS", Key::edit_scope}, {"[14~", Key::edit_scope},
                 {"[15~", Key::resume},
                 {"[17~", Key::supplement},
+                {"[18~", Key::current_review}, {"[19~", Key::failed_check},
+                {"[20~", Key::task_files}, {"[21~", Key::return_to_reading},
             };
             if (const auto match = std::ranges::find(keys, sequence, [](const auto& item) { return item.first; });
                 match != std::end(keys)) {
@@ -408,10 +411,9 @@ public:
         const auto changed = next != view_;
         if (ticket(next) != ticket(view_)) {
             reset_decision();
-            offset_ = 0;
-            align_ = true;
+            review_offset_ = 0;
         }
-        if (next.transcript != view_.transcript && follows_) {
+        if (next.transcript != view_.transcript && follows_ && !history_) {
             selected_ = next.transcript && !next.transcript->cards.empty() ? next.transcript->cards.size() - 1 : 0;
             align_ = true;
         }
@@ -448,10 +450,14 @@ public:
         line(std::string(label("▚ lay code  ·  会话 ", "[] lay code  /  Session ")) + safe_text(settings_.id, ascii_));
         if (viewport.columns < 34 || viewport.rows < 12) {
             if (viewport.rows >= 2) line(label("请放大窗口 · Esc 退出", "Enlarge window / Esc quits"));
-            if (viewport.rows >= 3) line(label("Ctrl+C 停止", "Ctrl+C stops"));
+            if (viewport.rows >= 3) line(label("行式查看 --resume --inspect", "CLI --resume --inspect"));
+            if (viewport.rows >= 4) line(label("Ctrl+C 停止", "Ctrl+C stops"));
             return result;
         }
-        line(status(), "\x1b[36m");
+        line(status(), "\x1b[7m");
+        const bool in_review = reviewing();
+        const auto& transcript = history_ ? history_ : view_.transcript;
+        auto& offset = in_review ? review_offset_ : offset_;
         std::vector<std::string> body;
         const auto add = [&](std::string_view text) {
             while (true) {
@@ -462,42 +468,44 @@ public:
             }
         };
         std::size_t anchor = 0;
-        if (view_.review) {
+        if (in_review) {
             const auto& review = *view_.review;
             add(review.title);
             add(std::string(label("任务 ", "Task ")) + std::to_string(review.task) + "  /  " + review.call);
             add(review.detail);
+        } else if (files_panel_ && transcript && transcript->task_files) {
+            add(transcript->task_files->title);
+            add(transcript->task_files->detail);
         } else {
             add(safe_text(settings_.path, ascii_));
             if (!view_.scope.empty()) add(view_.scope);
-            if (view_.transcript) {
-                const auto& cards = view_.transcript->cards;
+            if (transcript) {
+                const auto& cards = transcript->cards;
                 for (std::size_t i = 0; i < cards.size(); ++i) {
                     if (i == selected_) anchor = body.size();
                     add((i == selected_ ? "> " : "  ") + cards[i].title);
                     if (expanded_ == i) add(cards[i].detail);
                 }
-                if (!view_.transcript->diagnostic.empty()) add(view_.transcript->diagnostic);
+                if (!transcript->diagnostic.empty()) add(transcript->diagnostic);
             }
-            if (!view_.preview.empty()) {
+            if (!history_ && !view_.preview.empty()) {
                 add(std::string(label("预览  ", "Preview  ")) + view_.preview);
             }
             if (!view_.error.empty()) add(view_.error);
         }
         page_ = std::min(viewport.rows, 48) - 8;
         const auto total = static_cast<int>(body.size());
-        if (align_) {
-            offset_ = follows_ && !view_.review && !expanded_ ? total - page_ :
+        if (!in_review && align_) {
+            offset = follows_ && !expanded_ ? total - page_ :
                 static_cast<int>(anchor) - 1;
             align_ = false;
         }
-        offset_ = std::clamp(offset_, 0, std::max(0, total - page_));
-        for (int i = offset_; i < offset_ + page_; ++i) {
+        offset = std::clamp(offset, 0, std::max(0, total - page_));
+        for (int i = offset; i < offset + page_; ++i) {
             const auto text = i < total ? std::string_view(body[static_cast<std::size_t>(i)]) : std::string_view{};
-            const auto style = text.starts_with("- ") ? "\x1b[31m" : text.starts_with("+ ") ? "\x1b[32m" : "";
-            line(text, style);
+            line(text);
         }
-        line(std::to_string(offset_ + 1) + "-" + std::to_string(std::min(total, offset_ + page_)) + "/" +
+        line(std::to_string(offset + 1) + "-" + std::to_string(std::min(total, offset + page_)) + "/" +
             std::to_string(total) + std::string(label(" 行  ·  ↑↓ / PgUp PgDn", " lines  /  Up Down PgUp PgDn")));
         std::string rule;
         for (int i = 0; i < width; ++i) rule += label("─", "-");
@@ -505,7 +513,7 @@ public:
         line(shortcuts());
         line(instruction());
         line(notice_.empty() ? draft_label() : notice_);
-        if (!view_.review || focused_ || supplement_task_) {
+        if (!in_review || focused_ || supplement_task_) {
             auto [visible, column] = (focused_ ? decision_ : draft_).view(width - 2, ascii_);
             line("> " + visible, focused_ ? "\x1b[7m" : "");
             result.caret = 3 + column;
@@ -552,8 +560,13 @@ public:
                 toggle_supplement();
                 return true;
             }
+            if (!combined && (key == Key::current_review || key == Key::failed_check ||
+                              key == Key::task_files || key == Key::return_to_reading)) {
+                jump(key);
+                return true;
+            }
             if (new_review || view_.stopping) continue;
-            if (view_.review && !supplement_task_ && key == Key::tab) {
+            if (reviewing() && !supplement_task_ && key == Key::tab) {
                 if (focused_) reset_decision();
                 else if (!combined) {
                     focused_ = true;
@@ -566,7 +579,7 @@ public:
                 notice_ = label("已忽略粘贴或排队回车，请重新决定。", "Queued input ignored. Use Tab again.");
                 return true;
             }
-            if (focused_ && key == Key::enter && view_.review) {
+            if (focused_ && key == Key::enter && reviewing()) {
                 worker_.decide(view_.review->ticket, decision_.text == "y" || decision_.text == "yes");
                 reset_decision();
                 return true;
@@ -595,7 +608,8 @@ public:
                 }
                 return true;
             }
-            if (key == Key::details && !view_.review && view_.transcript && !view_.transcript->cards.empty()) {
+            const auto& transcript = history_ ? history_ : view_.transcript;
+            if (key == Key::details && !reviewing() && !files_panel_ && transcript && !transcript->cards.empty()) {
                 expanded_ = expanded_ == selected_ ? std::nullopt : std::optional{selected_};
                 align_ = true;
                 continue;
@@ -605,7 +619,7 @@ public:
                 navigate(key);
                 continue;
             }
-            if (!view_.review || focused_ || supplement_task_) {
+            if (!reviewing() || focused_ || supplement_task_) {
                 auto& draft = focused_ ? decision_ : draft_;
                 if ((key == Key::text || key == Key::paste_space) && (!focused_ || draft.text.size() < 8)) {
                     if (!focused_ && !event.pasted) notice_ = {};
@@ -627,6 +641,17 @@ public:
     }
 
 private:
+    struct ReadingPosition {
+        std::shared_ptr<const Transcript> transcript;
+        std::size_t selected;
+        std::optional<std::size_t> expanded;
+        int offset;
+        bool follows;
+        bool align;
+        std::size_t review_ticket;
+        int review_offset;
+    };
+
     static std::size_t ticket(const WorkspaceView& view) { return view.review ? view.review->ticket : 0; }
     static std::size_t task_count(const WorkspaceView& view) { return view.transcript ? view.transcript->tasks : 0; }
     bool unknown() const { return view_.transcript && view_.transcript->actions.acknowledge_unknown; }
@@ -638,6 +663,73 @@ private:
     }
     bool can_narrow() const { return settings_.writable && view_.transcript && !view_.review; }
     std::string_view label(std::string_view zh, std::string_view en) const { return ascii_ ? en : zh; }
+    bool reviewing() const { return view_.review && (!history_ || show_decision_); }
+
+    void open_history() {
+        if (!return_to_) {
+            return_to_ = ReadingPosition{history_ ? history_ : view_.transcript, selected_, expanded_,
+                                         offset_, follows_, align_, ticket(view_), review_offset_};
+        }
+        history_ = view_.transcript;
+        follows_ = false;
+        show_decision_ = false;
+    }
+
+    void latest() {
+        history_.reset();
+        return_to_.reset();
+        show_decision_ = false;
+        files_panel_ = false;
+        follows_ = true;
+        expanded_.reset();
+        align_ = true;
+        if (view_.transcript && !view_.transcript->cards.empty()) selected_ = view_.transcript->cards.size() - 1;
+    }
+
+    void jump(Key key) {
+        reset_decision();
+        if (key == Key::current_review) {
+            if (view_.review) {
+                show_decision_ = history_ != nullptr;
+                review_offset_ = 0;
+            } else {
+                notice_ = label("当前没有待审批动作", "No pending decision");
+            }
+        } else if (key == Key::return_to_reading) {
+            if (show_decision_) {
+                show_decision_ = false;
+            } else if (return_to_) {
+                auto position = std::move(*return_to_);
+                return_to_.reset();
+                history_ = position.transcript == view_.transcript ? nullptr : std::move(position.transcript);
+                selected_ = position.selected;
+                expanded_ = position.expanded;
+                offset_ = position.offset;
+                follows_ = position.follows;
+                align_ = position.align;
+                files_panel_ = false;
+                if (ticket(view_) == position.review_ticket) review_offset_ = position.review_offset;
+            } else if (history_) {
+                latest();
+            }
+        } else if (view_.transcript) {
+            const auto& transcript = *view_.transcript;
+            const bool files = key == Key::task_files;
+            if (files ? !transcript.task_files : !transcript.latest_failed_check) {
+                notice_ = files ? label("暂无任务文件记录", "No task file evidence") :
+                                  label("暂无失败验证", "No failed verification");
+                return;
+            }
+            open_history();
+            files_panel_ = files;
+            offset_ = 0;
+            align_ = !files;
+            if (!files) {
+                selected_ = *transcript.latest_failed_check;
+                expanded_ = selected_;
+            }
+        }
+    }
 
     void toggle_supplement() {
         reset_decision();
@@ -697,20 +789,23 @@ private:
 
     std::string_view shortcuts() const {
         if (focused_) return label("Esc 返回审阅 · Ctrl+C 停止", "Esc returns to review / Ctrl+C stop");
-        if (view_.review) return label("Ctrl+C 停止 · Esc 退出", "Ctrl+C stop / Esc quit");
+        if (history_ && reviewing()) return label("F10 返回历史 · Ctrl+C 停止", "F10 returns to history / Ctrl+C stop");
+        if (history_) return label("F7 审批 · F8 失败 · F9 文件", "F7 Review / F8 Failure / F9 Files");
+        if (reviewing()) return label("Ctrl+C 停止 · F8 失败 · Esc 退出", "Ctrl+C stop / F8 failure / Esc quit");
         const bool details = view_.transcript && !view_.transcript->cards.empty();
         if (view_.busy) {
-            return details ? label("Ctrl+O 详情 · Ctrl+C 停止 · Esc 退出", "Ctrl+O details / Ctrl+C stop / Esc quit") :
+            return details ? label("F7 审批 · F8 失败 · F9 文件 · Ctrl+C 停止", "F7 Review / F8 Failure / F9 Files / Ctrl+C stop") :
                              label("Ctrl+C 停止 · Esc 退出", "Ctrl+C stop / Esc quit");
         }
-        return details ? label("Ctrl+O 详情 · Esc 退出", "Ctrl+O details / Esc quit") : label("Esc 退出", "Esc quit");
+        return details ? label("F7 审批 · F8 失败 · F9 文件 · Ctrl+O 详情", "F7 Review / F8 Failure / F9 Files / Ctrl+O details") :
+                         label("Esc 退出", "Esc quit");
     }
 
     std::string_view draft_label() const {
         if (view_.supplement_waiting) return label("补充等待保存 · 可以编辑下一条草稿", "Saving supplement / Next draft editable");
         if (supplement_task_) return label("正在编辑本任务的补充", "Editing a supplement for this task");
         if (!returned_supplements_.empty()) return label("F6 切换退回的草稿", "F6 cycles through returned drafts");
-        if (view_.review) {
+        if (reviewing()) {
             if (view_.transcript && !view_.transcript->saved_edit.empty()) return view_.transcript->saved_edit;
             return label("审核当前动作", "Review current action");
         }
@@ -727,7 +822,12 @@ private:
 
     std::string status() const {
         if (view_.stopping) return std::string(label("正在停止", "Stopping"));
-        if (view_.review) return std::string(label("待批准 · ", "Needs approval / ")) + view_.review->title;
+        if (reviewing()) return std::string(label("待批准 · ", "Needs approval / ")) + view_.review->title;
+        if (history_) {
+            if (view_.review) return std::string(label("正在查看历史 · F7 待审批", "History / F7 pending decision"));
+            if (history_ != view_.transcript) return std::string(label("正在查看历史 · 有新记录", "History / New records"));
+            return std::string(label("正在查看历史", "Viewing history"));
+        }
         if (view_.busy) {
             return std::string(view_.requesting ? label("正在等模型", "Waiting for model") : label("工作中", "Working"));
         }
@@ -759,11 +859,12 @@ private:
 
     std::string_view instruction() const {
         if (supplement_task_) return label("F2 提交补充 · F6 返回草稿", "F2 submits supplement / F6 returns to draft");
+        if (history_ && !reviewing()) return label("F10 返回 · End 最新 · Ctrl+O 详情", "F10 return / End live / Ctrl+O details");
         if (view_.can_supplement && !focused_) {
-            return view_.review ? label("Tab 输入决定 · F6 补充本任务", "Tab to decide / F6 supplement task") :
+            return reviewing() ? label("Tab 输入决定 · F6 补充本任务", "Tab to decide / F6 supplement task") :
                                   label("F6 补充本任务 · 可编辑下一条草稿", "F6 supplement task / Next draft editable");
         }
-        if (view_.review) return focused_ ? label("输入 y 或 yes 后回车批准。空回车拒绝。",
+        if (reviewing()) return focused_ ? label("输入 y 或 yes 后回车批准。空回车拒绝。",
                                                    "y or yes + Enter approves. Enter denies.") :
                                             label("Tab 输入决定，↑↓ 翻阅动作详情。", "Tab to decide. Up/Down to review.");
         if (view_.busy) return label("可编辑下一条草稿。", "You can edit the next draft.");
@@ -789,16 +890,38 @@ private:
     void launch(WorkspaceCommand command) {
         worker_.launch(std::move(command));
         notice_ = {};
-        follows_ = true;
+        latest();
         confirming_unknown_ = false;
-        expanded_.reset();
-        align_ = true;
     }
 
     void navigate(Key key) {
+        if (reviewing()) {
+            if (key == Key::first) review_offset_ = 0;
+            else if (key == Key::last) review_offset_ = 1024 * 1024;
+            else if (key == Key::up) --review_offset_;
+            else if (key == Key::down) ++review_offset_;
+            else review_offset_ += key == Key::previous_page ? -page_ : page_;
+            return;
+        }
+        if (history_ && key == Key::last) {
+            latest();
+            return;
+        }
+        if (!history_ && view_.busy && view_.transcript &&
+            (key == Key::up || key == Key::first || key == Key::previous_page)) {
+            open_history();
+        }
+        if (files_panel_) {
+            if (key == Key::first) offset_ = 0;
+            else if (key == Key::up) --offset_;
+            else if (key == Key::down) ++offset_;
+            else offset_ += key == Key::previous_page ? -page_ : page_;
+            return;
+        }
+        const auto& transcript = history_ ? history_ : view_.transcript;
         if (key == Key::first || key == Key::last || key == Key::up || key == Key::down) {
-            if (!view_.review && view_.transcript && !view_.transcript->cards.empty()) {
-                const auto last = view_.transcript->cards.size() - 1;
+            if (transcript && !transcript->cards.empty()) {
+                const auto last = transcript->cards.size() - 1;
                 if (key == Key::first) selected_ = 0;
                 else if (key == Key::last) selected_ = last;
                 else if (key == Key::down) selected_ = std::min(last, selected_ + 1);
@@ -813,7 +936,7 @@ private:
             else ++offset_;
         } else {
             offset_ += key == Key::previous_page ? -page_ : page_;
-            if (!view_.review) follows_ = false;
+            follows_ = false;
         }
     }
 
@@ -829,7 +952,12 @@ private:
     bool allow_edit_ = true;
     std::size_t selected_ = 0;
     std::optional<std::size_t> expanded_;
+    std::shared_ptr<const Transcript> history_;
+    std::optional<ReadingPosition> return_to_;
+    bool files_panel_ = false;
+    bool show_decision_ = false;
     int offset_ = 0;
+    int review_offset_ = 0;
     int page_ = 1;
     std::string_view notice_;
     Draft draft_;
@@ -918,6 +1046,10 @@ int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
                     timer.record("tui-page", 0); break;
                 case Key::details:
                     timer.record("tui-expand", 0); break;
+                case Key::current_review: case Key::failed_check: case Key::task_files:
+                    timer.record("tui-jump", 0); break;
+                case Key::return_to_reading:
+                    timer.record("tui-return", 0); break;
                 default: break;
             }
         }

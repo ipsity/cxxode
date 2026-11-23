@@ -27,6 +27,8 @@ struct Transcript {
     std::string saved_edit{};
     bool supplement_pending = false;
     bool supplement_saved = false;
+    std::optional<std::size_t> latest_failed_check{};
+    std::optional<Card> task_files{};
 };
 
 struct Review {
