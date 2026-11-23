@@ -371,6 +371,13 @@ Session continue_session(Session session, const Generate& generate, const Execut
     return session;
 }
 
+std::string edit_review_details(const EditEvidence& evidence) {
+    std::string detail = "before " + evidence.before + "\nafter SHA-256 " + evidence.after_digest;
+    if (evidence.approved) detail += *evidence.approved ? "\napproval granted" : "\napproval denied";
+    if (!evidence.review_diff.empty()) detail += "\n" + evidence.review_diff;
+    return detail;
+}
+
 std::size_t edit_revision(const Session& session) {
     std::size_t revision = 0;
     for (const auto& round : session.rounds) {

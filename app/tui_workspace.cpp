@@ -34,7 +34,8 @@ void captured(std::string& detail, std::string_view name, const CapturedOutput& 
     detail += output.tail;
 }
 
-Transcript project(const Session& snapshot, bool ascii, const std::vector<std::vector<std::string>>& source_notes) {
+Transcript project(const Session& snapshot, bool ascii, const std::vector<std::vector<std::string>>& source_notes,
+                   std::span<const std::string> edits) {
     Transcript output{{}, snapshot.tasks.size(), task_closed(snapshot), snapshot.stop,
                       safe_text(snapshot.diagnostic, ascii)};
     const auto current_revision = edit_revision(snapshot);
@@ -57,6 +58,9 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
             auto title = tool.call.name + "  " + short_line(target) + "  [" + std::string(tool_state(tool)) + "]";
             std::string detail = "task " + std::to_string(task) + " · round " + std::to_string(round + 1) +
                 " · call " + tool.call.id;
+            if (tool.edit) {
+                detail += "\n" + edit_review_details(*tool.edit);
+            }
             if (tool.run) {
                 detail += "\nexecutable " + quoted_argument(tool.run->program) +
                     "\nworking directory " + quoted_argument(tool.run->directory);
@@ -96,6 +100,7 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
         }
     }
     tasks_at(snapshot.rounds.size());
+    for (const auto& note : edits) add(short_line(note), note);
     return output;
 }
 
@@ -180,14 +185,15 @@ void WorkspaceWorker::decide(std::size_t ticket, bool approved) {
 }
 
 void WorkspaceWorker::publish(const Session& snapshot, std::string_view point,
-                              const std::function<std::vector<std::string>(std::size_t)>& citations) {
+                              const std::function<std::vector<std::string>(std::size_t)>& citations,
+                              std::span<const std::string> edits) {
     if (citations) {
         std::vector<std::vector<std::string>> notes;
         for (std::size_t i = 0; i < snapshot.rounds.size(); ++i) notes.push_back(citations(i));
         source_notes_ = std::move(notes);
     }
     // A request changes the preview and counters only. Keep the committed cards.
-    auto transcript = point == "request" ? nullptr : std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_));
+    auto transcript = point == "request" ? nullptr : std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_, edits));
     const std::lock_guard lock(mutex_);
     view_.preview.clear();
     view_.requesting = point == "request";
@@ -210,8 +216,8 @@ std::optional<bool> WorkspaceWorker::review(std::size_t task, const ToolCall& ca
 void WorkspaceWorker::execute(const WorkspaceCommand& command) {
     const WorkspacePort port{
         [&] { return cancelled_.load(std::memory_order_relaxed); },
-        [&](const Session& session, std::string_view point, const auto& citations) {
-            try { publish(session, point, citations); } catch (...) {}
+        [&](const Session& session, std::string_view point, const auto& citations, std::span<const std::string> edits) {
+            try { publish(session, point, citations, edits); } catch (...) {}
         },
         [&](std::string_view text) {
             auto scope = safe_text(text, ascii_);

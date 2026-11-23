@@ -37,8 +37,12 @@ struct EditEvidence {
     std::string after_digest;
     std::string temporary;
     std::string backup;
+    std::string review_diff{};
+    std::optional<bool> approved{};
     bool operator==(const EditEvidence&) const = default;
 };
+
+std::string edit_review_details(const EditEvidence& evidence);
 
 struct ToolRecord {
     ToolCall call;

@@ -136,14 +136,55 @@ EditPreparation reject(std::string message) {
 
 } // namespace
 
+std::vector<std::string> edit_progress(const Session& session, std::span<const std::string> paths) {
+    std::vector<std::string> progress;
+    const auto first = session.tasks.empty() ? 0 : session.tasks.back().first_round;
+    for (const auto& path : paths) {
+        const ToolRecord* latest = nullptr;
+        const ToolRecord* last_effect = nullptr;
+        for (const auto& round : std::span(session.rounds).subspan(first)) {
+            for (const auto& tool : round.tools) {
+                if (tool.call.name != "edit" || !platform::path_equal(path, text_arg(tool.call, "path"))) continue;
+                latest = &tool;
+                if (tool.dispatched && (tool.result.status == ToolStatus::ok ||
+                    tool.result.status == ToolStatus::unknown || tool.result.status == ToolStatus::pending)) {
+                    last_effect = &tool;
+                }
+            }
+        }
+        std::string note = "[edit progress] " + path;
+        if (last_effect && last_effect->result.status == ToolStatus::unknown) {
+            note += " [effect unknown]";
+            note += "\n" + last_effect->result.text;
+        } else if (last_effect && last_effect->result.status == ToolStatus::pending) {
+            note += " [in progress]";
+        } else if (last_effect) {
+            note += " [applied]";
+        } else if (latest && latest->dispatched) {
+            note += " [failed]";
+        } else {
+            note += " [not started]";
+        }
+        if (latest && latest != last_effect && !latest->result.text.empty()) {
+            note += "\n" + latest->result.text;
+        }
+        progress.push_back(std::move(note));
+    }
+    return progress;
+}
+
 EditWorkspace::EditWorkspace(const ReadOnlyWorkspace& workspace, std::string writable_path)
     : workspace_(workspace), path_(std::move(writable_path)) {
     if (path_ == "." || !workspace_.allowed(path_)) {
-        throw std::invalid_argument("Choose one writable workspace-relative file with --write.");
+        throw std::invalid_argument("Each --write must name a writable workspace-relative file.");
     }
     const auto separator = path_.find_last_of('/');
     dirname_ = separator == path_.npos ? "." : path_.substr(0, separator);
     filename_ = path_.substr(separator == path_.npos ? 0 : separator + 1);
+}
+
+bool EditWorkspace::allows(std::string_view path) const {
+    return platform::path_equal(path, path_);
 }
 
 platform::Node EditWorkspace::parent() const {
@@ -175,7 +216,7 @@ EditPreparation EditWorkspace::prepare(const ToolCall& call, const Session& sess
     const auto version = text_arg(call, "version");
     const auto old_text = text_arg(call, "old_text");
     const auto new_text = text_arg(call, "new_text");
-    if (!platform::path_equal(path, path_)) {
+    if (!allows(path)) {
         return reject("edit path is outside the allowed file");
     }
     if (!plain_text(old_text) || !plain_text(new_text) || old_text.find('\r') != old_text.npos ||
@@ -221,7 +262,7 @@ EditPreparation EditWorkspace::prepare(const ToolCall& call, const Session& sess
         if (!create && normalized->text.find(old_text, position + 1) != std::string::npos) {
             return reject("old_text is ambiguous");
         }
-        const auto preview = diff(path_, normalized->text, position, old_text, new_text, create);
+        auto preview = diff(path_, normalized->text, position, old_text, new_text, create);
         if (preview.empty()) {
             return reject("the edit preview exceeds 16384 bytes of affected lines");
         }
@@ -236,7 +277,7 @@ EditPreparation EditWorkspace::prepare(const ToolCall& call, const Session& sess
         const auto stem = ".lay-code-" + platform::random_suffix();
         EditEvidence evidence{path_, directory.identity(), std::string(version),
                               create ? "" : platform::sha256(raw), platform::sha256(bytes),
-                              stem + ".tmp", {}};
+                              stem + ".tmp", {}, std::move(preview)};
 #ifdef _WIN32
         if (!create) {
             evidence.backup = stem + ".bak";
@@ -245,7 +286,8 @@ EditPreparation EditWorkspace::prepare(const ToolCall& call, const Session& sess
         if (denied_before(session, evidence)) {
             return {std::move(evidence), std::string(denied), {}};
         }
-        const auto approval = review(evidence, preview);
+        const auto approval = review(evidence, evidence.review_diff);
+        if (approval != Approval::unavailable) evidence.approved = approval == Approval::approved;
         if (approval == Approval::unavailable || stop()) {
             return {std::move(evidence), "interactive approval required", {}, true};
         }

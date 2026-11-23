@@ -195,8 +195,12 @@ private:
 };
 
 std::string scope_record(const SessionScope& scope) {
+    // Keep the existing scope encoding for read-only and single-file sessions.
+    Json write = "";
+    if (scope.writable_paths.size() == 1) write = scope.writable_paths.front();
+    if (scope.writable_paths.size() > 1) write = scope.writable_paths;
     Json result{{"root", utf8(fs::canonical(scope.root))}, {"identity", scope.root_identity},
-                {"provider", scope.provider}, {"model", scope.model}, {"write", scope.writable_path},
+                {"provider", scope.provider}, {"model", scope.model}, {"write", std::move(write)},
                 {"excluded", scope.excluded}};
     if (scope.allow_run) {
         result["allow_run"] = true;
@@ -205,14 +209,20 @@ std::string scope_record(const SessionScope& scope) {
 }
 
 Json encode_edit(const EditEvidence& edit) {
-    return {{"path", edit.path}, {"parent", edit.parent}, {"before", edit.before},
+    Json value{{"path", edit.path}, {"parent", edit.parent}, {"before", edit.before},
             {"before_digest", edit.before_digest}, {"after_digest", edit.after_digest},
             {"temporary", edit.temporary}, {"backup", edit.backup}};
+    if (!edit.review_diff.empty()) value["diff"] = edit.review_diff;
+    if (edit.approved) value["approved"] = *edit.approved;
+    return value;
 }
 
 EditEvidence decode_edit(const Json& value) {
-    return {value.at("path"), value.at("parent"), value.at("before"), value.at("before_digest"),
-            value.at("after_digest"), value.at("temporary"), value.at("backup")};
+    EditEvidence edit{value.at("path"), value.at("parent"), value.at("before"), value.at("before_digest"),
+                      value.at("after_digest"), value.at("temporary"), value.at("backup"),
+                      value.value("diff", std::string{})};
+    if (value.contains("approved")) edit.approved = value.at("approved").get<bool>();
+    return edit;
 }
 
 Json encode_run(const RunEvidence& run) {

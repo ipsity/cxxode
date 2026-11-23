@@ -54,7 +54,8 @@ public:
 
 private:
     void publish(const Session& snapshot, std::string_view point,
-                 const std::function<std::vector<std::string>(std::size_t)>& citations);
+                 const std::function<std::vector<std::string>(std::size_t)>& citations,
+                 std::span<const std::string> edits);
     std::optional<bool> review(std::size_t task, const ToolCall& call, std::string title, std::string detail);
     void execute(const WorkspaceCommand& command);
 

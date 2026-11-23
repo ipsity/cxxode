@@ -12,7 +12,7 @@ struct SessionScope {
     std::string root_identity;
     std::string provider;
     std::string model;
-    std::string writable_path;
+    std::vector<std::string> writable_paths;
     std::vector<std::string> excluded;
     bool allow_run = false;
 };

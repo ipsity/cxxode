@@ -101,6 +101,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/editing.py
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
         set_tests_properties(editing.recovery PROPERTIES TIMEOUT 90)
+        add_test(NAME editing.two_files COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/two_file_editing.py
+            $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
+        set_tests_properties(editing.two_files PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
         add_executable(process_contract tests/contract/process_contract.cpp)
         target_link_libraries(process_contract PRIVATE lay_workspace nlohmann_json::nlohmann_json)
         if(MINGW)

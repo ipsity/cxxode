@@ -77,7 +77,13 @@ Windows 用户可在终端运行 `--set-provider-key`，隐藏录入的密钥会
 
 ## P2 单文件编辑与恢复
 
-`--session ID --write FILE` 启用一个持久会话，并将写入范围限定为一条工作区相对文件路径。每次编辑先展示差异、已读取的版本和预期结果的摘要。输入 `y` 批准当前差异。非交互输入会在等待批准时暂停，可在终端重新打开同一会话。
+`--session ID` 启用持久会话。用一次或两次 `--write FILE` 可以授权最多两个精确的工作区相对文件路径。每次编辑先展示该文件的差异、已读取的版本和预期结果摘要。输入 `y` 批准当前差异。非交互输入会在等待批准时暂停，可在终端重新打开同一会话。
+
+```powershell
+lay-code.exe --tui --workspace . --session pager --write src/pager.py --write tests/test_paging.py --allow-run
+```
+
+双文件会话中，每份差异、批准决定和提交结果分别保存。第二份修改被拒绝或遇到版本冲突时，第一份已提交的修改保留。重开时传入相同的两条路径，顺序可以互换。CLI 和 TUI 都展示当前任务的逐文件进度。展开 TUI 中对应的编辑记录可回看原差异和批准决定。
 
 以下离线演示在临时目录将 `empty_config = reject` 改为 `empty_config = allow`。启动后输入 `fix fixture`，核对差异再批准。
 

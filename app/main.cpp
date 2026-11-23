@@ -63,7 +63,7 @@ struct Options {
     std::string provider_config;
     std::vector<std::string> excluded;
     std::string id;
-    std::string writable;
+    std::vector<std::string> writable;
     std::optional<std::string> question;
     std::optional<std::string> follow_up;
     bool resume = false;
@@ -84,7 +84,8 @@ void usage(std::ostream& stream) {
            << "       lay-code --workspace PATH [--provider NAME] [--model MODEL] [--exclude RELATIVE_PATH ...]\n"
            << "       lay-code --list-models [--provider NAME] [--provider-config PATH]\n"
            << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
-           << "       Use --session ID to keep a workspace session. Enable --write FILE or --allow-run as needed.\n"
+           << "       Use --session ID to keep a workspace session. Use up to two --write FILE options.\n"
+           << "       Use --allow-run to propose commands for approval.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
            << "       Use --follow-up TEXT [--no-write] to append to a closed session task.\n"
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
@@ -155,8 +156,8 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
             result.excluded.push_back(value);
         } else if (option == "--session" && result.id.empty()) {
             result.id = value;
-        } else if (option == "--write" && result.writable.empty()) {
-            result.writable = value;
+        } else if (option == "--write" && result.writable.size() < 2) {
+            result.writable.push_back(value);
         } else if (option == "--question" && !result.question) {
             result.question = value;
         } else if (option == "--follow-up" && !result.follow_up) {
@@ -185,6 +186,10 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
         throw std::invalid_argument("Use --session ID for persistent tasks. Choose one of --question, --resume or --follow-up.");
     }
+    if (result.writable.size() == 2 && (result.model == "fixture-edit" || result.model == "fixture-verify")) {
+        throw std::invalid_argument("The built-in editing fixtures take one --write path.");
+    }
+    std::ranges::sort(result.writable);
     return result;
 }
 
@@ -379,7 +384,8 @@ void show_verification(const lay::RunEvidence& run, const lay::Verification& ver
 
 #endif
 
-int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_workspace = nullptr) {
+int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_workspace = nullptr,
+           bool show_edit_history = false) {
     const bool workspace = source_workspace != nullptr;
 #ifdef LAY_WITH_ANTHROPIC
     const auto revision = lay::edit_revision(session);
@@ -403,10 +409,17 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
                 continue;
             }
 #endif
-            if (record.call.name == "edit" && record.result.status != lay::ToolStatus::pending) {
-                std::cout << "[edit] ";
-                terminal_text(record.result.text);
-                std::cout << '\n';
+            if (record.call.name == "edit") {
+                if (record.result.status != lay::ToolStatus::pending) {
+                    std::cout << "[edit] ";
+                    terminal_text(record.result.text);
+                    std::cout << '\n';
+                }
+                if (show_edit_history && record.edit) {
+                    std::cout << "[edit evidence] ";
+                    terminal_text(record.edit->path + "\n" + lay::edit_review_details(*record.edit));
+                    std::cout << '\n';
+                }
                 continue;
             }
             if (record.dispatched) {
@@ -715,14 +728,30 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     }
     const auto root = lay::platform::path_from_utf8(settings.workspace);
     const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing, persistent);
+    std::vector<lay::EditWorkspace> editors;
+    editors.reserve(settings.writable.size());
+    for (const auto& path : settings.writable) {
+        if (std::ranges::any_of(editors, [&](const auto& editor) { return editor.allows(path); })) {
+            throw std::invalid_argument("Each --write path must be distinct.");
+        }
+        editors.emplace_back(workspace, path);
+    }
+    const auto editor_for = [&](std::string_view path) -> const lay::EditWorkspace* {
+        const auto editor = std::ranges::find_if(editors, [&](const auto& item) { return item.allows(path); });
+        return editor == editors.end() ? nullptr : &*editor;
+    };
+    const auto progress = [&](const lay::Session& snapshot) {
+        return editors.size() == 2 ? lay::edit_progress(snapshot, settings.writable) : std::vector<std::string>{};
+    };
     const auto publish = [&](const lay::Session& snapshot, std::string_view point) {
         if (!port) return;
+        const auto edits = point == "request" ? std::vector<std::string>{} : progress(snapshot);
         if (point == "loaded" || point == "finished") {
             port->checkpoint(snapshot, point, [&](std::size_t round) {
                 return lay::source_evidence(snapshot, round, workspace);
-            });
+            }, edits);
         } else {
-            port->checkpoint(snapshot, point, {});
+            port->checkpoint(snapshot, point, {}, edits);
         }
     };
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
@@ -748,7 +777,11 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             publish(session, "finished");
             return 0;
         }
-        return render(session, &workspace);
+        for (const auto& note : progress(session)) {
+            terminal_text(note);
+            std::cout << '\n';
+        }
+        return render(session, &workspace, editors.size() == 2);
     };
     if (port) {
         port->scope(fixture ? std::string(label("本地离线夹具", "Local fixture")) :
@@ -790,10 +823,6 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         return finish(lay::run_session(std::move(question), model, read, cancel, {}, authorize));
     }
 
-    std::optional<lay::EditWorkspace> editor;
-    if (editing) {
-        editor.emplace(workspace, settings.writable);
-    }
     const lay::RunWorkspace runner(workspace);
     const lay::SessionScope scope{root, workspace.root_identity(), fixture ? "local" : lay::provider_scope(selected),
                                   selected.model, settings.writable, settings.excluded, settings.allow_run};
@@ -880,8 +909,13 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         store.save(snapshot, point);
         publish(snapshot, point);
     };
-    if (editor) {
-        journal.prepare_edit = [&](const auto& call, const auto& snapshot) {
+    if (!editors.empty()) {
+        journal.prepare_edit = [&](const auto& call, const auto& snapshot) -> lay::EditPreparation {
+            const auto* editor = editor_for(lay::text_arg(call, "path"));
+            if (!editor) {
+                return {{}, editors.size() == 1 ? "edit path is outside the allowed file" :
+                    "edit path is outside the allowed files", {}};
+            }
             if (!port) return editor->prepare(call, snapshot, approve_edit, cancel);
             return editor->prepare(call, snapshot, [&](const lay::EditEvidence& evidence, std::string_view diff) {
                 auto details = std::string(label("文件版本 ", "File version ")) + evidence.before +
@@ -890,8 +924,13 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
                 return review_ui(call, snapshot, std::string(label("编辑 ", "Edit ")) + evidence.path, std::move(details));
             }, cancel);
         };
-        journal.recover_edit = [&](const auto& evidence) { return editor->recover(evidence); };
-        journal.cleanup_edit = [&](const auto& evidence) { editor->cleanup(evidence); };
+        journal.recover_edit = [&](const auto& evidence) -> lay::ToolResult {
+            if (const auto* editor = editor_for(evidence.path)) return editor->recover(evidence);
+            return {lay::ToolStatus::unknown, "effect unknown for " + evidence.path + ". Edit path is outside the saved scope."};
+        };
+        journal.cleanup_edit = [&](const auto& evidence) {
+            if (const auto* editor = editor_for(evidence.path)) editor->cleanup(evidence);
+        };
     }
     if (settings.allow_run) {
         journal.prepare_run = [&](const auto& call, const auto& snapshot) {
@@ -918,9 +957,9 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     }
     lay::Generate model;
     if (settings.model == "fixture-verify") {
-        model = fixture_verify_model(settings.writable);
+        model = fixture_verify_model(settings.writable.front());
     } else if (fixture) {
-        model = fixture_edit_model(settings.writable);
+        model = fixture_edit_model(settings.writable.front());
     } else {
         // Inspection and recovery of committed evidence must work without model credentials.
         model = [&, generate = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {

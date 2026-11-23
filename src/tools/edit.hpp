@@ -7,10 +7,13 @@ namespace lay {
 enum class Approval { approved, denied, unavailable };
 using ReviewEdit = std::function<Approval(const EditEvidence&, std::string_view)>;
 
+std::vector<std::string> edit_progress(const Session& session, std::span<const std::string> paths);
+
 class EditWorkspace {
 public:
     EditWorkspace(const ReadOnlyWorkspace& workspace, std::string writable_path);
 
+    bool allows(std::string_view path) const;
     EditPreparation prepare(const ToolCall& call, const Session& session,
                             const ReviewEdit& review, const StopRequested& stop) const;
     ToolResult recover(const EditEvidence& evidence) const;
