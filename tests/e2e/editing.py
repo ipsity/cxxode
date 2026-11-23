@@ -282,11 +282,11 @@ def cases(base, cli, driver):
     future = new("future")
     future.command(data=b"fix fixture\nn\n")
     with closing(sqlite3.connect(future.db)) as db:
-        db.execute("PRAGMA user_version=5")
+        db.execute("PRAGMA user_version=6")
         db.commit()
     assert "unsupported session database format" in future.command(2, resume=True, data=b"")
     with closing(sqlite3.connect(future.db)) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
 
     migration = new("migration")
     process = migration.paused("after_edit_dispatch")

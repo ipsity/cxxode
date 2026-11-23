@@ -13,10 +13,16 @@ int run(std::span<const std::string> arguments);
 
 enum class WorkspaceAction { prepare, inspect, start, follow_up, resume, close_task, close_unknown };
 
+struct DecisionSelection {
+    std::size_t earlier;
+    std::optional<std::size_t> current{};
+};
+
 struct WorkspaceCommand {
     WorkspaceAction action;
     std::string question{};
     bool allow_edit = true;
+    std::optional<DecisionSelection> decision{};
 };
 
 struct CheckpointView {

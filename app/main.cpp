@@ -4,6 +4,7 @@
 
 #ifdef LAY_WITH_ANTHROPIC
 #include "model/provider.hpp"
+#include "platform/crypto.hpp"
 #include "store/session_store.hpp"
 #include "tools/citations.hpp"
 #include "tools/edit.hpp"
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <condition_variable>
@@ -72,6 +74,8 @@ struct Options {
     std::vector<std::string> writable;
     std::optional<std::string> question;
     std::optional<std::string> follow_up;
+    std::optional<std::size_t> quote_task;
+    std::optional<std::size_t> current_decision_task;
 #ifdef LAY_TEST_HOOKS
     std::optional<std::string> test_supplement;
 #endif
@@ -96,6 +100,7 @@ void usage(std::ostream& stream) {
            << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
            << "       Use --session ID to keep a workspace session. Use up to " << max_writable_paths
            << " --write FILE options.\n"
+           << "       With --follow-up, use --quote-task ID [--current-decision-task ID] to reference saved user input.\n"
            << "       Use --allow-run to propose commands for approval.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
            << "       Use --resume --inspect to view saved results without contacting the model.\n"
@@ -104,6 +109,15 @@ void usage(std::ostream& stream) {
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
            << "       Add --close-task to record that acknowledgement without another model request.\n"
            << "       lay-code --migrate-session ID\n";
+}
+
+std::size_t task_id(std::string_view value) {
+    std::size_t id = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), id);
+    if (error != std::errc{} || end != value.data() + value.size() || id == 0) {
+        throw std::invalid_argument("Decision references require positive task IDs.");
+    }
+    return id;
 }
 
 Options options(std::span<const std::string> arguments, bool tui = false) {
@@ -179,6 +193,10 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
             result.question = value;
         } else if (option == "--follow-up" && !result.follow_up) {
             result.follow_up = value;
+        } else if (option == "--quote-task" && !result.quote_task) {
+            result.quote_task = task_id(value);
+        } else if (option == "--current-decision-task" && !result.current_decision_task) {
+            result.current_decision_task = task_id(value);
 #ifdef LAY_TEST_HOOKS
         } else if (option == "--test-supplement" && !result.test_supplement) {
             result.test_supplement = value;
@@ -193,6 +211,12 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         throw std::invalid_argument("The supplement fixture requires the line CLI with --resume.");
     }
 #endif
+    if ((result.quote_task || result.current_decision_task) && !result.follow_up) {
+        throw std::invalid_argument("Decision references require --follow-up.");
+    }
+    if (result.current_decision_task && (!result.quote_task || *result.current_decision_task <= *result.quote_task)) {
+        throw std::invalid_argument("The current decision must name a newer task than --quote-task.");
+    }
     if (result.list_models || result.set_provider_key) {
         if ((result.list_models && result.set_provider_key) || !result.workspace.empty() || !result.model.empty() ||
             !result.excluded.empty() || !result.id.empty() || !result.writable.empty() || result.question ||
@@ -428,6 +452,10 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
             std::cout << "[task " << task + 1 << "] ";
             terminal_text(session.tasks[task].question);
             std::cout << '\n';
+            if (const auto& reference = session.tasks[task].decision_reference) {
+                terminal_text(lay::decision_reference_receipt(*reference));
+                std::cout << '\n';
+            }
             ++task;
         }
     };
@@ -927,7 +955,27 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     }
 #endif
     if (settings.follow_up) {
+        std::optional<lay::DecisionReference> reference;
+        if (settings.quote_task) {
+            const auto source = [&](std::size_t id) {
+                if (id == 0 || id > session.tasks.size()) {
+                    throw std::invalid_argument("Decision references must name saved tasks in this session.");
+                }
+                return lay::DecisionSource{id, lay::platform::sha256(session.tasks[id - 1].question)};
+            };
+            reference.emplace(lay::DecisionReference{source(*settings.quote_task)});
+            if (settings.current_decision_task) {
+                reference->current = source(*settings.current_decision_task);
+            } else {
+                const auto known = std::find_if(session.tasks.rbegin(), session.tasks.rend(), [&](const auto& task) {
+                    return task.decision_reference && task.decision_reference->earlier.task == *settings.quote_task &&
+                        task.decision_reference->current;
+                });
+                if (known != session.tasks.rend()) reference->current = known->decision_reference->current;
+            }
+        }
         lay::append_task(session, question_input(*settings.follow_up), !settings.no_write);
+        session.tasks.back().decision_reference = std::move(reference);
         store.save(session, "follow_up");
         show_scope();
     }
@@ -1153,6 +1201,10 @@ int workspace_tui(std::span<const std::string> arguments) {
             next.resume = false;
             next.follow_up = command.question;
             next.no_write = !command.allow_edit;
+            if (command.decision) {
+                next.quote_task = command.decision->earlier;
+                next.current_decision_task = command.decision->current;
+            }
         } else if (command.action == lay::tui::WorkspaceAction::close_task ||
                    command.action == lay::tui::WorkspaceAction::close_unknown) {
             next.accept_unknown = command.action == lay::tui::WorkspaceAction::close_unknown;
@@ -1221,7 +1273,7 @@ int run(std::span<const std::string> arguments) {
         if (arguments.size() == 2 && arguments[0] == "--migrate-session") {
             const auto backup = lay::SessionStore::migrate(arguments[1]);
             if (backup.empty()) {
-                std::cout << "Session format " << lay::SessionStore::format_version << " is already current.\n";
+                std::cout << "Session format is already current.\n";
             } else {
                 std::cout << "Migrated session to format " << lay::SessionStore::format_version << ". Backup ";
                 terminal_text(backup);

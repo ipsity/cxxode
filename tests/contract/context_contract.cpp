@@ -140,6 +140,37 @@ int main() {
                 }) == 1, "The historical supplement occurs once before the next task");
     }
 
+    auto decisions = many_tasks;
+    const std::string current_decision = "I withdraw the old decision after the importer upgrade.";
+    decisions.insert(decisions.begin() + 1, Task{current_decision, 3, 3, 2, false, SessionStop::end_turn});
+    decisions.back().decision_reference = DecisionReference{{1, "version-before"}, DecisionSource{2, "version-after"}};
+    const Request selected{follow_up, repeated_reads, 24, false, false, decisions};
+    const std::string_view reference_header = "[Host selected decision references]\n";
+    limits.body_bytes = 6144;
+    for (const auto& provider : {Provider{}, chat_provider, responses}) {
+        const auto projected = messages::project(selected, provider, limits);
+        require(!projected.body.empty() && projected.body == messages::project(selected, provider, limits).body &&
+                projected.layout.first_round > 3 && projected.layout.template_version == 6 &&
+                projected.body.find("user denied this action") != projected.body.npos,
+                "Compaction is deterministic and retains prior refusal alongside selected user sources");
+        const auto body = nlohmann::json::parse(projected.body);
+        const auto& turns = body.at(provider.protocol == Protocol::responses ? "input" : "messages");
+        const auto item = std::ranges::find_if(turns, [&](const auto& row) {
+            return row.contains("role") && row.at("role") == "user" && row.at("content").is_string() &&
+                row.at("content").template get_ref<const std::string&>().starts_with(reference_header);
+        });
+        require(item != turns.end() && body.at("tools").size() == 2, "Reference travels with the read-only question");
+        const auto reference = nlohmann::json::parse(item->at("content").get<std::string>().substr(reference_header.size()));
+        require(reference.at("earlier").at("task") == 1 && reference.at("earlier").at("text") == question &&
+                reference.at("current").at("task") == 2 && reference.at("current").at("text") == current_decision &&
+                reference.at("current").at("version") == "version-after",
+                "Earlier and current sources retain precise provenance and original user text");
+    }
+    limits.body_bytes = 512;
+    const auto reference_overflow = messages::project(selected, responses, limits);
+    require(reference_overflow.body.empty() && reference_overflow.diagnostic.find("Selected decision references use") !=
+                reference_overflow.diagnostic.npos, "Oversized selected text gives an actionable budget diagnostic");
+
     messages::Stream anthropic;
     require(anthropic.push(
         R"(data: {"type":"message_start","message":{"role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":100,"cache_read_input_tokens":900,"cache_creation_input_tokens":50,"output_tokens":1}}})"

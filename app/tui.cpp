@@ -18,7 +18,7 @@ namespace {
 enum class Key {
     text, enter, escape, tab, stop, details, submit, up, down, left, right, first, last,
     previous_page, next_page, backspace, erase, paste, paste_space, acknowledge, edit_scope, resume, supplement,
-    current_review, failed_check, task_files, return_to_reading
+    current_review, failed_check, task_files, return_to_reading, quote_task, current_decision
 };
 
 struct Event {
@@ -109,6 +109,7 @@ private:
                 {"[17~", Key::supplement},
                 {"[18~", Key::current_review}, {"[19~", Key::failed_check},
                 {"[20~", Key::task_files}, {"[21~", Key::return_to_reading},
+                {"[23~", Key::quote_task}, {"[24~", Key::current_decision},
             };
             if (const auto match = std::ranges::find(keys, sequence, [](const auto& item) { return item.first; });
                 match != std::end(keys)) {
@@ -421,8 +422,10 @@ public:
             if (!next.error.empty() && draft_.text.empty() && task_count(next) == submitted_after_) {
                 draft_ = std::move(submitted_);
                 allow_edit_ = submitted_allow_edit_;
+                draft_decision_ = submitted_decision_;
             }
             submitted_ = {};
+            submitted_decision_.reset();
         }
         if (supplement_submitted_task_ && !next.supplement_waiting) {
             if (task_count(next) != *supplement_submitted_task_ || !next.transcript->supplement_saved) {
@@ -512,7 +515,17 @@ public:
         line(rule);
         line(shortcuts());
         line(instruction());
-        line(notice_.empty() ? draft_label() : notice_);
+        if (notice_.empty() && draft_decision_ && !in_review && !supplement_task_) {
+            auto selected = std::string(label("引用任务 ", "Quote task ")) + std::to_string(draft_decision_->earlier);
+            if (draft_decision_->current) {
+                selected += label(" · 现行任务 ", " / Current task ");
+                selected += std::to_string(*draft_decision_->current);
+            }
+            if (!allow_edit_) selected += label(" · 禁止写入", " / Edits off");
+            line(selected);
+        } else {
+            line(notice_.empty() ? draft_label() : notice_);
+        }
         if (!in_review || focused_ || supplement_task_) {
             auto [visible, column] = (focused_ ? decision_ : draft_).view(width - 2, ascii_);
             line("> " + visible, focused_ ? "\x1b[7m" : "");
@@ -563,6 +576,10 @@ public:
             if (!combined && (key == Key::current_review || key == Key::failed_check ||
                               key == Key::task_files || key == Key::return_to_reading)) {
                 jump(key);
+                return true;
+            }
+            if (!combined && (key == Key::quote_task || key == Key::current_decision)) {
+                select_decision(key == Key::current_decision);
                 return true;
             }
             if (new_review || view_.stopping) continue;
@@ -664,6 +681,32 @@ private:
     bool can_narrow() const { return settings_.writable && view_.transcript && !view_.review; }
     std::string_view label(std::string_view zh, std::string_view en) const { return ascii_ ? en : zh; }
     bool reviewing() const { return view_.review && (!history_ || show_decision_); }
+
+    std::optional<std::size_t> selected_user_task() const {
+        if (view_.busy || view_.review || focused_ || supplement_task_ || files_panel_ ||
+            !view_.transcript || !view_.transcript->actions.follow_up) return {};
+        const auto& transcript = history_ ? history_ : view_.transcript;
+        return selected_ < transcript->cards.size() ? transcript->cards[selected_].user_task : std::nullopt;
+    }
+
+    void select_decision(bool current) {
+        const auto task = selected_user_task();
+        if (!task) {
+            notice_ = label("请先选中一条已保存的用户原文。", "Select saved user input first.");
+        } else if (current && (!draft_decision_ || *task <= draft_decision_->earlier)) {
+            notice_ = label("先用 F11 引用，再选较新的任务并按 F12。", "Quote with F11, then select a newer task and press F12.");
+        } else if (current) {
+            if (draft_decision_->current == task) draft_decision_->current.reset();
+            else draft_decision_->current = task;
+            notice_ = {};
+        } else if (draft_decision_ && draft_decision_->earlier == *task) {
+            draft_decision_.reset();
+            notice_ = label("已移除草稿引用。", "Draft reference cleared.");
+        } else {
+            draft_decision_ = DecisionSelection{*task};
+            notice_ = {};
+        }
+    }
 
     void open_history() {
         if (!return_to_) {
@@ -782,13 +825,15 @@ private:
             submitted_ = std::exchange(draft_, Draft{});
             submitted_after_ = task_count(view_);
             submitted_allow_edit_ = allow_edit_;
-            launch({action, submitted_.text, allow_edit_});
+            submitted_decision_ = std::exchange(draft_decision_, std::nullopt);
+            launch({action, submitted_.text, allow_edit_, submitted_decision_});
             allow_edit_ = true;
         }
     }
 
     std::string_view shortcuts() const {
         if (focused_) return label("Esc 返回审阅 · Ctrl+C 停止", "Esc returns to review / Ctrl+C stop");
+        if (selected_user_task()) return label("F11 引用原文 · F12 标记现行决定", "F11 quote / F12 mark current decision");
         if (history_ && reviewing()) return label("F10 返回历史 · Ctrl+C 停止", "F10 returns to history / Ctrl+C stop");
         if (history_) return label("F7 审批 · F8 失败 · F9 文件", "F7 Review / F8 Failure / F9 Files");
         if (reviewing()) return label("Ctrl+C 停止 · F8 失败 · Esc 退出", "Ctrl+C stop / F8 failure / Esc quit");
@@ -963,6 +1008,8 @@ private:
     Draft draft_;
     Draft decision_;
     Draft submitted_;
+    std::optional<DecisionSelection> draft_decision_;
+    std::optional<DecisionSelection> submitted_decision_;
     Draft submitted_supplement_;
     std::deque<Draft> returned_supplements_;
     std::optional<std::size_t> supplement_task_;
@@ -1047,6 +1094,7 @@ int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
                 case Key::details:
                     timer.record("tui-expand", 0); break;
                 case Key::current_review: case Key::failed_check: case Key::task_files:
+                case Key::quote_task: case Key::current_decision:
                     timer.record("tui-jump", 0); break;
                 case Key::return_to_reading:
                     timer.record("tui-return", 0); break;

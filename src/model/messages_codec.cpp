@@ -371,6 +371,14 @@ Projection project(const Request& request, const Provider& provider, ContextLimi
         instructions += " A user supplement updates the task identified in its heading. Respect its latest "
                         "direction and the tool results already recorded by the host.";
     }
+    const auto* reference = request.tasks.empty() || !request.tasks.back().decision_reference ? nullptr :
+        &*request.tasks.back().decision_reference;
+    if (reference) {
+        projection.layout.template_version = 6;
+        instructions += " The host selected decision references contain exact historic user messages. Use their "
+                        "numeric task IDs for citations. If a current source is included, it updates the earlier source. "
+                        "Follow the new user instruction and the existing approval rules.";
+    }
     if (request.edit_enabled) {
         instructions += " When the user requests a file change and the evidence supports it, read the current "
                         "file and call the edit tool before the final answer. The edit tool opens the host's approval "
@@ -405,6 +413,19 @@ Projection project(const Request& request, const Provider& provider, ContextLimi
         return Json{{"role", "user"}, {"content", text}}.dump();
     };
     const auto plain = user_input(original);
+    std::string decision_input;
+    if (reference) {
+        const auto source = [&](const DecisionSource& item) {
+            if (item.task == 0 || item.task >= request.tasks.size()) {
+                throw std::logic_error("decision source is outside the preceding tasks");
+            }
+            return Json{{"task", item.task}, {"message", task_question_id(item.task)},
+                        {"version", item.version}, {"role", "user"}, {"text", request.tasks[item.task - 1].question}};
+        };
+        Json selected{{"earlier", source(reference->earlier)}};
+        if (reference->current) selected["current"] = source(*reference->current);
+        decision_input = user_input("[Host selected decision references]\n" + selected.dump());
+    }
     std::vector<std::string> groups;
     for (std::size_t i = 0; i < request.history.size(); ++i) {
         groups.push_back(round_messages(request.history[i], protocol, task_number(request.tasks, i), i));
@@ -412,6 +433,7 @@ Projection project(const Request& request, const Provider& provider, ContextLimi
     std::vector<std::string> inputs(groups.size() + 1);
     for (std::size_t i = 0; i < request.tasks.size(); ++i) {
         const auto& task = request.tasks[i];
+        if (i + 1 == request.tasks.size() && !decision_input.empty()) inputs.at(task.first_round) += ',' + decision_input;
         if (i) inputs.at(task.first_round) += ',' + user_input(task.question);
         if (task.supplement && task.supplement->before_round) {
             inputs.at(*task.supplement->before_round) += ',' +
@@ -501,8 +523,12 @@ Projection project(const Request& request, const Provider& provider, ContextLimi
     const auto mandatory = latest ? size(user_message(latest, {}), latest) : size(plain, 0);
     projection.diagnostic = "Context needs " + std::to_string(mandatory) + " bytes for the original question (" +
         std::to_string(request.question.size()) + " bytes), the latest complete tool group (" +
-        std::to_string(group_bytes[latest]) + " bytes), older decisions and the request template. Budget " +
-        std::to_string(budget) + " bytes. Use a smaller question or tool result.";
+        std::to_string(group_bytes[latest]) + " bytes), older decisions and the request template.";
+    if (reference) {
+        projection.diagnostic += " Selected decision references use " + std::to_string(decision_input.size()) +
+            " bytes. Select a shorter source if needed.";
+    }
+    projection.diagnostic += " Budget " + std::to_string(budget) + " bytes. Use a smaller question or tool result.";
     return projection;
 }
 

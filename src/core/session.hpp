@@ -101,6 +101,18 @@ struct TaskSupplement {
     bool operator==(const TaskSupplement&) const = default;
 };
 
+struct DecisionSource {
+    std::size_t task;
+    std::string version;
+    bool operator==(const DecisionSource&) const = default;
+};
+
+struct DecisionReference {
+    DecisionSource earlier;
+    std::optional<DecisionSource> current{};
+    bool operator==(const DecisionReference&) const = default;
+};
+
 struct Task {
     std::string question;
     std::size_t first_round = 0;
@@ -111,6 +123,7 @@ struct Task {
     std::size_t active_ms = 0;
     std::optional<TaskSupplement> supplement{};
     std::optional<std::size_t> approval_wait_ms{};
+    std::optional<DecisionReference> decision_reference{};
     bool operator==(const Task&) const = default;
 };
 
@@ -209,6 +222,8 @@ void append_task(Session& session, std::string question, bool allow_edit);
 TaskActions task_actions(const Session& session);
 std::string supplement_id(std::size_t task_id);
 std::string supplement_receipt(const TaskSupplement& supplement, std::size_t task_id, bool closed);
+std::string task_question_id(std::size_t task_id);
+std::string decision_reference_receipt(const DecisionReference& reference);
 void close_task(Session& session);
 void recover_session(Session& session, const SessionJournal& journal);
 bool task_closed(const Session& session);

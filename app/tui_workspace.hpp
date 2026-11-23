@@ -13,6 +13,7 @@ namespace lay::tui {
 struct Card {
     std::string title;
     std::string detail;
+    std::optional<std::size_t> user_task{};
 };
 
 struct Transcript {

@@ -31,6 +31,7 @@ namespace {
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
 constexpr auto current_format = SessionStore::format_version;
+constexpr std::int64_t decision_format = 5;
 
 bool valid_supplement(std::string_view text) {
     return text.size() <= TaskSupplement::max_bytes && text.find_first_not_of(" \t\r\n") != text.npos &&
@@ -401,6 +402,16 @@ std::string encode_session(const Session& session) {
         if (task.approval_wait_ms) {
             tasks.back()["approval_wait_ms"] = *task.approval_wait_ms;
         }
+        if (task.decision_reference) {
+            const auto encode_source = [](const DecisionSource& source) {
+                return Json{{"task", source.task}, {"message", task_question_id(source.task)},
+                            {"version", source.version}};
+            };
+            const auto& reference = *task.decision_reference;
+            auto& entry = tasks.back()["decision_reference"];
+            entry["earlier"] = encode_source(reference.earlier);
+            if (reference.current) entry["current"] = encode_source(*reference.current);
+        }
         if (task.supplement) {
             const auto& input = *task.supplement;
             tasks.back()["supplement"] = {{"id", supplement_id(i + 1)}, {"task_id", i + 1},
@@ -545,6 +556,26 @@ Session decode_session(std::string_view payload, std::int64_t version = current_
             }
             task.supplement = std::move(input);
         }
+        if (item.contains("decision_reference")) {
+            if (version != decision_format) throw std::runtime_error("invalid session format for a decision reference");
+            const auto decode_source = [&](const Json& saved) {
+                DecisionSource source{saved.at("task"), saved.at("version")};
+                if (source.task == 0 || source.task > i || saved.at("message") != task_question_id(source.task) ||
+                    source.version != platform::sha256(session.tasks[source.task - 1].question)) {
+                    throw std::runtime_error("invalid stored decision source");
+                }
+                return source;
+            };
+            const auto& saved = item.at("decision_reference");
+            DecisionReference reference{decode_source(saved.at("earlier"))};
+            if (saved.contains("current")) {
+                reference.current = decode_source(saved.at("current"));
+                if (reference.current->task <= reference.earlier.task) {
+                    throw std::runtime_error("invalid order of stored decision references");
+                }
+            }
+            task.decision_reference = std::move(reference);
+        }
         session.tasks.push_back(std::move(task));
     }
     return session;
@@ -636,9 +667,10 @@ struct SessionStore::Impl {
         if (!question && version >= 1 && version < current_format) {
             throw std::runtime_error("This session requires offline migration with --migrate-session ID.");
         }
-        if (version != (question ? 0 : current_format)) {
+        if (question ? version != 0 : version != current_format && version != decision_format) {
             throw std::runtime_error("unsupported session database format");
         }
+        session_format = question ? current_format : version;
         configure(connection);
         if (question) {
             Transaction transaction(connection);
@@ -668,6 +700,7 @@ struct SessionStore::Impl {
     StoreCheckpoint checkpoint;
     Connection db{nullptr, sqlite3_close};
     std::int64_t revision = 0;
+    std::int64_t session_format = current_format;
 };
 
 SessionStore::SessionStore(std::string_view id, const SessionScope& scope, std::optional<std::string> question,
@@ -680,7 +713,7 @@ SessionStore::~SessionStore() = default;
 Session SessionStore::load() const {
     Statement session(state_->db.get(), "SELECT snapshot FROM session WHERE id=1");
     session.step(SQLITE_ROW);
-    auto snapshot = decode_session(session.text(0));
+    auto snapshot = decode_session(session.text(0), state_->session_format);
     std::int64_t previous = 0;
     for (const auto& task : snapshot.tasks) {
         if (!task.supplement) continue;
@@ -734,7 +767,7 @@ std::string SessionStore::migrate(std::string_view id) {
     }
     const auto db = connect(path, false);
     const auto version = format(db.get());
-    if (version == current_format) {
+    if (version == current_format || version == decision_format) {
         return {};
     }
     if (version < 1 || version >= current_format) {
@@ -827,7 +860,14 @@ void SessionStore::save(const Session& session, std::string_view point) {
     commit.bind(1, state_->revision + 1);
     commit.bind(2, point);
     commit.step(SQLITE_DONE);
+    const bool add_decision_format = state_->session_format == current_format &&
+        !session.tasks.empty() && session.tasks.back().decision_reference;
+    if (add_decision_format) {
+        const auto query = "PRAGMA user_version=" + std::to_string(decision_format);
+        sql(db, query.c_str());
+    }
     transaction.commit();
+    if (add_decision_format) state_->session_format = decision_format;
     ++state_->revision;
 #ifdef LAY_BENCHMARK_METRICS
     timer.record("checkpoint", session.tasks.size());

@@ -340,6 +340,20 @@ std::string supplement_receipt(const TaskSupplement& supplement, std::size_t tas
     return receipt + (closed ? " / task closed before inclusion" : " / pending");
 }
 
+std::string task_question_id(std::size_t task_id) {
+    return "task-" + std::to_string(task_id) + "-question";
+}
+
+std::string decision_reference_receipt(const DecisionReference& reference) {
+    auto detail = "[decision reference] " + task_question_id(reference.earlier.task) + " sha256=" +
+        reference.earlier.version;
+    if (reference.current) {
+        detail += "\n[current decision reference] " + task_question_id(reference.current->task) +
+            " sha256=" + reference.current->version;
+    }
+    return detail;
+}
+
 TaskActions task_actions(const Session& session) {
     if (session.tasks.empty() || session.stop == SessionStop::storage_error) return {};
     const auto active = std::span(session.rounds).subspan(session.tasks.back().first_round);

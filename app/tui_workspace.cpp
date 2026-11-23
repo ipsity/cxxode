@@ -52,7 +52,10 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
     const auto tasks_at = [&](std::size_t round) {
         while (task < snapshot.tasks.size() && snapshot.tasks[task].first_round == round) {
             const auto& item = snapshot.tasks[task++];
-            add("#" + std::to_string(task) + (ascii ? " You  " : " 你  ") + short_line(item.question), item.question);
+            auto detail = item.question;
+            if (item.decision_reference) detail += '\n' + decision_reference_receipt(*item.decision_reference);
+            add("#" + std::to_string(task) + (ascii ? " You  " : " 你  ") + short_line(item.question), detail);
+            output.cards.back().user_task = task;
         }
     };
     for (std::size_t round = 0; round < snapshot.rounds.size(); ++round) {

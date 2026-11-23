@@ -141,5 +141,9 @@ if(BUILD_TESTING)
         add_executable(context_contract tests/contract/context_contract.cpp)
         target_link_libraries(context_contract PRIVATE lay_messages nlohmann_json::nlohmann_json)
         add_test(NAME context.contract COMMAND context_contract)
+        add_test(NAME context.decision_references COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/decision_references.py
+            $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
+        set_tests_properties(context.decision_references PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
     endif()
 endif()
