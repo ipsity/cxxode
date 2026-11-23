@@ -419,6 +419,7 @@ public:
     }
 
     std::size_t review_ticket() const { return ticket(view_); }
+    int input_wait_ms() const { return view_.busy ? 10 : 50; }
 
     Frame frame(Size viewport) {
         Frame result;
@@ -743,7 +744,7 @@ int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
     auto size = terminal.size();
     editor.refresh();
     screen.draw(terminal, size, editor.frame(size));
-    while (const auto bytes = terminal.read()) {
+    while (const auto bytes = terminal.read(editor.input_wait_ms())) {
         const auto latest = terminal.size();
         const auto events = input.decode(*bytes);
         const auto old_ticket = editor.review_ticket();

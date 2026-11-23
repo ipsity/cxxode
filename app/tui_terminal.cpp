@@ -139,10 +139,10 @@ Size Terminal::size() const {
     return {80, 24};
 }
 
-std::optional<std::string> Terminal::read() {
+std::optional<std::string> Terminal::read(int wait_ms) {
 #ifdef _WIN32
     auto& native = *native_;
-    const auto wait = WaitForSingleObject(native.in, 50);
+    const auto wait = WaitForSingleObject(native.in, static_cast<DWORD>(wait_ms));
     if (wait == WAIT_TIMEOUT) {
         return std::string{};
     }
@@ -187,7 +187,7 @@ std::optional<std::string> Terminal::read() {
     return bytes;
 #else
     pollfd input{STDIN_FILENO, POLLIN, 0};
-    const auto ready = poll(&input, 1, 50);
+    const auto ready = poll(&input, 1, wait_ms);
     if (ready == 0 || (ready < 0 && errno == EINTR)) {
         return std::string{};
     }
