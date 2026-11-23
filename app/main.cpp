@@ -741,7 +741,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             std::min<std::size_t>(used_ms, task_time.count()));
     };
     const auto finish = [&](lay::Session session) {
-        if (session.stop == lay::SessionStop::cancelled && !interrupted_now()) {
+        if (!persistent && session.stop == lay::SessionStop::cancelled && !interrupted_now()) {
             session.stop = lay::SessionStop::time_limit;
         }
         if (port) {

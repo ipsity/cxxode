@@ -17,7 +17,7 @@ from editing import finish
 from verification import VerificationFixture
 
 
-FIRST = "fix and verify"
+FIRST = "修复并验证空配置"
 FOLLOW_UP = "保留刚才的修改，仅运行空配置用例"
 F2 = ESC + "OQ"
 F3 = ESC + "OR"
@@ -58,31 +58,50 @@ def facts(snapshot):
 
 def compare(base, cli, driver, cmake, ctest):
     line = VerificationFixture(base, "line-equivalent", cli, driver, cmake, ctest)
+    ending = b" # " + b"x" * 800 + b" LONG-DIFF-END\n"
+    original = b"empty_config = reject" + ending
+    revised = b"empty_config = allow" + ending
+    line.file.write_bytes(original)
     line.command(data=(FIRST + "\ny\ny\ny\n").encode())
     line.command(extra=("--follow-up", FOLLOW_UP, "--no-write"), data=b"y\n")
     tui = VerificationFixture(base, "tui-equivalent", cli, driver, cmake, ctest)
+    tui.file.write_bytes(original)
     piped = subprocess.run([cli, "--tui", *tui.args], input=b"y\n", capture_output=True, timeout=5, env=tui.env)
     assert piped.returncode == 2 and b"interactive terminal" in piped.stderr and not tui.db.exists()
 
     with open_tui(tui) as terminal:
         terminal.expect("等待任务")
-        submit(terminal, FIRST)
+        terminal.key(ESC + "[200~" + "第一行\r\n第二行" + ESC + "[201~", "第二行")
+        terminal.send("\r")
+        terminal.quiet()
+        assert not tui.db.exists() and tui.count() == 0
+        terminal.send("\x7f" * len("第一行  第二行"))
+        terminal.key(FIRST, "> " + FIRST)
+        terminal.send("\r")
+        terminal.quiet()
+        assert not tui.db.exists() and tui.count() == 0
+        terminal.send(F2)
         terminal.expect("待批准 · 运行 ctest")
         terminal.expect("任务 1  /  verify-0")
         terminal.send("\ty\r")
         terminal.quiet()
         assert tui.count() == 0 and "> y" not in terminal.text
         terminal.key("\t", "空回车拒绝")
-        terminal.key(ESC + "[200~y\r" + ESC + "[201~", "已忽略粘贴或排队回车")
+        terminal.key(ESC + "[200~y\r\n第二行\r\n" + ESC + "[201~", "已忽略粘贴或排队回车")
         resized = len(terminal.text)
         terminal.resize(16, 48)
         terminal.expect("\x1b[16;1H", resized)
         assert tui.count() == 0
         approve(terminal)
         terminal.expect("待批准 · 编辑")
-        terminal.send(ESC + "[6~")
+        terminal.key(ESC + "[F", "LONG-DIFF-END")
+        terminal.send((ESC + "[5~") * 2)
         terminal.expect("+empty_config = allow")
-        assert tui.count() == 1 and tui.file.read_bytes() == b"empty_config = reject\n"
+        terminal.key(ESC + "[H", "任务 1  /  edit-2")
+        resized = len(terminal.text)
+        terminal.resize(24, 80)
+        terminal.expect("任务 1  /  edit-2", resized)
+        assert tui.count() == 1 and tui.file.read_bytes() == original
         approve(terminal)
         terminal.expect("任务 1  /  verify-3")
         approve(terminal)
@@ -103,7 +122,7 @@ def compare(base, cli, driver, cmake, ctest):
         approve(terminal)
         terminal.expect("已完成", start)
 
-    assert tui.file.read_bytes() == line.file.read_bytes() == b"empty_config = allow\n"
+    assert tui.file.read_bytes() == line.file.read_bytes() == revised
     assert tui.count() == line.count() == 3
     snapshot, phases = tui.saved()
     assert facts(snapshot) == facts(line.saved()[0])
@@ -238,6 +257,17 @@ def cancel_running(base, cli, driver, cmake, ctest):
     assert snapshot["tasks"][-1]["closed"] and snapshot["dispatches"] == 1
     assert "command cancelled" in snapshot["rounds"][-1]["tools"][0]["result"]
     assert not (fixture.root / "observed-completion.txt").exists()
+    with open_tui(fixture, "--resume") as terminal:
+        terminal.expect("已停止")
+        terminal.expect("command cancelled")
+        submit(terminal, "检查上次取消后保留的记录")
+        terminal.expect("任务 2  /  follow-up-2")
+        terminal.key("\t", "空回车拒绝")
+        terminal.send("\r")
+        terminal.expect("已完成")
+    recovered, _ = fixture.saved()
+    assert recovered["dispatches"] == 1 and fixture.count() == 1
+    assert recovered["rounds"][:len(snapshot["rounds"])] == snapshot["rounds"]
 
     exit_pending = VerificationFixture(base, "tui-exit-pending", cli, driver, cmake, ctest)
     with open_tui(exit_pending) as terminal:
