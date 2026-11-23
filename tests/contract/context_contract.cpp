@@ -37,6 +37,12 @@ int main() {
             result.layout.body_bytes == result.body.size() && result.body.size() <= limits.body_bytes,
             "old groups are dropped as a whole");
     const auto body = nlohmann::json::parse(result.body);
+    const auto system = body.at("system").get<std::string>();
+    require(result.layout.template_version == 3 && system.find("cite the exact line") != system.npos &&
+            system.find("include the exact path:line separately") != system.npos &&
+            system.find("call the edit tool before the final answer") != system.npos &&
+            system.find("host's approval prompt") != system.npos,
+            "Workspace requests require a precise source anchor and use host approval for requested edits");
     const auto& sent = body.at("messages");
     require(sent.size() == 3 && sent.at(0).at("content").at(0).at("text") == question,
             "the original Unicode question survives");
@@ -67,7 +73,14 @@ int main() {
     responses.model = "fixture-model";
     const Request continued{follow_up, across_tasks, 24, false, false, tasks};
     const auto full = messages::project(continued, responses);
-    const auto full_items = nlohmann::json::parse(full.body).at("input");
+    const auto full_body = nlohmann::json::parse(full.body);
+    const auto read_only = full_body.at("instructions").get<std::string>();
+    require(read_only.find("cite the exact line") != read_only.npos &&
+            read_only.find("latest user instruction") != read_only.npos &&
+            read_only.find("call the edit tool") == read_only.npos &&
+            full_body.at("tools").size() == 2,
+            "Read-only follow-ups retain exact citations and only read and search tools");
+    const auto& full_items = full_body.at("input");
     require(full_items.at(0).at("content") == question &&
             full_items.at(3).at("content") == "Previous change is complete." &&
             full_items.at(4).at("content") == follow_up && full_items.at(5) == native,

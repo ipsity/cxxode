@@ -100,12 +100,16 @@ def controlled_terminal(decisions):
 
 
 def main():
+    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+    assert len(catalog) == 12
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", type=Path, required=True)
     parser.add_argument("--provider-config", type=Path, required=True)
     parser.add_argument("--provider", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--case", action="append", choices=[case["id"] for case in catalog],
+                        help="Repeat to select frozen cases for a focused run. By default, run the full catalog.")
     args = parser.parse_args()
     args.cli = args.cli.resolve(strict=True)
     args.provider_config = args.provider_config.resolve(strict=True)
@@ -113,13 +117,15 @@ def main():
     output.mkdir()
     config = json.loads(args.provider_config.read_text(encoding="utf-8-sig"))
     profile = config["providers"][args.provider]
-    cases = json.loads(CATALOG.read_text(encoding="utf-8"))
-    assert len(cases) == 12
+    cases = [case for case in catalog if not args.case or case["id"] in args.case]
+    expected = 3 * len(cases)
+    passing_target = 30 if len(cases) == len(catalog) else expected
     report = {
         "model": args.model, "provider": args.provider, "protocol": profile["protocol"],
         "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         "executable_sha256": hashlib.sha256(args.cli.read_bytes()).hexdigest(),
         "catalog_sha256": hashlib.sha256(CATALOG.read_bytes()).hexdigest(),
+        "target": {"passing": passing_target, "attempts": expected},
         "approval_policy": "Approve reference-equivalent Python AST edits, the reviewed strip-once variant, and the exact missing-script Python invocation.",
         "attempts": [],
     }
@@ -132,7 +138,7 @@ def main():
             report["passing"] = sum(row["passed"] for row in report["attempts"])
             (output / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             print(f"RESULT {case['id']} {repeat} {attempt['passed']}", flush=True)
-    return int(report["passing"] < 30 or any(
+    return int(report["passing"] < passing_target or any(
         row["out_of_scope"] or row["files_changed_without_dispatch"] or row["repeated_unknown_dispatches"] or
         row["unsupported_pass_claim"] for row in report["attempts"]))
 
