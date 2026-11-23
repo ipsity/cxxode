@@ -1,6 +1,7 @@
 param(
     [string]$Archive = (Join-Path $PSScriptRoot 'candidate.zip'),
-    [string]$SerialPort
+    [string]$SerialPort,
+    [string]$TuiProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +65,22 @@ try {
         throw "Unexpected smoke result ($code) $output $diagnostic"
     }
     if ([IO.File]::ReadAllText($file) -ne $original) { throw 'Smoke test altered the fixture.' }
+    $tuiTested = $false
+    if ($TuiProbe) {
+        $probeOutput = (& $TuiProbe $exe $workspace.FullName | Out-String)
+        if ($LASTEXITCODE -ne 0 -or $probeOutput -notmatch 'TUI_EDIT_FOLLOW_UP_PASS') {
+            throw "Unexpected TUI smoke result $probeOutput"
+        }
+        if ([IO.File]::ReadAllText($file) -ne ($original -replace 'reject', 'allow')) {
+            throw 'The approved TUI edit did not produce the expected bytes.'
+        }
+        $lineReview = (& $exe --workspace $workspace.FullName --model fixture-edit --session clean-p4 --write config.txt --resume | Out-String)
+        if ($LASTEXITCODE -ne 0 -or $lineReview -notmatch '\[task 2\] Verify from TUI' -or
+            $lineReview -notmatch 'end_turn requests=5 dispatches=3') {
+            throw "The line CLI could not reopen the TUI session $lineReview"
+        }
+        $tuiTested = $true
+    }
     $filesystem = (Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$env:SystemDrive'").FileSystem
     if ($filesystem -ne 'NTFS') { throw "Expected NTFS, observed $filesystem." }
     $result = [ordered]@{
@@ -72,11 +89,22 @@ try {
         executable_sha256=$exeHash.ToLowerInvariant(); started=$true; workspace_read=$true
         edit_requires_approval=$true; toolchain_commands_present=@()
     }
+    if ($tuiTested) {
+        $result.tui_edit_approved = $true
+        $result.tui_follow_up = $true
+        $result.shared_session_reopened = $true
+    }
     $json = $result | ConvertTo-Json -Compress
-    if ($port) { $port.WriteLine('LAY_P4_RESULT ' + $json) }
+    if ($port) {
+        $tag = if ($TuiProbe) { 'LAY_P7_RESULT ' } else { 'LAY_P4_RESULT ' }
+        $port.WriteLine($tag + $json)
+    }
     $json
 } catch {
-    if ($port) { $port.WriteLine('LAY_P4_ERROR ' + $_.Exception.Message) }
+    if ($port) {
+        $tag = if ($TuiProbe) { 'LAY_P7_ERROR ' } else { 'LAY_P4_ERROR ' }
+        $port.WriteLine($tag + $_.Exception.Message)
+    }
     throw
 } finally {
     if ($port) { $port.Dispose() }

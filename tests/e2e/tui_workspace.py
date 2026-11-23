@@ -13,6 +13,7 @@ import threading
 import time
 
 from tui import ESC, PAINT, console
+from editing import finish
 from verification import VerificationFixture
 
 
@@ -131,6 +132,18 @@ def compare(base, cli, driver, cmake, ctest):
 
 def recovery(base, cli, driver, cmake, ctest):
     fixture = VerificationFixture(base, "tui-kill", cli, driver, cmake, ctest, hold=True)
+    line = VerificationFixture(base, "line-kill", cli, driver, cmake, ctest, hold=True)
+    process = line.paused("unused", data=(FIRST + "\ny\n").encode())
+    try:
+        deadline = time.monotonic() + 3
+        while not line.count() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert line.count() == 1
+    finally:
+        finish(process, kill=True)
+    assert "effect_unknown" in line.command(1, resume=True, data=b"")
+    line.command(resume=True, extra=("--accept-unknown", "--close-task"), data=b"")
+    line.command(extra=("--follow-up", FOLLOW_UP, "--no-write"), data=b"y\n")
     with open_tui(fixture) as terminal:
         terminal.expect("等待任务")
         submit(terminal, FIRST)
@@ -149,7 +162,63 @@ def recovery(base, cli, driver, cmake, ctest):
         assert fixture.count() == 1 and fixture.saved()[0]["dispatches"] == 1
         terminal.key(F3, "核对后再次按 F3")
         terminal.key(F3, "效果未知 · 已结清")
-    assert fixture.count() == 1 and fixture.saved()[0]["tasks"][-1]["closed"]
+        terminal.key(F4, "后续任务已禁用编辑工具")
+        start = len(terminal.text)
+        submit(terminal, FOLLOW_UP)
+        terminal.expect("任务 2  /  follow-up-2", start)
+        approve(terminal)
+        terminal.expect("已完成", start, timeout=8)
+    assert fixture.count() == line.count() == 2
+    assert fixture.file.read_bytes() == line.file.read_bytes()
+    assert facts(fixture.saved()[0]) == facts(line.saved()[0])
+
+
+def other_pairs(base, cli, driver, cmake, ctest):
+    changed = b"empty_config = reject\n# externally modified between tasks\n"
+    for scenario in ("external", "denied"):
+        denied = scenario == "denied"
+        tui = VerificationFixture(base, "tui-" + scenario, cli, driver, cmake, ctest)
+        line = VerificationFixture(base, "line-" + scenario, cli, driver, cmake, ctest)
+        line.command(data=(FIRST + ("\nn\ny\nn\n" if denied else "\ny\ny\ny\n")).encode())
+        if not denied:
+            line.file.write_bytes(changed)
+        line.command(extra=("--follow-up", FOLLOW_UP, "--no-write"), data=b"" if denied else b"y\n")
+        with open_tui(tui) as terminal:
+            terminal.expect("等待任务")
+            submit(terminal, FIRST)
+            terminal.expect("任务 1  /  verify-0")
+            if denied:
+                terminal.key("\t", "空回车拒绝")
+                terminal.send("\r")
+            else:
+                approve(terminal)
+            terminal.expect("任务 1  /  edit-2")
+            approve(terminal)
+            terminal.expect("任务 1  /  verify-3")
+            if denied:
+                terminal.key("\t", "空回车拒绝")
+                terminal.send("\r")
+            else:
+                approve(terminal)
+            terminal.expect("已完成")
+            if not denied:
+                tui.file.write_bytes(changed)
+            terminal.key(F4, "后续任务已禁用编辑工具")
+            start = len(terminal.text)
+            submit(terminal, FOLLOW_UP)
+            if not denied:
+                terminal.expect("任务 2  /  follow-up-2", start)
+                approve(terminal)
+            terminal.expect("已完成", start)
+        assert tui.file.read_bytes() == line.file.read_bytes()
+        assert tui.count() == line.count() == (0 if denied else 3)
+        snapshot, phases = tui.saved()
+        assert facts(snapshot) == facts(line.saved()[0]) and phases == line.saved()[1]
+        final_tool = snapshot["rounds"][-2]["tools"][0]
+        if denied:
+            assert "command denied by user" in final_tool["result"] and not final_tool["dispatched"]
+        else:
+            assert "CTest reported 1 failed" in final_tool["result"]
 
 
 def cancel_running(base, cli, driver, cmake, ctest):
@@ -267,6 +336,7 @@ if __name__ == "__main__":
     with TemporaryDirectory(prefix="lay-workspace-tui-") as path:
         base = Path(path).resolve()
         compare(base, program, driver, cmake, ctest)
+        other_pairs(base, program, driver, cmake, ctest)
         recovery(base, program, driver, cmake, ctest)
         cancel_running(base, program, driver, cmake, ctest)
         previews(base, program)

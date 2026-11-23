@@ -48,8 +48,8 @@ class Terminal:
             except (EOFError, OSError):
                 pass
 
-    def expect(self, marker, start=0):
-        until = time.monotonic() + 3
+    def expect(self, marker, start=0, *, timeout=3):
+        until = time.monotonic() + timeout
         while marker not in self.text[start:] and time.monotonic() < until:
             self.collect()
         assert marker in self.text[start:], repr(self.text[start:])

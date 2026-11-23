@@ -136,7 +136,7 @@ def run_location(command, env):
         return process.wait(), "".join(answer), citations
 
 
-def run_case(args, case, repeat, output):
+def run_case(args, case, repeat, output, interactive=None):
     session_id = f'{case["id"]}-{repeat}'
     root = output / session_id
     prepare(case, root)
@@ -162,6 +162,8 @@ def run_case(args, case, repeat, output):
     print(f"\n{session_id}\n{case['task']}\n", flush=True)
     if "location" in case:
         cli_exit, rendered_answer, rendered_citations = run_location(command, env)
+    elif interactive:
+        cli_exit = interactive(command, env, case, root, database_dir / f"session-{session_id}.sqlite3")
     else:
         cli_exit = subprocess.run(command, env=env).returncode
     history = context(database_dir / f"session-{session_id}.sqlite3")
