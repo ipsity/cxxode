@@ -162,6 +162,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal);
 void append_task(Session& session, std::string question, bool allow_edit);
+void recover_session(Session& session, const SessionJournal& journal);
 bool task_closed(const Session& session);
 std::string_view name(SessionStop stop);
 std::size_t edit_revision(const Session& session);

@@ -14,7 +14,7 @@ target_include_directories(lay_core PUBLIC src)
 add_library(lay_scripted_model STATIC src/model/scripted_model.cpp)
 target_link_libraries(lay_scripted_model PUBLIC lay_core)
 
-add_library(lay_tui STATIC app/tui.cpp app/tui_terminal.cpp)
+add_library(lay_tui STATIC app/tui.cpp app/tui_terminal.cpp app/tui_workspace.cpp)
 target_link_libraries(lay_tui PRIVATE lay_core)
 
 add_executable(lay-code app/main.cpp)
@@ -106,6 +106,10 @@ if(BUILD_TESTING)
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver> $<TARGET_FILE:process_contract>
             ${CMAKE_COMMAND} ${CMAKE_CTEST_COMMAND})
         set_tests_properties(verification.contract PROPERTIES TIMEOUT 90)
+        add_test(NAME tui.workspace COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/tui_workspace.py
+            $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver> ${CMAKE_COMMAND} ${CMAKE_CTEST_COMMAND})
+        set_tests_properties(tui.workspace PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
         add_executable(context_contract tests/contract/context_contract.cpp)
         target_link_libraries(context_contract PRIVATE lay_messages nlohmann_json::nlohmann_json)
         add_test(NAME context.contract COMMAND context_contract)

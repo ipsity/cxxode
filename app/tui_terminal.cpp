@@ -37,6 +37,8 @@ std::string utf8(const wchar_t* data, int count) {
 std::string_view control(const KEY_EVENT_RECORD& key) {
     switch (key.wVirtualKeyCode) {
         case VK_F2: return "\x1bOQ";
+        case VK_F3: return "\x1bOR";
+        case VK_F4: return "\x1bOS";
         case VK_UP: return "\x1b[A";
         case VK_DOWN: return "\x1b[B";
         case VK_RIGHT: return "\x1b[C";

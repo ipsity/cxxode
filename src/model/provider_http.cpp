@@ -422,12 +422,14 @@ std::vector<std::string> list_models(const Provider& provider) {
     }
 }
 
-Generate provider_model(const Provider& provider, StopRequested stop_requested, TextPreview preview) {
+Generate provider_model(const Provider& provider, StopRequested stop_requested, TextPreview preview,
+                        std::function<void()> attempt_started) {
     if (provider.model.empty()) {
         throw std::invalid_argument("Choose --model MODEL or set model in the provider profile. Use --list-models to see available IDs.");
     }
     auto transport = std::make_shared<Transport>(provider);
     return [provider, transport = std::move(transport), preview = std::move(preview),
+            attempt_started = std::move(attempt_started),
             stop_requested = std::move(stop_requested)](const Request& request, const EventSink& emit) {
         Generation generation{0, {}};
         try {
@@ -439,6 +441,9 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
             const auto limit = std::min<std::size_t>(3, request.attempts_left);
             bool repaired = false;
             for (std::size_t attempt = 0; attempt < limit; ++attempt) {
+                if (attempt_started) {
+                    try { attempt_started(); } catch (...) {}
+                }
                 ++generation.attempts;
                 auto result = transport->post(projection.body, emit, stop_requested, preview);
                 auto layout = projection.layout;

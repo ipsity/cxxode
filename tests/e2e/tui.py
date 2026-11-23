@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -30,12 +31,14 @@ COLOUR = re.compile(r"\x1b\[(?:31|32|36)m")
 
 
 class Terminal:
-    def __init__(self, output, read, send, resize, alive):
+    def __init__(self, output, read, send, resize, alive, kill):
         self.output = output
         self.read = read
         self.send = send
         self.resize = resize
         self.alive = alive
+        self.kill = kill
+        self.forced = False
         self.text = ""
 
     def collect(self):
@@ -65,20 +68,25 @@ class Terminal:
         if self.alive():
             self.key(ESC, ESC + "[?1049l")
 
+    def force_exit(self):
+        self.forced = True
+        self.kill()
+
 
 @contextmanager
 def console(cli, args, rows, columns, env):
     if os.name == "nt":
         process = PtyProcess.spawn([cli, *args], dimensions=(rows, columns), backend=Backend.ConPTY, env=env)
         terminal = Terminal(process.fileobj, lambda: process.read(8192), process.write, process.setwinsize,
-                            process.isalive)
+                            process.isalive, lambda: os.kill(process.pid, signal.SIGTERM))
         try:
             yield terminal
-            terminal.quit()
+            if not terminal.forced:
+                terminal.quit()
             deadline = time.monotonic() + 3
             while process.isalive() and time.monotonic() < deadline:
                 time.sleep(0.01)
-            assert not process.isalive() and process.exitstatus == 0
+            assert not process.isalive() and (terminal.forced or process.exitstatus == 0)
         finally:
             process.close(force=True)
     else:
@@ -94,12 +102,15 @@ def console(cli, args, rows, columns, env):
             with subprocess.Popen([cli, *args], stdin=slave, stdout=slave, stderr=slave, env=env) as process:
                 terminal = Terminal(master, lambda: decoder.decode(os.read(master, 8192)),
                                     lambda text: os.write(master, text.encode()), resize,
-                                    lambda: process.poll() is None)
+                                    lambda: process.poll() is None, process.kill)
                 try:
                     yield terminal
-                    terminal.quit()
-                    assert process.wait(timeout=3) == 0
-                    assert termios.tcgetattr(slave) == original
+                    if terminal.forced:
+                        process.wait(timeout=3)
+                    else:
+                        terminal.quit()
+                        assert process.wait(timeout=3) == 0
+                        assert termios.tcgetattr(slave) == original
                 finally:
                     if process.poll() is None:
                         process.kill()

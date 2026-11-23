@@ -174,3 +174,16 @@ lay-code.exe --tui --demo unknown --ascii
 ```
 
 方向键和 PgUp/PgDn 翻阅记录，Ctrl+O 展开或收起详情。待审批时用 Tab 进入决定框，输入小写 `y` 或 `yes` 后回车批准，空回车拒绝。Ctrl+C 停止当前动作，Esc 退出，决定框内的 Esc 返回审阅。草稿用 F2 提交，回车可留给输入法确认候选。需要纯单色时加 `--mono`，需要 ASCII 排版时加 `--ascii`。
+
+## 用终端界面处理工作区任务
+
+使用原会话的工作区、模型和权限参数。以下会话允许编辑 `config.txt` 和提议运行命令，每次编辑和运行仍单独审批。
+
+```powershell
+lay-code.exe --tui --workspace . --session parser --write config.txt --allow-run
+lay-code.exe --tui --workspace . --session parser --write config.txt --allow-run --resume
+```
+
+用 F2 提交新任务。上一条任务结清后，可在同一窗口输入并提交后续任务。有写权限的会话可用 F4 禁用下一条任务的编辑工具。用 ↑↓ 选择记录，Ctrl+O 展开对应工具输出，PgUp/PgDn 翻页。忙时可以编辑下一条草稿。
+
+`--resume` 先展示已保存的记录，按 F2 才继续未结束的任务。Ctrl+C 停止当前任务，已提交的工具结果会保留。若记录显示效果未知，核对工作区后连续两次按 F3 可离线结清。也可以用同版本的行式 CLI 恢复同一会话。

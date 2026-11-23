@@ -291,24 +291,4 @@ RunPreparation RunWorkspace::prepare(const ToolCall& call, const Session& sessio
     }
 }
 
-std::string quoted_argument(std::string_view value) {
-    std::string result(1, '"');
-    for (const auto byte : value) {
-        if (byte == '"' || byte == '\\') {
-            result += '\\';
-        }
-        if (static_cast<unsigned char>(byte) < 32 || byte == 127) {
-            constexpr std::string_view hex = "0123456789abcdef";
-            const auto number = static_cast<unsigned char>(byte);
-            result += "\\x";
-            result += hex[number >> 4];
-            result += hex[number & 15];
-        } else {
-            result += byte;
-        }
-    }
-    result += '"';
-    return result;
-}
-
 } // namespace lay

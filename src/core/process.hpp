@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lay {
@@ -46,5 +47,6 @@ struct Verification {
 
 std::string describe(ProcessStatus status, std::int64_t code);
 std::string verification_text(const Verification& result);
+std::string quoted_argument(std::string_view value);
 
 } // namespace lay

@@ -1,6 +1,7 @@
 #include "tui.hpp"
 #include "tui_terminal.hpp"
 #include "tui_text.hpp"
+#include "tui_workspace.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -12,7 +13,7 @@ namespace {
 
 enum class Key {
     text, enter, escape, tab, stop, details, submit, up, down, left, right, first, last,
-    previous_page, next_page, backspace, erase, paste
+    previous_page, next_page, backspace, erase, paste, acknowledge, edit_scope
 };
 
 struct Event {
@@ -96,6 +97,8 @@ private:
                 {"[F", Key::last}, {"OF", Key::last}, {"[4~", Key::last},
                 {"[5~", Key::previous_page}, {"[6~", Key::next_page}, {"[3~", Key::erase},
                 {"OQ", Key::submit}, {"[12~", Key::submit},
+                {"OR", Key::acknowledge}, {"[13~", Key::acknowledge},
+                {"OS", Key::edit_scope}, {"[14~", Key::edit_scope},
             };
             if (const auto match = std::ranges::find(keys, sequence, [](const auto& item) { return item.first; });
                 match != std::end(keys)) {
@@ -383,6 +386,311 @@ private:
     int caret_ = 0;
 };
 
+class WorkspaceEditor {
+public:
+    WorkspaceEditor(const WorkspaceScreen& settings, WorkspaceWorker& worker)
+        : settings_(settings), worker_(worker), mono_(settings.mono || std::getenv("NO_COLOR")),
+          ascii_(settings.ascii) {
+        draft_.text = safe_text(settings.draft, false);
+        draft_.cursor = draft_.text.size();
+    }
+
+    bool refresh() {
+        auto next = worker_.view();
+        const auto changed = next != view_;
+        if (ticket(next) != ticket(view_)) {
+            reset_decision();
+            offset_ = 0;
+            align_ = true;
+        }
+        if (next.transcript != view_.transcript && follows_) {
+            selected_ = next.transcript && !next.transcript->cards.empty() ? next.transcript->cards.size() - 1 : 0;
+            align_ = true;
+        }
+        if (view_.busy && !next.busy) {
+            if (!next.error.empty() && draft_.text.empty() && task_count(next) == submitted_after_) {
+                draft_ = std::move(submitted_);
+                allow_edit_ = submitted_allow_edit_;
+            }
+            submitted_ = {};
+        }
+        view_ = std::move(next);
+        return changed;
+    }
+
+    std::size_t review_ticket() const { return ticket(view_); }
+
+    Frame frame(Size viewport) {
+        Frame result;
+        const auto width = std::clamp(viewport.columns - 1, 1, 119);
+        auto& output = result.rows;
+        const auto line = [&](std::string_view text, std::string_view style = {}) {
+            output.push_back({wrap(text, width).front(), mono_ ? std::string_view{} : style});
+        };
+        line(std::string(label("▚ lay code  ·  会话 ", "[] lay code  /  Session ")) + safe_text(settings_.id, ascii_));
+        if (viewport.columns < 34 || viewport.rows < 12) {
+            if (viewport.rows >= 2) line(label("请放大窗口 · Esc 退出", "Enlarge window / Esc quits"));
+            if (viewport.rows >= 3) line(label("Ctrl+C 停止", "Ctrl+C stops"));
+            return result;
+        }
+        line(status(), "\x1b[36m");
+        std::vector<std::string> body;
+        const auto add = [&](std::string_view text) {
+            while (true) {
+                const auto end = text.find('\n');
+                for (auto& row : wrap(text.substr(0, end), width)) body.push_back(std::move(row));
+                if (end == text.npos) break;
+                text.remove_prefix(end + 1);
+            }
+        };
+        std::size_t anchor = 0;
+        if (view_.review) {
+            const auto& review = *view_.review;
+            add(review.title);
+            add(std::string(label("任务 ", "Task ")) + std::to_string(review.task) + "  /  " + review.call);
+            add(review.detail);
+        } else {
+            add(safe_text(settings_.path, ascii_));
+            if (!view_.scope.empty()) add(view_.scope);
+            if (view_.transcript) {
+                const auto& cards = view_.transcript->cards;
+                for (std::size_t i = 0; i < cards.size(); ++i) {
+                    if (i == selected_) anchor = body.size();
+                    add((i == selected_ ? "> " : "  ") + cards[i].title);
+                    if (expanded_ == i) add(cards[i].detail);
+                }
+                if (!view_.transcript->diagnostic.empty()) add(view_.transcript->diagnostic);
+            }
+            if (!view_.preview.empty()) {
+                add(std::string(label("预览  ", "Preview  ")) + view_.preview);
+            }
+            if (!view_.error.empty()) add(view_.error);
+        }
+        page_ = std::min(viewport.rows, 48) - 8;
+        const auto total = static_cast<int>(body.size());
+        if (align_) {
+            offset_ = follows_ && !view_.review && !expanded_ ? total - page_ :
+                static_cast<int>(anchor) - 1;
+            align_ = false;
+        }
+        offset_ = std::clamp(offset_, 0, std::max(0, total - page_));
+        for (int i = offset_; i < offset_ + page_; ++i) {
+            const auto text = i < total ? std::string_view(body[static_cast<std::size_t>(i)]) : std::string_view{};
+            const auto style = text.starts_with("- ") ? "\x1b[31m" : text.starts_with("+ ") ? "\x1b[32m" : "";
+            line(text, style);
+        }
+        line(std::to_string(offset_ + 1) + "-" + std::to_string(std::min(total, offset_ + page_)) + "/" +
+            std::to_string(total) + std::string(label(" 行  ·  ↑↓ / PgUp PgDn", " lines  /  Up Down PgUp PgDn")));
+        std::string rule;
+        for (int i = 0; i < width; ++i) rule += label("─", "-");
+        line(rule);
+        line(label("Ctrl+O 详情 · Ctrl+C 停止 · Esc 退出", "Ctrl+O details / Ctrl+C stop / Esc quit"));
+        line(instruction());
+        line(notice_.empty() ? draft_label() : notice_);
+        if (!view_.review || focused_) {
+            auto [visible, column] = (focused_ ? decision_ : draft_).view(width - 2, ascii_);
+            line("> " + visible, focused_ ? "\x1b[7m" : "");
+            result.caret = 3 + column;
+        } else {
+            line(label("▸ 等待你的决定", "> Waiting for your decision"));
+        }
+        return result;
+    }
+
+    bool handle(const std::vector<Event>& batch, Size size, bool new_review) {
+        const bool combined = batch.size() > 1;
+        const bool compact = size.columns < 34 || size.rows < 12;
+        for (const auto& event : batch) {
+            const auto key = event.key;
+            if (key == Key::stop) {
+                if (view_.busy) {
+                    worker_.stop();
+                    reset_decision();
+                } else {
+                    notice_ = label("当前没有活动任务。", "No active task.");
+                }
+                return true;
+            }
+            if (key == Key::escape) {
+                if (!focused_) return false;
+                reset_decision();
+                return true;
+            }
+            if (compact || new_review || view_.stopping) continue;
+            if (key != Key::acknowledge) confirming_unknown_ = false;
+            if (view_.review && key == Key::tab) {
+                if (focused_) reset_decision();
+                else if (!combined) {
+                    focused_ = true;
+                    notice_ = {};
+                }
+                return true;
+            }
+            if (focused_ && (key == Key::paste || (combined && key == Key::enter))) {
+                reset_decision();
+                notice_ = label("已忽略粘贴或排队回车，请重新决定。", "Queued input ignored. Use Tab again.");
+                return true;
+            }
+            if (focused_ && key == Key::enter && view_.review) {
+                worker_.decide(view_.review->ticket, decision_.text == "y" || decision_.text == "yes");
+                reset_decision();
+                return true;
+            }
+            if (key == Key::acknowledge && !combined && !view_.busy && unknown()) {
+                if (confirming_unknown_) launch({WorkspaceAction::close_unknown});
+                else {
+                    confirming_unknown_ = true;
+                    notice_ = label("核对后再次按 F3 结清。", "Check effects. Press F3 again to close.");
+                }
+                return true;
+            }
+            if (key == Key::edit_scope && !combined && can_narrow()) {
+                allow_edit_ = !allow_edit_;
+                notice_ = {};
+                return true;
+            }
+            if (key == Key::submit && !combined && !view_.busy && !unknown()) {
+                if (!view_.transcript && settings_.resume) {
+                    launch({WorkspaceAction::inspect});
+                } else if (view_.transcript && !view_.transcript->closed) {
+                    launch({WorkspaceAction::resume});
+                } else if (draft_.text.find_first_not_of(' ') != draft_.text.npos) {
+                    const auto action = view_.transcript ? WorkspaceAction::follow_up : WorkspaceAction::start;
+                    submitted_ = std::exchange(draft_, Draft{});
+                    submitted_after_ = task_count(view_);
+                    submitted_allow_edit_ = allow_edit_;
+                    launch({action, submitted_.text, allow_edit_});
+                    allow_edit_ = true;
+                }
+                return true;
+            }
+            if (key == Key::details && !view_.review && view_.transcript && !view_.transcript->cards.empty()) {
+                expanded_ = expanded_ == selected_ ? std::nullopt : std::optional{selected_};
+                align_ = true;
+                continue;
+            }
+            if (key == Key::up || key == Key::down || key == Key::first || key == Key::last ||
+                key == Key::previous_page || key == Key::next_page) {
+                navigate(key);
+                continue;
+            }
+            if (!view_.review || focused_) {
+                auto& draft = focused_ ? decision_ : draft_;
+                if (key == Key::text && (!focused_ || draft.text.size() < 8)) draft.insert(event.text);
+                if (key == Key::left || key == Key::right) draft.move(key == Key::right, false);
+                if (key == Key::backspace || key == Key::erase) draft.move(key == Key::erase, true);
+            }
+        }
+        return true;
+    }
+
+private:
+    static std::size_t ticket(const WorkspaceView& view) { return view.review ? view.review->ticket : 0; }
+    static std::size_t task_count(const WorkspaceView& view) { return view.transcript ? view.transcript->tasks : 0; }
+    bool unknown() const { return view_.transcript && !view_.transcript->closed &&
+                                 view_.transcript->stop == SessionStop::effect_unknown; }
+    bool can_narrow() const { return settings_.writable && view_.transcript && !view_.review; }
+    std::string_view label(std::string_view zh, std::string_view en) const { return ascii_ ? en : zh; }
+
+    std::string_view draft_label() const {
+        if (view_.review) return label("审核当前动作", "Review current action");
+        if (can_narrow()) {
+            return allow_edit_ ? label("F4 禁用后续任务的编辑工具", "F4 disables edits for the next task") :
+                                 label("后续任务已禁用编辑工具 · F4 切换", "Next task: edits off / F4 toggles");
+        }
+        return label("任务草稿", "Task draft");
+    }
+
+    std::string status() const {
+        if (view_.stopping) return std::string(label("正在停止", "Stopping"));
+        if (view_.review) return std::string(label("待批准 · ", "Needs approval / ")) + view_.review->title;
+        if (view_.busy) {
+            return std::string(view_.requesting ? label("请求中", "Requesting model") : label("工作中", "Working"));
+        }
+        if (!view_.error.empty()) return std::string(label("会话错误", "Session error"));
+        if (!view_.transcript) return std::string(label("等待任务", "Ready for a task"));
+        if (view_.transcript->stop == SessionStop::effect_unknown) {
+            return std::string(view_.transcript->closed ? label("效果未知 · 已结清", "Effect unknown / Closed") :
+                                                        label("效果未知 · 等待核对", "Effect unknown / Check result"));
+        }
+        if (view_.transcript->stop == SessionStop::cancelled) return std::string(label("已停止", "Stopped"));
+        if (view_.transcript->closed && view_.transcript->stop == SessionStop::end_turn) {
+            return std::string(label("已完成", "Complete"));
+        }
+        return std::string(label("任务暂停 · ", "Task paused / ")) + std::string(name(view_.transcript->stop));
+    }
+
+    std::string_view instruction() const {
+        if (view_.review) return focused_ ? label("输入 y 或 yes 后回车批准。空回车拒绝。",
+                                                   "y or yes + Enter approves. Enter denies.") :
+                                            label("Tab 输入决定，↑↓ 翻阅动作详情。", "Tab to decide. Up/Down to review.");
+        if (view_.busy) return label("可编辑下一条草稿。", "You can edit the next draft.");
+        if (unknown()) return label("先核对工作区，再用 F3 结清。", "Check the workspace, then press F3.");
+        if (!view_.transcript && settings_.resume) return label("F2 重新打开会话。", "F2 retries opening the session.");
+        if (view_.transcript && !view_.transcript->closed) return label("F2 恢复当前任务，保留草稿。",
+                                                                       "F2 resumes the current task.");
+        return label("F2 提交草稿，回车确认输入法候选。", "F2 submits draft. Enter keeps editing.");
+    }
+
+    void reset_decision() {
+        focused_ = false;
+        decision_ = {};
+        notice_ = {};
+    }
+
+    void launch(WorkspaceCommand command) {
+        worker_.launch(std::move(command));
+        notice_ = {};
+        follows_ = true;
+        confirming_unknown_ = false;
+        expanded_.reset();
+        align_ = true;
+    }
+
+    void navigate(Key key) {
+        if (key == Key::first || key == Key::last || key == Key::up || key == Key::down) {
+            if (!view_.review && view_.transcript && !view_.transcript->cards.empty()) {
+                const auto last = view_.transcript->cards.size() - 1;
+                if (key == Key::first) selected_ = 0;
+                else if (key == Key::last) selected_ = last;
+                else if (key == Key::down) selected_ = std::min(last, selected_ + 1);
+                else if (selected_) --selected_;
+                follows_ = selected_ == last;
+                align_ = true;
+                return;
+            }
+            if (key == Key::first) offset_ = 0;
+            else if (key == Key::last) offset_ = 1024 * 1024;
+            else if (key == Key::up) --offset_;
+            else ++offset_;
+        } else {
+            offset_ += key == Key::previous_page ? -page_ : page_;
+            if (!view_.review) follows_ = false;
+        }
+    }
+
+    const WorkspaceScreen& settings_;
+    WorkspaceWorker& worker_;
+    bool mono_;
+    bool ascii_;
+    WorkspaceView view_;
+    bool follows_ = true;
+    bool align_ = true;
+    bool focused_ = false;
+    bool confirming_unknown_ = false;
+    bool allow_edit_ = true;
+    std::size_t selected_ = 0;
+    std::optional<std::size_t> expanded_;
+    int offset_ = 0;
+    int page_ = 1;
+    std::string_view notice_;
+    Draft draft_;
+    Draft decision_;
+    Draft submitted_;
+    std::size_t submitted_after_ = 0;
+    bool submitted_allow_edit_ = true;
+};
+
 } // namespace
 
 int run(std::span<const std::string> arguments) {
@@ -421,6 +729,31 @@ int run(std::span<const std::string> arguments) {
         size = latest;
         if (!demo.handle(events, size)) break;
         screen.draw(terminal, size, demo.frame(size));
+    }
+    return 0;
+}
+
+int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
+    Terminal terminal;
+    WorkspaceWorker worker(work, settings.ascii);
+    WorkspaceEditor editor(settings, worker);
+    Screen screen;
+    Input input;
+    worker.launch({settings.resume ? WorkspaceAction::inspect : WorkspaceAction::prepare});
+    auto size = terminal.size();
+    editor.refresh();
+    screen.draw(terminal, size, editor.frame(size));
+    while (const auto bytes = terminal.read()) {
+        const auto latest = terminal.size();
+        const auto events = input.decode(*bytes);
+        const auto old_ticket = editor.review_ticket();
+        const auto changed = editor.refresh();
+        if (!changed && events.empty() && latest == size) continue;
+        size = latest;
+        const auto next_ticket = editor.review_ticket();
+        if (!editor.handle(events, size, next_ticket && next_ticket != old_ticket)) break;
+        editor.refresh();
+        screen.draw(terminal, size, editor.frame(size));
     }
     return 0;
 }

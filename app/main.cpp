@@ -73,11 +73,14 @@ struct Options {
     bool allow_run = false;
     bool list_models = false;
     bool set_provider_key = false;
+    bool mono = false;
+    bool ascii = false;
 };
 
 void usage(std::ostream& stream) {
     stream << "Usage: lay-code [--truncated]\n"
            << "       lay-code --tui [--demo normal|approval|failure|unknown] [--mono] [--ascii]\n"
+           << "       lay-code --tui --workspace PATH --session ID [--resume] [--mono] [--ascii]\n"
            << "       lay-code --workspace PATH [--provider NAME] [--model MODEL] [--exclude RELATIVE_PATH ...]\n"
            << "       lay-code --list-models [--provider NAME] [--provider-config PATH]\n"
            << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
@@ -89,7 +92,7 @@ void usage(std::ostream& stream) {
            << "       lay-code --migrate-session ID\n";
 }
 
-Options options(std::span<const std::string> arguments) {
+Options options(std::span<const std::string> arguments, bool tui = false) {
     Options result;
     if (arguments.size() == 1 && arguments.front() == "--truncated") {
         result.script = lay::Script::truncated;
@@ -100,6 +103,14 @@ Options options(std::span<const std::string> arguments) {
     }
     for (std::size_t index = 0; index < arguments.size();) {
         const auto& option = arguments[index++];
+        if (tui && option == "--mono" && !result.mono) {
+            result.mono = true;
+            continue;
+        }
+        if (tui && option == "--ascii" && !result.ascii) {
+            result.ascii = true;
+            continue;
+        }
         if (option == "--resume" && !result.resume) {
             result.resume = true;
             continue;
@@ -679,14 +690,35 @@ lay::StoreCheckpoint test_checkpoint() {
 #endif
 }
 
-int run_workspace(const Options& settings) {
+void close_cancelled_task(lay::Session& session) {
+    const auto active = std::span(session.rounds).subspan(session.tasks.back().first_round);
+    for (const auto& round : active) {
+        if (std::ranges::any_of(round.tools, [](const auto& tool) {
+                return tool.dispatched && tool.result.status == lay::ToolStatus::pending;
+            })) {
+            return;
+        }
+    }
+    for (auto& round : active) {
+        for (auto& tool : round.tools) {
+            if (tool.result.status == lay::ToolStatus::pending) {
+                tool.result = {lay::ToolStatus::skipped, "cancelled"};
+            }
+        }
+    }
+    session.finished = true;
+}
+
+int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port = nullptr,
+                  lay::tui::WorkspaceAction action = lay::tui::WorkspaceAction::start) {
     using Clock = std::chrono::steady_clock;
     constexpr auto task_time = std::chrono::milliseconds(std::chrono::minutes(15));
     auto deadline = Clock::time_point::max();
     bool cancellation_announced = false;
+    const auto interrupted_now = [&] { return port ? port->stopping() : stopping(); };
     const lay::StopRequested cancel = [&] {
-        const auto interrupted = stopping();
-        if (interrupted && !cancellation_announced) {
+        const auto interrupted = interrupted_now();
+        if (interrupted && !port && !cancellation_announced) {
             std::cout << "[session] stopping\n" << std::flush;
             cancellation_announced = true;
         }
@@ -695,6 +727,7 @@ int run_workspace(const Options& settings) {
     const bool persistent = !settings.id.empty();
     const bool editing = !settings.writable.empty();
     const bool fixture = settings.model == "fixture-edit" || settings.model == "fixture-verify";
+    const auto label = [&](std::string_view zh, std::string_view en) { return settings.ascii ? en : zh; };
     lay::Provider selected;
     if (!fixture) {
         selected = lay::load_provider(settings.provider, settings.model,
@@ -710,23 +743,35 @@ int run_workspace(const Options& settings) {
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
     const auto authorize = [&](const lay::ToolCall& call) { return workspace.authorize(call); };
     const auto activate = [&](std::size_t used_ms = 0) {
+        if (!port) {
 #ifdef _WIN32
-        if (!SetConsoleCtrlHandler(on_console_control, TRUE)) {
-            std::signal(SIGINT, on_interrupt);
-        }
+            if (!SetConsoleCtrlHandler(on_console_control, TRUE)) {
+                std::signal(SIGINT, on_interrupt);
+            }
 #else
-        std::signal(SIGINT, on_interrupt);
+            std::signal(SIGINT, on_interrupt);
 #endif
+        }
         deadline = Clock::now() + task_time - std::chrono::milliseconds(
             std::min<std::size_t>(used_ms, task_time.count()));
     };
     const auto finish = [&](lay::Session session) {
-        if (session.stop == lay::SessionStop::cancelled && !stopping()) {
+        if (session.stop == lay::SessionStop::cancelled && !interrupted_now()) {
             session.stop = lay::SessionStop::time_limit;
+        }
+        if (port) {
+            port->checkpoint(session, "finished");
+            return 0;
         }
         return render(session, &workspace);
     };
+    if (port) {
+        port->scope(fixture ? std::string(label("本地离线夹具", "Local fixture")) :
+            selected.model + std::string(label(" → ", " -> ")) + selected.endpoint);
+        if (action == lay::tui::WorkspaceAction::prepare) return 0;
+    }
     const auto show_scope = [&] {
+        if (port) return;
         std::cout << (fixture ? "[scope] Local fixture in " : "[scope] Questions and selected file excerpts from ");
         terminal_text(settings.workspace);
         if (!fixture) {
@@ -738,7 +783,7 @@ int run_workspace(const Options& settings) {
         std::cout << ".\n";
     };
     std::optional<PreviewOutput> preview_output;
-    if (!fixture) {
+    if (!fixture && !port) {
         try {
             preview_output.emplace();
         } catch (const std::system_error&) {
@@ -746,7 +791,9 @@ int run_workspace(const Options& settings) {
         }
     }
     const auto preview = [&](std::string_view text) {
-        if (preview_output) {
+        if (port) {
+            port->preview(text);
+        } else if (preview_output) {
             preview_output->offer(text);
         }
     };
@@ -770,13 +817,14 @@ int run_workspace(const Options& settings) {
         show_scope();
         question = settings.question ? question_input(*settings.question) : prompt();
     }
-    lay::SessionStore store(settings.id, scope, std::move(question), test_checkpoint());
+    lay::SessionStore store(settings.id, scope, std::move(question), port ? lay::StoreCheckpoint{} : test_checkpoint());
     auto session = store.load();
     if (settings.follow_up) {
         lay::append_task(session, question_input(*settings.follow_up), !settings.no_write);
         store.save(session, "follow_up");
         show_scope();
     }
+    if (port) port->checkpoint(session, "loaded");
     if (settings.accept_unknown) {
         if (session.stop != lay::SessionStop::effect_unknown || session.finished) {
             throw std::invalid_argument("Resume and review the unknown effect before accepting it.");
@@ -784,13 +832,21 @@ int run_workspace(const Options& settings) {
         if (settings.close_task) {
             session.finished = true;
             store.save(session, "closed_unknown");
-            render(session, &workspace);
+            finish(std::move(session));
             return 0;
         }
         session.stop = lay::SessionStop::end_turn;
         store.save(session, "accept_unknown");
     }
     activate(session.tasks.back().active_ms);
+    const auto review_ui = [&](const lay::ToolCall& call, const lay::Session& snapshot,
+                               std::string title, std::string details) {
+        const auto waiting = Clock::now();
+        const auto answer = port->review(snapshot.tasks.size(), call, std::move(title), std::move(details));
+        deadline += Clock::now() - waiting;
+        if (!answer || interrupted_now()) return lay::Approval::unavailable;
+        return *answer ? lay::Approval::approved : lay::Approval::denied;
+    };
     const auto review_answer = [&](std::string_view question) {
         std::cout << question << std::flush;
         const auto waiting = Clock::now();
@@ -829,22 +885,51 @@ int run_workspace(const Options& settings) {
     journal.save = [&](auto& snapshot, auto point) {
         const auto activity = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - deadline);
         snapshot.tasks.back().active_ms = std::clamp(task_time + activity, std::chrono::milliseconds{0}, task_time).count();
-        if (point == "stop" && snapshot.stop == lay::SessionStop::cancelled && !stopping()) {
-            snapshot.stop = lay::SessionStop::time_limit;
+        if (point == "stop" && snapshot.stop == lay::SessionStop::cancelled) {
+            if (!interrupted_now()) {
+                snapshot.stop = lay::SessionStop::time_limit;
+            } else if (port) {
+                close_cancelled_task(snapshot);
+            }
         }
         store.save(snapshot, point);
+        if (port) port->checkpoint(snapshot, point);
     };
     if (editor) {
         journal.prepare_edit = [&](const auto& call, const auto& snapshot) {
-            return editor->prepare(call, snapshot, approve_edit, cancel);
+            if (!port) return editor->prepare(call, snapshot, approve_edit, cancel);
+            return editor->prepare(call, snapshot, [&](const lay::EditEvidence& evidence, std::string_view diff) {
+                auto details = std::string(label("文件版本 ", "File version ")) + evidence.before +
+                    std::string(label("\n修改后 SHA-256 ", "\nResult SHA-256 ")) + evidence.after_digest + "\n";
+                details += diff;
+                return review_ui(call, snapshot, std::string(label("编辑 ", "Edit ")) + evidence.path, std::move(details));
+            }, cancel);
         };
         journal.recover_edit = [&](const auto& evidence) { return editor->recover(evidence); };
         journal.cleanup_edit = [&](const auto& evidence) { editor->cleanup(evidence); };
     }
     if (settings.allow_run) {
         journal.prepare_run = [&](const auto& call, const auto& snapshot) {
-            return runner.prepare(call, snapshot, approve_run, cancel);
+            if (!port) return runner.prepare(call, snapshot, approve_run, cancel);
+            return runner.prepare(call, snapshot, [&](const lay::RunEvidence& evidence) {
+                auto details = std::string(label("程序 ", "Program ")) + lay::quoted_argument(evidence.program) +
+                    std::string(label("\n目录 ", "\nDirectory ")) + lay::quoted_argument(evidence.directory) +
+                    std::string(label("\n权限 当前账户\n超时 ", "\nPermissions Current account\nTimeout ")) +
+                    std::to_string(evidence.timeout_ms) +
+                    std::string(label(" ms\n编辑版本 ", " ms\nEdit revision ")) + std::to_string(evidence.edit_revision);
+                for (std::size_t i = 0; i < evidence.arguments.size(); ++i) {
+                    details += std::string(label("\n参数 ", "\nArgument ")) + std::to_string(i) + " " +
+                        lay::quoted_argument(evidence.arguments[i]);
+                }
+                if (!fixture) details += std::string(label("\n输出摘录将发送至 ", "\nOutput excerpts go to ")) + selected.endpoint;
+                return review_ui(call, snapshot, std::string(label("运行 ", "Run ")) +
+                    std::string(lay::text_arg(call, "program")), std::move(details));
+            }, cancel);
         };
+    }
+    if (action == lay::tui::WorkspaceAction::inspect) {
+        if (!session.finished) lay::recover_session(session, journal);
+        return finish(std::move(session));
     }
     lay::Generate model;
     if (settings.model == "fixture-verify") {
@@ -856,7 +941,8 @@ int run_workspace(const Options& settings) {
         model = [&, generate = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
             if (!generate) {
                 try {
-                    generate = lay::provider_model(selected, cancel, preview);
+                    generate = lay::provider_model(selected, cancel, preview, port ? std::function<void()>{
+                        [&] { port->preview({}); }} : std::function<void()>{});
                 } catch (const std::exception& error) {
                     return lay::Generation{0, lay::GenerationFailure{lay::SessionStop::transport_error, error.what()}};
                 }
@@ -865,6 +951,32 @@ int run_workspace(const Options& settings) {
         };
     }
     return finish(lay::continue_session(std::move(session), model, read, cancel, {}, authorize, journal));
+}
+
+int workspace_tui(std::span<const std::string> arguments) {
+    const auto settings = options(arguments, true);
+    if (settings.workspace.empty() || settings.id.empty() || settings.follow_up || settings.accept_unknown ||
+        settings.list_models || settings.set_provider_key) {
+        throw std::invalid_argument("Workspace TUI requires --workspace PATH --session ID. Use F2 to submit and --resume to open a saved session.");
+    }
+    const lay::tui::WorkspaceScreen screen{settings.id, settings.workspace, settings.question.value_or(""),
+                                           settings.resume, settings.mono, settings.ascii, !settings.writable.empty()};
+    return lay::tui::run_workspace(screen, [&](const lay::tui::WorkspaceCommand& command, const lay::tui::WorkspacePort& port) {
+        auto next = settings;
+        next.question.reset();
+        next.resume = command.action != lay::tui::WorkspaceAction::start;
+        if (!next.resume) {
+            next.question = command.question;
+        } else if (command.action == lay::tui::WorkspaceAction::follow_up) {
+            next.resume = false;
+            next.follow_up = command.question;
+            next.no_write = !command.allow_edit;
+        } else if (command.action == lay::tui::WorkspaceAction::close_unknown) {
+            next.accept_unknown = true;
+            next.close_task = true;
+        }
+        run_workspace(next, &port, command.action);
+    });
 }
 
 int provider_command(const Options& settings) {
@@ -912,7 +1024,15 @@ int run(std::span<const std::string> arguments) {
     }
     try {
         if (!arguments.empty() && arguments.front() == "--tui") {
-            return lay::tui::run(arguments.subspan(1));
+            const auto remainder = arguments.subspan(1);
+            if (std::ranges::find(remainder, "--workspace") != remainder.end()) {
+#ifdef LAY_WITH_ANTHROPIC
+                return workspace_tui(remainder);
+#else
+                throw std::invalid_argument("Build with the readonly-release preset to use a real workspace.");
+#endif
+            }
+            return lay::tui::run(remainder);
         }
 #ifdef LAY_WITH_ANTHROPIC
         if (arguments.size() == 2 && arguments[0] == "--migrate-session") {

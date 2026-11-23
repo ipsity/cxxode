@@ -29,7 +29,8 @@ bool valid_model_id(std::string_view model);
 
 // Completes and validates a user-chosen base URL before reading any credential.
 Provider resolve_provider(Provider provider);
-Generate provider_model(const Provider& provider, StopRequested stop_requested, TextPreview preview = {});
+Generate provider_model(const Provider& provider, StopRequested stop_requested, TextPreview preview = {},
+                        std::function<void()> attempt_started = {});
 std::vector<std::string> list_models(const Provider& provider);
 std::string provider_key(const Provider& provider);
 void save_provider_key(const Provider& provider, std::string_view key);

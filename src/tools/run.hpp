@@ -16,6 +16,4 @@ private:
     const ReadOnlyWorkspace& workspace_;
 };
 
-std::string quoted_argument(std::string_view value);
-
 } // namespace lay

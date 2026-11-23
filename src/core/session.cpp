@@ -196,7 +196,9 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
     }
 }
 
-void recover(Session& session, const SessionJournal& journal) {
+} // namespace
+
+void recover_session(Session& session, const SessionJournal& journal) {
     const auto first = session.tasks.empty() ? 0 : session.tasks.back().first_round;
     if (session.rounds.size() == first || !journal.save) {
         return;
@@ -242,8 +244,6 @@ void recover(Session& session, const SessionJournal& journal) {
         save(journal, session, "recovery");
     }
 }
-
-} // namespace
 
 bool task_closed(const Session& session) {
     return session.finished || session.stop == SessionStop::request_limit || session.stop == SessionStop::tool_limit ||
@@ -291,7 +291,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
     const bool run_enabled = journal.save && journal.prepare_run;
     try {
         if (!session.finished) {
-            recover(session, journal);
+            recover_session(session, journal);
         }
         if (session.finished || session.stop == SessionStop::effect_unknown || session.stop == SessionStop::time_limit) {
             return session;
