@@ -1,0 +1,42 @@
+{
+  "milestone": "P20",
+  "source_commit": "266f438a6e8f24ba7988da86ce3d64c8d9bddff7",
+  "artifacts": {
+    "windows_executable_sha256": "17d60d6c44e68d8925e6362e16b2759f4ec4d0c9903269aba6faa47a38a6ef70",
+    "wsl_executable_sha256": "aa88ed54da10ca24f68a87740c6d70783466665fb1a7482c041712d496a13f5d",
+    "windows_package": "lay-code-0.1.0-rc13-windows-x64.zip",
+    "windows_package_sha256": "0b91c3fe470c784d45d16fb56b8e43e94ffa32da077c03329b2dca5e981dcbb4"
+  },
+  "contracts": {
+    "windows": {"passed": 14, "total": 14},
+    "ubuntu_24_04_wsl": {"passed": 14, "total": 14},
+    "recordings": "tests/contract/ctest_contract.cpp",
+    "live_command_and_legacy_session": "tests/e2e/verification.py",
+    "tui_and_cli_projection": "tests/e2e/tui_workspace.py"
+  },
+  "recordings": [
+    {"case": "pass", "named": ["good test: passed"], "summary_retained": true},
+    {"case": "fail", "named": ["bad...test: failed"], "summary_retained": true},
+    {"case": "empty", "named": [], "summary": "CTest reported no tests."},
+    {"case": "skip", "named": ["skip test: skipped"], "pass_claims": 0},
+    {"case": "cancel", "named": [], "process_status": "cancelled"},
+    {"case": "truncation", "named": [], "summary_retained": true}
+  ],
+  "fallbacks": {
+    "malformed_completed_rows": "Summary retained, no named cases emitted",
+    "exit_disagrees_with_rows": "No named cases emitted",
+    "legacy_session_without_case_detail": "RC13 reopened a session written by packaged RC12, preserving the original summaries and exact saved snapshot without rerunning tests",
+    "stale_report": "An existing report.xml with another case was ignored and byte-verified unchanged",
+    "coverage_assertions": 0,
+    "named_source": "Normalized captured stdout from the same approved CTest process, with one-based line numbers"
+  },
+  "packaged_executable_replay": {
+    "environment": "Windows ConPTY with the RC13 production executable and CTest 4.4.5",
+    "actual_ctest_runs": 2,
+    "recorded": [
+      {"name": "empty_config", "outcome": "failed", "stdout_line": 3},
+      {"name": "empty_config", "outcome": "passed", "stdout_line": 3}
+    ],
+    "observations": "F8 opened the failed command in TUI. CLI inspection of the same SQLite session showed both named outcomes with source lines."
+  }
+}
