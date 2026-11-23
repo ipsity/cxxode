@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -113,6 +114,31 @@ int main() {
             compact.body.find("user denied this action") != compact.body.npos &&
             compact.body.find("revision-35") != compact.body.npos,
             "Repeated reads cannot crowd the first file version, prior denials or the newest version out of history");
+
+    auto corrected_tasks = many_tasks;
+    corrected_tasks.front().supplement = TaskSupplement{"先检查现有测试。", 7, 1};
+    Provider chat_provider;
+    chat_provider.protocol = Protocol::chat_completions;
+    chat_provider.model = "fixture-model";
+    const auto correction = "[Task supplement task-1-input-2]\n" + corrected_tasks.front().supplement->text;
+    const Request corrected{follow_up, repeated_reads, 24, false, false, corrected_tasks};
+    for (const auto& provider : {Provider{}, chat_provider, responses}) {
+        const auto trimmed_correction = messages::project(corrected, provider, limits);
+        require(trimmed_correction.layout.first_round > 2 && trimmed_correction.layout.template_version == 5,
+                "A supplement remains in a compacted conversation");
+        const auto body = nlohmann::json::parse(trimmed_correction.body);
+        const auto& turns = body.at(provider.protocol == Protocol::responses ? "input" : "messages");
+        const auto input = std::ranges::find_if(turns, [&](const auto& turn) {
+            return turn.value("role", std::string{}) == "user" && turn.at("content") == correction;
+        });
+        const auto later = std::ranges::find_if(turns, [&](const auto& turn) {
+            return turn.value("role", std::string{}) == "user" && turn.at("content") == follow_up;
+        });
+        require(input != turns.end() && later != turns.end() && input < later &&
+                std::ranges::count_if(turns, [&](const auto& turn) {
+                    return turn.value("role", std::string{}) == "user" && turn.at("content") == correction;
+                }) == 1, "The historical supplement occurs once before the next task");
+    }
 
     messages::Stream anthropic;
     require(anthropic.push(

@@ -109,6 +109,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/supplement.py
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
         set_tests_properties(editing.supplement PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
+        add_test(NAME editing.supplement_live COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/supplement_live.py
+            $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
+        set_tests_properties(editing.supplement_live PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
         add_executable(process_contract tests/contract/process_contract.cpp)
         target_link_libraries(process_contract PRIVATE lay_workspace nlohmann_json::nlohmann_json)
         if(MINGW)

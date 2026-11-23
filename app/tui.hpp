@@ -34,6 +34,8 @@ struct WorkspacePort {
     std::function<void(std::string_view)> scope;
     std::function<void(std::string_view)> preview;
     std::function<std::optional<bool>(std::size_t, const ToolCall&, std::string, std::string)> review;
+    std::function<std::optional<std::string>(std::size_t)> take_supplement;
+    StopRequested supplement_requested;
 };
 
 struct WorkspaceScreen {

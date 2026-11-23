@@ -146,11 +146,32 @@ void pause_on_repeated_file_failure(Session& session, const ToolRecord& current)
     }
 }
 
+bool collect_supplement(Session& session, const SessionJournal& journal) {
+    if (session.tasks.empty() || task_closed(session)) return false;
+    auto& task = session.tasks.back();
+    if (!task.supplement && journal.accept_supplement) journal.accept_supplement(session);
+    if (!task.supplement || task.supplement->before_round) return false;
+    if (session.rounds.size() > task.first_round) {
+        for (auto& record : session.rounds.back().tools) {
+            if (!record.dispatched && record.result.status == ToolStatus::pending) {
+                record.result = {ToolStatus::skipped, "superseded by " + supplement_id(session.tasks.size())};
+                if (record.edit && record.edit->approved == true) record.edit->approved.reset();
+            }
+        }
+    }
+    if (session.stop == SessionStop::approval_required || session.stop == SessionStop::repeated_file_failure) {
+        session.stop = SessionStop::end_turn;
+        session.diagnostic.clear();
+    }
+    return true;
+}
+
 void settle_tools(Session& session, const ExecuteTool& execute, const StopRequested& stop_requested,
                   std::size_t first_dispatch, std::size_t tool_limit,
                   const AuthorizeTool& authorize, const SessionJournal& journal) {
     std::string_view skip_reason;
     for (auto& record : session.rounds.back().tools) {
+        if (collect_supplement(session, journal)) break;
         if (record.result.status != ToolStatus::pending) {
             if (record.result.status != ToolStatus::ok) {
                 skip_reason = "prior_tool_failed";
@@ -178,6 +199,7 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
             record.edit = std::move(edit.evidence);
             if (!edit.rejection.empty()) {
                 if (edit.needs_approval) {
+                    if (collect_supplement(session, journal)) break;
                     session.stop = stop_requested() ? SessionStop::cancelled : SessionStop::approval_required;
                     session.diagnostic = std::move(edit.rejection);
                     break;
@@ -193,6 +215,7 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
             run = journal.prepare_run(record.call, session);
             record.run = std::move(run.evidence);
             if (run.needs_approval) {
+                if (collect_supplement(session, journal)) break;
                 session.stop = stop_requested() ? SessionStop::cancelled : SessionStop::approval_required;
                 session.diagnostic = "interactive command approval required";
                 break;
@@ -212,6 +235,7 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
                 continue;
             }
         }
+        if (collect_supplement(session, journal)) break;
         if (stop_requested()) {
             session.stop = SessionStop::cancelled;
             skip_reason = name(session.stop);
@@ -329,7 +353,7 @@ TaskActions task_actions(const Session& session) {
     }
     if (task_closed(session)) return {.follow_up = !pending};
     if (session.stop == SessionStop::effect_unknown) return {.acknowledge_unknown = true};
-    return {.resume = !session.tasks.back().supplement, .close = true};
+    return {.resume = true, .close = true};
 }
 
 void close_task(Session& session) {
@@ -380,7 +404,7 @@ Session run_session(std::string question, const Generate& generate, const Execut
 Session continue_session(Session session, const Generate& generate, const ExecuteTool& execute,
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal) {
-    const Task* task = session.tasks.empty() ? nullptr : &session.tasks.back();
+    auto* task = session.tasks.empty() ? nullptr : &session.tasks.back();
     const auto first_round = task ? task->first_round : 0;
     const auto first_request = task ? task->first_request : 0;
     const auto first_dispatch = task ? task->first_dispatch : 0;
@@ -390,15 +414,13 @@ Session continue_session(Session session, const Generate& generate, const Execut
         if (!session.finished) {
             recover_session(session, journal);
         }
-        if (session.finished || session.stop == SessionStop::effect_unknown || session.stop == SessionStop::time_limit) {
+        if (task_closed(session) || session.stop == SessionStop::effect_unknown) {
             return session;
         }
-        // A saved supplement needs an explicit request boundary before this task can resume.
-        if (task && task->supplement) return session;
         session.stop = SessionStop::end_turn;
         session.diagnostic.clear();
         while (true) {
-            if (session.rounds.size() > first_round) {
+            if (!collect_supplement(session, journal) && session.rounds.size() > first_round) {
                 auto& round = session.rounds.back();
                 const bool untouched = std::ranges::all_of(round.tools, [](const ToolRecord& record) {
                     return !record.dispatched && record.result.status == ToolStatus::pending;
@@ -409,12 +431,18 @@ Session continue_session(Session session, const Generate& generate, const Execut
                     settle_tools(session, execute, stop_requested, first_dispatch, limits.tool_calls, authorize, journal);
                 }
             }
+            const bool supplemented = collect_supplement(session, journal);
             if (session.stop != SessionStop::end_turn || stop_requested() ||
                 session.requests - first_request >= limits.requests) {
                 if (session.stop == SessionStop::end_turn) {
                     session.stop = stop_requested() ? SessionStop::cancelled : SessionStop::request_limit;
                 }
                 break;
+            }
+
+            if (supplemented) {
+                task->supplement->before_round = session.rounds.size();
+                save(journal, session, "supplement_included");
             }
 
             ReplyDraft draft;
@@ -463,6 +491,15 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 }
                 session.requests += result.attempts;
             }
+            auto complete = std::move(draft).complete();
+            if (collect_supplement(session, journal)) {
+                if (complete && !complete->tools.empty() && !interrupted && !result.failure) {
+                    session.rounds.emplace_back(std::move(*complete));
+                    collect_supplement(session, journal);
+                    save(journal, session, "reply");
+                }
+                continue;
+            }
             if (interrupted || stop_requested()) {
                 session.stop = SessionStop::cancelled;
                 break;
@@ -472,7 +509,6 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 session.diagnostic = result.failure->diagnostic;
                 break;
             }
-            auto complete = std::move(draft).complete();
             if (!complete) {
                 session.stop = SessionStop::protocol_error;
                 break;
@@ -545,7 +581,7 @@ TaskReceipt task_receipt(const Session& session, Limits limits) {
             if (!result.test_summary.empty()) verification += "\n    " + result.test_summary;
         }
     }
-    const auto reason = task.supplement && !task_closed(session) && session.stop == SessionStop::end_turn ?
+    const auto reason = task.supplement && !task.supplement->before_round && !task_closed(session) && session.stop == SessionStop::end_turn ?
         std::string_view("supplement_pending") : name(session.stop);
     auto title = "Task " + std::to_string(session.tasks.size()) + " receipt · " + std::string(reason);
     std::string detail = "Saved files";

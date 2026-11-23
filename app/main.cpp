@@ -30,6 +30,10 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#ifdef LAY_TEST_HOOKS
+#include <filesystem>
+#include <fstream>
+#endif
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
@@ -500,7 +504,8 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
                       << attempt.body_bytes << '/' << attempt.budget_bytes << " bytes)\n";
         }
     }
-    const bool pending_supplement = !session.tasks.empty() && session.tasks.back().supplement && !lay::task_closed(session);
+    const bool pending_supplement = !session.tasks.empty() && session.tasks.back().supplement &&
+        !session.tasks.back().supplement->before_round && !lay::task_closed(session);
     const auto reason = pending_supplement && session.stop == lay::SessionStop::end_turn
         ? "supplement_pending" : lay::name(session.stop);
     std::cout << "[session] " << reason << " requests=" << session.requests
@@ -696,7 +701,8 @@ lay::StoreCheckpoint test_checkpoint() {
     return [](std::string_view stage, std::string_view point, const lay::Session& snapshot) {
         const bool has_tool = !snapshot.rounds.empty() && !snapshot.rounds.back().tools.empty();
         const bool attempt = point == "request" || point == "request_result";
-        const bool standalone = attempt || point == "follow_up" || point == "supplement" || point == "supplement_resume";
+        const bool standalone = attempt || point == "follow_up" || point == "supplement" || point == "supplement_included" ||
+            point == "supplement_resume";
         if (!standalone && !(point == "reply" && snapshot.finished) && !has_tool) {
             return false;
         }
@@ -705,6 +711,17 @@ lay::StoreCheckpoint test_checkpoint() {
             (attempt ? "_" + std::to_string(snapshot.requests) : "");
         if (const auto* full = std::getenv("LAY_TEST_FULL"); full && name == full) {
             return true;
+        }
+        if (const auto* gate = std::getenv("LAY_TEST_GATE_POINT"); gate && name == gate) {
+            if (const auto* path = std::getenv("LAY_TEST_GATE")) {
+                const auto ready = lay::platform::path_from_utf8(std::string(path) + ".ready");
+                const auto release = lay::platform::path_from_utf8(std::string(path) + ".release");
+                std::ofstream(ready).close();
+                const auto expires = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+                while (!std::filesystem::exists(release) && std::chrono::steady_clock::now() < expires) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+            }
         }
         if (const auto* pause = std::getenv("LAY_TEST_PAUSE"); pause && name == pause) {
             std::cout << "[checkpoint] " << name << '\n' << std::flush;
@@ -760,6 +777,15 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     if (!fixture) {
         selected = lay::load_provider(settings.provider, settings.model,
                                      lay::platform::path_from_utf8(settings.provider_config));
+#ifdef LAY_TEST_HOOKS
+        if (const auto* base = std::getenv("LAY_TEST_ANTHROPIC_BASE");
+            base && selected.protocol == lay::Protocol::anthropic) {
+            selected.base_url = base;
+            selected = lay::resolve_provider(std::move(selected));
+            if (!selected.loopback) throw std::invalid_argument("The Messages fixture requires a loopback URL.");
+            selected.api_key_env.clear();
+        }
+#endif
         if (selected.model.empty()) {
             throw std::invalid_argument("Choose --model MODEL or set model in the provider profile. Use --list-models to see available IDs.");
         }
@@ -958,14 +984,17 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     std::string unsaved_reply;
     lay::SessionJournal journal{};
     journal.persist_model_attempts = !fixture;
-    journal.save = [&](auto& snapshot, auto point) {
+    const auto record_time = [&](lay::Session& snapshot) {
         const auto activity = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - deadline);
         snapshot.tasks.back().active_ms = std::clamp(task_time + activity, std::chrono::milliseconds{0}, task_time).count();
         snapshot.tasks.back().approval_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(approval_wait).count();
+    };
+    journal.save = [&](auto& snapshot, auto point) {
+        record_time(snapshot);
         if (point == "stop" && snapshot.stop == lay::SessionStop::cancelled) {
             if (!interrupted_now()) {
                 snapshot.stop = lay::SessionStop::time_limit;
-            } else if (port) {
+            } else if (port && !snapshot.tasks.back().supplement) {
                 close_cancelled_task(snapshot);
             }
         }
@@ -977,6 +1006,15 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         }
         publish(snapshot, point, {store.revision()});
     };
+    if (port) {
+        journal.accept_supplement = [&](lay::Session& snapshot) {
+            if (auto text = port->take_supplement(snapshot.tasks.size())) {
+                record_time(snapshot);
+                store.save_supplement(snapshot, snapshot.tasks.size(), std::move(*text));
+                publish(snapshot, "supplement", {store.revision()});
+            }
+        };
+    }
     if (!editors.empty()) {
         journal.prepare_edit = [&](const auto& call, const auto& snapshot) -> lay::EditPreparation {
             const auto* editor = editor_for(lay::text_arg(call, "path"));
@@ -1044,10 +1082,11 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         model = fixture_edit_model(settings.writable.front());
     } else {
         // Inspection and recovery of committed evidence must work without model credentials.
-        model = [&, generate = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
+        const lay::StopRequested model_stop = [cancel, port] { return cancel() || (port && port->supplement_requested()); };
+        model = [&, model_stop, generate = lay::Generate{}](const lay::Request& request, const lay::EventSink& emit) mutable {
             if (!generate) {
                 try {
-                    generate = lay::provider_model(selected, cancel, preview, port ? std::function<void()>{
+                    generate = lay::provider_model(selected, model_stop, preview, port ? std::function<void()>{
                         [&] { port->preview({}); }} : std::function<void()>{});
                 } catch (const std::exception& error) {
                     return lay::Generation{0, lay::GenerationFailure{lay::SessionStop::transport_error, error.what()}};

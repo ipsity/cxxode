@@ -3,6 +3,7 @@
 
 #include <charconv>
 #include <stdexcept>
+#include <utility>
 
 namespace lay::tui {
 namespace {
@@ -39,7 +40,8 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
     Transcript output{{}, snapshot.tasks.size(), task_closed(snapshot), snapshot.stop,
                       safe_text(snapshot.diagnostic, ascii), task_actions(snapshot), checkpoint.revision,
                       !checkpoint.storage_error.empty()};
-    output.supplement_pending = !snapshot.tasks.empty() && snapshot.tasks.back().supplement && !output.closed;
+    output.supplement_saved = !snapshot.tasks.empty() && snapshot.tasks.back().supplement.has_value();
+    output.supplement_pending = output.supplement_saved && !snapshot.tasks.back().supplement->before_round && !output.closed;
     const auto current_revision = edit_revision(snapshot);
     const auto add = [&](std::string title, std::string_view detail) {
         output.cards.push_back({safe_text(title, ascii), safe_text(detail, ascii, true)});
@@ -114,6 +116,8 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
             auto title = receipt;
             if (!ascii && !input->before_round) {
                 title = std::string(closed ? "补充已保存 · 任务已结清 " : "补充已保存 · 等待处理 ") + supplement_id(i + 1);
+            } else if (!ascii) {
+                title = "补充已纳入请求 · " + supplement_id(i + 1);
             }
             add(std::move(title), receipt + '\n' + input->text);
         }
@@ -179,6 +183,11 @@ void WorkspaceWorker::launch(WorkspaceCommand command) {
         view_.busy = true;
         view_.requesting = false;
         view_.stopping = false;
+        view_.can_supplement = false;
+        view_.supplement_waiting = false;
+        queued_supplement_.reset();
+        accepts_supplement_ = command.action == WorkspaceAction::start || command.action == WorkspaceAction::follow_up ||
+            command.action == WorkspaceAction::resume;
         view_.preview.clear();
         view_.error.clear();
         cancelled_.store(false, std::memory_order_relaxed);
@@ -210,6 +219,19 @@ void WorkspaceWorker::decide(std::size_t ticket, bool approved) {
     ready_.notify_one();
 }
 
+bool WorkspaceWorker::submit_supplement(std::size_t task, std::string text) {
+    {
+        const std::lock_guard lock(mutex_);
+        if (!view_.can_supplement || view_.stopping || !view_.transcript || view_.transcript->tasks != task) return false;
+        queued_supplement_ = std::move(text);
+        view_.can_supplement = false;
+        view_.supplement_waiting = true;
+        view_.review.reset();
+    }
+    ready_.notify_one();
+    return true;
+}
+
 void WorkspaceWorker::publish(const Session& snapshot, std::string_view point,
                               const std::function<std::vector<std::string>(std::size_t)>& citations,
                               std::span<const std::string> edits, CheckpointView checkpoint) {
@@ -225,7 +247,13 @@ void WorkspaceWorker::publish(const Session& snapshot, std::string_view point,
     const std::lock_guard lock(mutex_);
     view_.preview.clear();
     view_.requesting = attempting;
-    if (transcript) view_.transcript = std::move(transcript);
+    if (transcript) {
+        if (transcript->supplement_saved) view_.supplement_waiting = false;
+        view_.can_supplement = accepts_supplement_ && point != "finished" && !transcript->closed &&
+            !transcript->storage_failed && transcript->stop != SessionStop::effect_unknown &&
+            !transcript->supplement_saved && !view_.supplement_waiting && !view_.stopping;
+        view_.transcript = std::move(transcript);
+    }
 }
 
 std::optional<bool> WorkspaceWorker::review(std::size_t task, const ToolCall& call, std::string title,
@@ -233,10 +261,10 @@ std::optional<bool> WorkspaceWorker::review(std::size_t task, const ToolCall& ca
     auto request = std::make_shared<Review>(Review{++tickets_, task, safe_text(call.id, ascii_),
         safe_text(title, ascii_), safe_text(detail, ascii_, true)});
     std::unique_lock lock(mutex_);
-    if (cancelled_.load(std::memory_order_relaxed)) return std::nullopt;
+    if (queued_supplement_ || cancelled_.load(std::memory_order_relaxed)) return std::nullopt;
     decision_.reset();
     view_.review = std::move(request);
-    ready_.wait(lock, [&] { return decision_ || cancelled_.load(std::memory_order_relaxed); });
+    ready_.wait(lock, [&] { return decision_ || queued_supplement_ || cancelled_.load(std::memory_order_relaxed); });
     view_.review.reset();
     return cancelled_.load(std::memory_order_relaxed) ? std::nullopt : decision_;
 }
@@ -261,6 +289,15 @@ void WorkspaceWorker::execute(const WorkspaceCommand& command) {
         [&](std::size_t task, const ToolCall& call, std::string title, std::string details) {
             return review(task, call, std::move(title), std::move(details));
         },
+        [&](std::size_t task) -> std::optional<std::string> {
+            const std::lock_guard lock(mutex_);
+            if (!view_.transcript || view_.transcript->tasks != task) return {};
+            return std::exchange(queued_supplement_, std::nullopt);
+        },
+        [&] {
+            const std::lock_guard lock(mutex_);
+            return queued_supplement_.has_value();
+        },
     };
     std::string error;
     try {
@@ -275,6 +312,9 @@ void WorkspaceWorker::execute(const WorkspaceCommand& command) {
     view_.busy = false;
     view_.requesting = false;
     view_.stopping = false;
+    view_.can_supplement = false;
+    view_.supplement_waiting = false;
+    queued_supplement_.reset();
 }
 
 } // namespace lay::tui

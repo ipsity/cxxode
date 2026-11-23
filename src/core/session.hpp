@@ -189,6 +189,7 @@ struct SessionJournal {
     std::function<void(const EditEvidence&)> cleanup_edit;
     std::function<RunPreparation(const ToolCall&, const Session&)> prepare_run{};
     bool persist_model_attempts = false;
+    std::function<void(Session&)> accept_supplement{};
 };
 
 struct TaskActions {

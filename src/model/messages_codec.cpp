@@ -364,6 +364,13 @@ Projection project(const Request& request, const Provider& provider, ContextLimi
         instructions += " The latest user instruction governs the current task. Prior tool results are historical "
                         "observations. Read again before treating older file evidence as current.";
     }
+    if (std::ranges::any_of(request.tasks, [](const Task& task) {
+            return task.supplement && task.supplement->before_round;
+        })) {
+        projection.layout.template_version = 5;
+        instructions += " A user supplement updates the task identified in its heading. Respect its latest "
+                        "direction and the tool results already recorded by the host.";
+    }
     if (request.edit_enabled) {
         instructions += " When the user requests a file change and the evidence supports it, read the current "
                         "file and call the edit tool before the final answer. The edit tool opens the host's approval "
@@ -403,9 +410,13 @@ Projection project(const Request& request, const Provider& provider, ContextLimi
         groups.push_back(round_messages(request.history[i], protocol, task_number(request.tasks, i), i));
     }
     std::vector<std::string> inputs(groups.size() + 1);
-    for (std::size_t i = 1; i < request.tasks.size(); ++i) {
+    for (std::size_t i = 0; i < request.tasks.size(); ++i) {
         const auto& task = request.tasks[i];
-        inputs.at(task.first_round) += ',' + user_input(task.question);
+        if (i) inputs.at(task.first_round) += ',' + user_input(task.question);
+        if (task.supplement && task.supplement->before_round) {
+            inputs.at(*task.supplement->before_round) += ',' +
+                user_input("[Task supplement " + supplement_id(i + 1) + "]\n" + task.supplement->text);
+        }
     }
     std::vector<std::size_t> group_bytes(groups.size() + 1);
     group_bytes.back() = inputs.back().size();

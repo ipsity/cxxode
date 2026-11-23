@@ -26,6 +26,7 @@ struct Transcript {
     bool storage_failed;
     std::string saved_edit{};
     bool supplement_pending = false;
+    bool supplement_saved = false;
 };
 
 struct Review {
@@ -45,6 +46,8 @@ struct WorkspaceView {
     bool busy = false;
     bool requesting = false;
     bool stopping = false;
+    bool can_supplement = false;
+    bool supplement_waiting = false;
     bool operator==(const WorkspaceView&) const = default;
 };
 
@@ -56,6 +59,7 @@ public:
     WorkspaceView view() const;
     void stop();
     void decide(std::size_t ticket, bool approved);
+    bool submit_supplement(std::size_t task, std::string text);
 
 private:
     void publish(const Session& snapshot, std::string_view point,
@@ -72,6 +76,8 @@ private:
     std::atomic_bool cancelled_ = false;
     std::size_t tickets_ = 0;
     std::optional<bool> decision_;
+    std::optional<std::string> queued_supplement_;
+    bool accepts_supplement_ = false;
     std::vector<std::vector<std::string>> source_notes_;
     std::jthread thread_;
 };

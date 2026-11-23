@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <deque>
 #include <stdexcept>
 #include <utility>
 
@@ -13,7 +14,7 @@ namespace {
 
 enum class Key {
     text, enter, escape, tab, stop, details, submit, up, down, left, right, first, last,
-    previous_page, next_page, backspace, erase, paste, paste_space, acknowledge, edit_scope, resume
+    previous_page, next_page, backspace, erase, paste, paste_space, acknowledge, edit_scope, resume, supplement
 };
 
 struct Event {
@@ -101,6 +102,7 @@ private:
                 {"OR", Key::acknowledge}, {"[13~", Key::acknowledge},
                 {"OS", Key::edit_scope}, {"[14~", Key::edit_scope},
                 {"[15~", Key::resume},
+                {"[17~", Key::supplement},
             };
             if (const auto match = std::ranges::find(keys, sequence, [](const auto& item) { return item.first; });
                 match != std::end(keys)) {
@@ -417,6 +419,15 @@ public:
             }
             submitted_ = {};
         }
+        if (supplement_submitted_task_ && !next.supplement_waiting) {
+            if (task_count(next) != *supplement_submitted_task_ || !next.transcript->supplement_saved) {
+                if (draft_.text.empty()) draft_ = std::move(submitted_supplement_);
+                else returned_supplements_.push_back(std::move(submitted_supplement_));
+                notice_ = label("补充已退回草稿", "Supplement returned to draft");
+            }
+            submitted_supplement_ = {};
+            supplement_submitted_task_.reset();
+        }
         view_ = std::move(next);
         return changed;
     }
@@ -491,7 +502,7 @@ public:
         line(shortcuts());
         line(instruction());
         line(notice_.empty() ? draft_label() : notice_);
-        if (!view_.review || focused_) {
+        if (!view_.review || focused_ || supplement_task_) {
             auto [visible, column] = (focused_ ? decision_ : draft_).view(width - 2, ascii_);
             line("> " + visible, focused_ ? "\x1b[7m" : "");
             result.caret = 3 + column;
@@ -520,6 +531,10 @@ public:
                 return true;
             }
             if (key == Key::escape) {
+                if (supplement_task_) {
+                    supplement_task_.reset();
+                    return true;
+                }
                 if (!focused_) return false;
                 reset_decision();
                 return true;
@@ -530,8 +545,12 @@ public:
                 if (!combined) submit();
                 continue;
             }
+            if (key == Key::supplement && !combined) {
+                toggle_supplement();
+                return true;
+            }
             if (new_review || view_.stopping) continue;
-            if (view_.review && key == Key::tab) {
+            if (view_.review && !supplement_task_ && key == Key::tab) {
                 if (focused_) reset_decision();
                 else if (!combined) {
                     focused_ = true;
@@ -583,7 +602,7 @@ public:
                 navigate(key);
                 continue;
             }
-            if (!view_.review || focused_) {
+            if (!view_.review || focused_ || supplement_task_) {
                 auto& draft = focused_ ? decision_ : draft_;
                 if ((key == Key::text || key == Key::paste_space) && (!focused_ || draft.text.size() < 8)) {
                     if (!focused_ && !event.pasted) notice_ = {};
@@ -617,8 +636,35 @@ private:
     bool can_narrow() const { return settings_.writable && view_.transcript && !view_.review; }
     std::string_view label(std::string_view zh, std::string_view en) const { return ascii_ ? en : zh; }
 
+    void toggle_supplement() {
+        reset_decision();
+        if (supplement_task_) {
+            supplement_task_.reset();
+        } else if (view_.can_supplement) {
+            supplement_task_ = task_count(view_);
+        } else if (!returned_supplements_.empty()) {
+            if (!draft_.text.empty()) returned_supplements_.push_back(std::move(draft_));
+            draft_ = std::move(returned_supplements_.front());
+            returned_supplements_.pop_front();
+            notice_ = label("已取回补充草稿", "Returned supplement draft opened");
+        }
+    }
+
     void submit() {
-        if (view_.review) {
+        if (supplement_task_) {
+            if (draft_.text.find_first_not_of(' ') == draft_.text.npos) {
+                notice_ = label("请先输入补充内容。", "Enter a supplement first.");
+                return;
+            }
+            if (worker_.submit_supplement(*supplement_task_, draft_.text)) {
+                supplement_submitted_task_ = supplement_task_;
+                submitted_supplement_ = std::exchange(draft_, Draft{});
+                notice_ = {};
+            } else {
+                notice_ = label("补充保留在草稿区", "Supplement kept in draft");
+            }
+            supplement_task_.reset();
+        } else if (view_.review) {
             notice_ = label("请先完成当前审批，草稿未发送。", "Finish the current review. Draft unsent.");
         } else if (view_.busy || view_.stopping) {
             notice_ = label("草稿未发送，可以继续编辑。", "Draft unsent. Keep editing.");
@@ -626,10 +672,12 @@ private:
             notice_ = label("草稿未发送 · F5 重开会话", "Draft unsent / F5 opens the session");
         } else if (unknown()) {
             notice_ = label("草稿未发送 · 先核对未知效果", "Draft unsent / Check unknown effects");
+        } else if (view_.transcript && view_.transcript->supplement_pending) {
+            notice_ = label("补充等待处理 · F5 继续原任务", "Supplement pending / F5 continues the task");
         } else if (view_.transcript && view_.transcript->actions.resume) {
             notice_ = label("草稿未发送 · F5 继续原任务", "Draft unsent / F5 continues the task");
         } else if (view_.transcript && view_.transcript->actions.close) {
-            notice_ = label("补充等待处理 · F3 可结束任务", "Supplement pending / F3 ends the task");
+            notice_ = label("F3 可结束任务", "F3 ends the task");
         } else if (view_.transcript && !view_.transcript->actions.follow_up) {
             notice_ = label("草稿未发送，请重开会话。", "Draft unsent. Reopen the session.");
         } else if (draft_.text.find_first_not_of(' ') == draft_.text.npos) {
@@ -656,6 +704,9 @@ private:
     }
 
     std::string_view draft_label() const {
+        if (view_.supplement_waiting) return label("补充等待保存 · 可以编辑下一条草稿", "Saving supplement / Next draft editable");
+        if (supplement_task_) return label("正在编辑本任务的补充", "Editing a supplement for this task");
+        if (!returned_supplements_.empty()) return label("F6 切换退回的草稿", "F6 cycles through returned drafts");
         if (view_.review) {
             if (view_.transcript && !view_.transcript->saved_edit.empty()) return view_.transcript->saved_edit;
             return label("审核当前动作", "Review current action");
@@ -704,6 +755,11 @@ private:
     }
 
     std::string_view instruction() const {
+        if (supplement_task_) return label("F2 提交补充 · F6 返回草稿", "F2 submits supplement / F6 returns to draft");
+        if (view_.can_supplement && !focused_) {
+            return view_.review ? label("Tab 输入决定 · F6 补充本任务", "Tab to decide / F6 supplement task") :
+                                  label("F6 补充本任务 · 可编辑下一条草稿", "F6 supplement task / Next draft editable");
+        }
         if (view_.review) return focused_ ? label("输入 y 或 yes 后回车批准。空回车拒绝。",
                                                    "y or yes + Enter approves. Enter denies.") :
                                             label("Tab 输入决定，↑↓ 翻阅动作详情。", "Tab to decide. Up/Down to review.");
@@ -776,6 +832,10 @@ private:
     Draft draft_;
     Draft decision_;
     Draft submitted_;
+    Draft submitted_supplement_;
+    std::deque<Draft> returned_supplements_;
+    std::optional<std::size_t> supplement_task_;
+    std::optional<std::size_t> supplement_submitted_task_;
     std::size_t submitted_after_ = 0;
     bool submitted_allow_edit_ = true;
 };

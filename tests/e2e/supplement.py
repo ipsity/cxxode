@@ -116,7 +116,7 @@ def run(base, cli, driver):
         accepted()
         kill_at(fixture, "before_supplement_resume", extra=("--resume",), inspect=accepted)
         accepted()
-        reopened = fixture.command(1, driver=False, resume=True, data=b"")
+        reopened = fixture.command(driver=False, resume=True, extra=("--inspect",), data=b"")
         expected = f"[supplement {INPUT_ID}] saved at revision {revision + 1} / pending"
         assert reopened.count(expected) == 1 and SUPPLEMENT in reopened
         assert "Apply this edit?" not in reopened and server.requests == 2
@@ -132,7 +132,7 @@ def run(base, cli, driver):
             terminal.send("\x1b[A")
             terminal.quiet()
             terminal.key("\x0f", SUPPLEMENT)
-            terminal.key("\x1bOQ", "补充等待处理 · F3 可结束任务")
+            terminal.key("\x1bOQ", "补充等待处理 · F5 继续原任务")
             accepted()
         closed = fixture.command(driver=False, resume=True, extra=("--close-task",), data=b"")
         assert "task closed before inclusion" in closed and server.requests == 2

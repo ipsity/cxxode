@@ -1,4 +1,10 @@
-# Lay Code 0.1.0-rc10
+# Lay Code 0.1.0-rc11
+
+P16 Windows x64 便携验收包。运行中的任务可按 F6 进入补充模式，再按 F2 提交。补充保留原任务和预算。已经派发的动作先结算，尚未派发的旧提案失效，新的验证或编辑动作另行审批。
+
+通过 Responses、Chat Completions 和 Anthropic Messages 本地回环回放，以及 Windows ConPTY 和 Ubuntu 24.04 WSL PTY 的终端交互验证。验收记录位于源码仓库的 `bench/p16-validation.json`。
+
+## Lay Code 0.1.0-rc10
 
 P17 Windows x64 便携验收包。持久会话在每次模型 POST 前保存本任务的预算预留，包括自动重试。恢复保留已用额度及未知回执。相邻两次可核实的相同文件错误会暂停，任务收据会列出调用、已保存文件、验证记录和剩余额度。
 

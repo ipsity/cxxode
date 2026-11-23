@@ -684,7 +684,13 @@ void SessionStore::save_supplement(Session& session, std::size_t task_id, std::s
         if (input->text == text) return;
         throw std::invalid_argument("The current task already has a saved supplement.");
     }
-    if (!task_actions(session).resume) {
+    const auto active = std::span(session.rounds).subspan(session.tasks.back().first_round);
+    if (task_closed(session) || session.stop == SessionStop::storage_error ||
+        std::ranges::any_of(active, [](const Round& round) {
+            return std::ranges::any_of(round.tools, [](const ToolRecord& tool) {
+                return tool.dispatched && tool.result.status == ToolStatus::pending;
+            });
+        })) {
         throw std::invalid_argument("This task cannot accept a supplement. Review its saved state.");
     }
     const auto before = revision();
