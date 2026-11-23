@@ -1,5 +1,6 @@
 #include "core/utf8.hpp"
 #include "model/scripted_model.hpp"
+#include "tui.hpp"
 
 #ifdef LAY_WITH_ANTHROPIC
 #include "model/provider.hpp"
@@ -76,6 +77,7 @@ struct Options {
 
 void usage(std::ostream& stream) {
     stream << "Usage: lay-code [--truncated]\n"
+           << "       lay-code --tui [--demo normal|approval|failure|unknown] [--mono] [--ascii]\n"
            << "       lay-code --workspace PATH [--provider NAME] [--model MODEL] [--exclude RELATIVE_PATH ...]\n"
            << "       lay-code --list-models [--provider NAME] [--provider-config PATH]\n"
            << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
@@ -909,13 +911,16 @@ int run(std::span<const std::string> arguments) {
         return 0;
     }
     try {
+        if (!arguments.empty() && arguments.front() == "--tui") {
+            return lay::tui::run(arguments.subspan(1));
+        }
 #ifdef LAY_WITH_ANTHROPIC
         if (arguments.size() == 2 && arguments[0] == "--migrate-session") {
             const auto backup = lay::SessionStore::migrate(arguments[1]);
             if (backup.empty()) {
                 std::cout << "Session format 3 is already current.\n";
             } else {
-                std::cout << "Migrated session to format 2. Backup ";
+                std::cout << "Migrated session to format 3. Backup ";
                 terminal_text(backup);
                 std::cout << '\n';
             }

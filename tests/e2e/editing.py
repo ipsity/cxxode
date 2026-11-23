@@ -308,7 +308,7 @@ def cases(base, cli, driver):
     assert "--migrate-session" in migration.command(2, resume=True, data=b"", driver=False)
     migrated = subprocess.run([cli, "--migrate-session", "migration"], env=migration.env,
                               capture_output=True, timeout=5)
-    assert migrated.returncode == 0 and b"Migrated session" in migrated.stdout, migrated
+    assert migrated.returncode == 0 and b"Migrated session to format 3" in migrated.stdout, migrated
     backup, = migration.db.parent.glob("session-migration.v1-*.sqlite3")
     with closing(sqlite3.connect(backup)) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 1

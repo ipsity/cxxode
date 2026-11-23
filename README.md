@@ -161,3 +161,16 @@ lay-code.exe --workspace . --session parser --resume
 多任务会话会随引用显示来源任务、轮次、文件版本和读取时间。旧任务的引用以及当前文件版本无法核对的引用标为 `[historical citation]`。追加任务后重新读取文件，即可按当前版本引用。`Ctrl+C` 中断后，已保存的工具结果会随原任务恢复。
 
 核对 `effect_unknown` 的记录后，可用 `--resume --accept-unknown --close-task` 离线结清并保留未知状态，再追加任务。旧会话需先用 `lay-code.exe --migrate-session ID` 从格式 1 或 2 离线升级到格式 3。原格式备份会保存在会话目录。需要回到旧版程序时，请保全格式 3 数据库，再使用升级前的备份。
+
+## 离线终端演示
+
+在交互终端执行以下任一命令。四个场景均使用固定记录，审批和提交都只在演示中生效。
+
+```powershell
+lay-code.exe --tui --demo normal
+lay-code.exe --tui --demo approval
+lay-code.exe --tui --demo failure --mono
+lay-code.exe --tui --demo unknown --ascii
+```
+
+方向键和 PgUp/PgDn 翻阅记录，Ctrl+O 展开或收起详情。待审批时用 Tab 进入决定框，输入小写 `y` 或 `yes` 后回车批准，空回车拒绝。Ctrl+C 停止当前动作，Esc 退出，决定框内的 Esc 返回审阅。草稿用 F2 提交，回车可留给输入法确认候选。需要纯单色时加 `--mono`，需要 ASCII 排版时加 `--ascii`。
