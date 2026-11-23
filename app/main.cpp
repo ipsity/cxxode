@@ -35,6 +35,8 @@
 #include <thread>
 #include <utility>
 
+namespace lay { class ReadOnlyWorkspace; }
+
 namespace {
 
 std::atomic_flag interrupted;
@@ -365,9 +367,31 @@ void show_verification(const lay::RunEvidence& run, const lay::Verification& ver
         std::cout << "Remaining descendants were terminated.\n";
     }
 }
+
+void show_citations(const lay::Session& session, std::size_t round, const lay::ReadOnlyWorkspace& workspace) {
+    for (const auto& source : lay::source_citations(session, round)) {
+        const bool historical = source.historical ||
+            (!session.tasks.empty() && !workspace.matches_file_version(source.path, source.version));
+        if (!historical && !source.inline_form) {
+            std::cout << "[citation] ";
+            terminal_text(source.path);
+            std::cout << ':' << source.line << '\n';
+        }
+        if (session.tasks.size() > 1 || (historical && !session.tasks.empty())) {
+            std::cout << (historical ? "[historical citation] " : "[citation source] ");
+            terminal_text(source.path);
+            std::cout << ':' << source.line << " task=" << source.task << " round=" << source.round << " version=";
+            terminal_text(source.version.empty() ? "unknown" : source.version);
+            std::cout << " observed=";
+            terminal_text(source.observed_utc.empty() ? "unknown" : source.observed_utc);
+            std::cout << '\n';
+        }
+    }
+}
 #endif
 
-int render(const lay::Session& session, bool workspace) {
+int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_workspace = nullptr) {
+    const bool workspace = source_workspace != nullptr;
 #ifdef LAY_WITH_ANTHROPIC
     const auto revision = lay::edit_revision(session);
 #endif
@@ -428,17 +452,17 @@ int render(const lay::Session& session, bool workspace) {
                 std::cout << '\n';
             }
         }
+#ifdef LAY_WITH_ANTHROPIC
+        const bool archived = task > 0 && task < session.tasks.size();
+        const auto end = archived ? session.tasks[task].first_round : session.rounds.size();
+        const bool answered = archived ? session.tasks[task - 1].ended == lay::SessionStop::end_turn :
+            session.finished && session.stop == lay::SessionStop::end_turn;
+        if (source_workspace && answered && i + 1 == end && !round.text.empty() && round.tools.empty()) {
+            show_citations(session, i, *source_workspace);
+        }
+#endif
     }
     show_tasks(session.rounds.size());
-#ifdef LAY_WITH_ANTHROPIC
-    if (workspace) {
-        for (const auto& citation : lay::verified_source_citations(session)) {
-            std::cout << "[citation] ";
-            terminal_text(citation);
-            std::cout << '\n';
-        }
-    }
-#endif
     for (const auto& attempt : session.model_attempts) {
         if (attempt.first_round > 0) {
             std::cout << "[context] " << attempt.first_round << " older rounds projected as host facts. "
@@ -655,6 +679,7 @@ lay::StoreCheckpoint test_checkpoint() {
 
 int run_workspace(const Options& settings) {
     using Clock = std::chrono::steady_clock;
+    constexpr auto task_time = std::chrono::milliseconds(std::chrono::minutes(15));
     auto deadline = Clock::time_point::max();
     bool cancellation_announced = false;
     const lay::StopRequested cancel = [&] {
@@ -679,10 +704,10 @@ int run_workspace(const Options& settings) {
         selected.model = settings.model;
     }
     const auto root = lay::platform::path_from_utf8(settings.workspace);
-    const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing);
+    const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing, persistent);
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
     const auto authorize = [&](const lay::ToolCall& call) { return workspace.authorize(call); };
-    const auto activate = [&] {
+    const auto activate = [&](std::size_t used_ms = 0) {
 #ifdef _WIN32
         if (!SetConsoleCtrlHandler(on_console_control, TRUE)) {
             std::signal(SIGINT, on_interrupt);
@@ -690,13 +715,14 @@ int run_workspace(const Options& settings) {
 #else
         std::signal(SIGINT, on_interrupt);
 #endif
-        deadline = Clock::now() + std::chrono::minutes(15);
+        deadline = Clock::now() + task_time - std::chrono::milliseconds(
+            std::min<std::size_t>(used_ms, task_time.count()));
     };
     const auto finish = [&](lay::Session session) {
         if (session.stop == lay::SessionStop::cancelled && !stopping()) {
             session.stop = lay::SessionStop::time_limit;
         }
-        return render(session, true);
+        return render(session, &workspace);
     };
     const auto show_scope = [&] {
         std::cout << (fixture ? "[scope] Local fixture in " : "[scope] Questions and selected file excerpts from ");
@@ -756,13 +782,13 @@ int run_workspace(const Options& settings) {
         if (settings.close_task) {
             session.finished = true;
             store.save(session, "closed_unknown");
-            render(session, true);
+            render(session, &workspace);
             return 0;
         }
         session.stop = lay::SessionStop::end_turn;
         store.save(session, "accept_unknown");
     }
-    activate();
+    activate(session.tasks.back().active_ms);
     const auto review_answer = [&](std::string_view question) {
         std::cout << question << std::flush;
         const auto waiting = Clock::now();
@@ -798,7 +824,14 @@ int run_workspace(const Options& settings) {
         return review_answer("Run this command? [y/N] ");
     };
     lay::SessionJournal journal{};
-    journal.save = [&](const auto& snapshot, auto point) { store.save(snapshot, point); };
+    journal.save = [&](auto& snapshot, auto point) {
+        const auto activity = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - deadline);
+        snapshot.tasks.back().active_ms = std::clamp(task_time + activity, std::chrono::milliseconds{0}, task_time).count();
+        if (point == "stop" && snapshot.stop == lay::SessionStop::cancelled && !stopping()) {
+            snapshot.stop = lay::SessionStop::time_limit;
+        }
+        store.save(snapshot, point);
+    };
     if (editor) {
         journal.prepare_edit = [&](const auto& call, const auto& snapshot) {
             return editor->prepare(call, snapshot, approve_edit, cancel);
@@ -906,7 +939,7 @@ int run(std::span<const std::string> arguments) {
                         return {lay::ToolStatus::ok, "empty_config = allow"};
                     }
                     return {lay::ToolStatus::failed, "fixture path not found"};
-                }, stopping), false);
+                }, stopping));
         }
 #ifdef LAY_WITH_ANTHROPIC
         return run_workspace(settings);

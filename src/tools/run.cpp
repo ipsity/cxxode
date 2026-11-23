@@ -1,10 +1,10 @@
 #include "tools/run.hpp"
 #include "core/utf8.hpp"
 #include "platform/process.hpp"
+#include "tools/utc.hpp"
 
 #include <algorithm>
 #include <charconv>
-#include <ctime>
 #include <stdexcept>
 #include <utility>
 
@@ -106,23 +106,6 @@ fs::path find_on_path(const fs::path& basename, const TextList& environment) {
     return {};
 }
 
-std::string utc() {
-    const auto now = std::time(nullptr);
-    std::tm calendar{};
-#ifdef _WIN32
-    if (gmtime_s(&calendar, &now) != 0) {
-        return {};
-    }
-#else
-    if (!gmtime_r(&now, &calendar)) {
-        return {};
-    }
-#endif
-    char timestamp[32]{};
-    std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &calendar);
-    return timestamp;
-}
-
 std::optional<std::pair<unsigned int, unsigned int>> ctest_counts(std::string_view text) {
     constexpr std::string_view marker = "% tests passed, ";
     constexpr std::string_view all_passed = "% tests passed out of ";
@@ -196,7 +179,7 @@ std::string test_summary(const fs::path& executable, const ProcessResult& result
 RunPreparation reject(RunEvidence evidence, std::string detail) {
     Verification result;
     result.process.diagnostic = std::move(detail);
-    result.observed_utc = utc();
+    result.observed_utc = utc_now();
     return {std::move(evidence), std::move(result), {}, false};
 }
 
@@ -300,7 +283,7 @@ RunPreparation RunWorkspace::prepare(const ToolCall& call, const Session& sessio
                 result.diagnostic = error.what();
             }
             const auto summary = test_summary(executable, result);
-            return {std::move(result), utc(), summary};
+            return {std::move(result), utc_now(), summary};
         };
         return {std::move(evidence), {}, apply, false};
     } catch (const std::runtime_error& error) {

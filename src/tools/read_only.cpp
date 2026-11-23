@@ -1,6 +1,7 @@
 #include "tools/read_only.hpp"
 #include "core/utf8.hpp"
 #include "tools/file_version.hpp"
+#include "tools/utc.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -102,8 +103,8 @@ void for_lines(std::string_view text, const Visit& visit) {
 } // namespace
 
 ReadOnlyWorkspace::ReadOnlyWorkspace(const std::filesystem::path& root, std::vector<std::string> excluded,
-                                     bool versions)
-    : root_(platform::Node::root(root)), excluded_(std::move(excluded)), versions_(versions) {
+                                     bool editing, bool persistent)
+    : root_(platform::Node::root(root)), excluded_(std::move(excluded)), editing_(editing), persistent_(persistent) {
     for (const auto& path : excluded_) {
         if (path.size() > 2048 || !components(path, [](std::string_view name, std::string_view) {
                 return safe_name(name);
@@ -133,6 +134,23 @@ platform::Node ReadOnlyWorkspace::open(std::string_view path) const {
         return {};
     }
     return std::move(parents.back());
+}
+
+bool ReadOnlyWorkspace::matches_file_version(std::string_view path, std::string_view version) const {
+    if (version.empty() || path == "." || !allowed(path)) {
+        return false;
+    }
+    try {
+        auto node = open(path);
+        if (!node || node.directory()) {
+            return false;
+        }
+        const auto limit = editing_ ? editable_bytes : file_limit;
+        const auto bytes = node.read(limit + 1);
+        return bytes.size() <= limit && file_version(node, bytes) == version;
+    } catch (const std::runtime_error&) {
+        return false;
+    }
 }
 
 std::string_view ReadOnlyWorkspace::authorize(const ToolCall& call) const {
@@ -175,6 +193,7 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
     std::string output = std::string(path) + (node.directory() ? " (directory)\n" : "\n");
     std::size_t next = 0;
     std::string version;
+    std::string observed;
     auto add = [&](std::size_t line, std::string_view text) {
         if (line < start) {
             return true;
@@ -215,14 +234,16 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
             output += "[no visible entries]\n";
         }
     } else {
-        auto text = read_text(node, versions_ ? editable_bytes : file_limit, versions_);
+        const auto bytes = editing_ ? editable_bytes : file_limit;
+        auto text = read_text(node, bytes, editing_ || persistent_);
         if (!text.supported) {
             return {ToolStatus::failed, "file is binary or its encoding is not UTF-8"};
         }
         for_lines(text.bytes, add);
         version = std::move(text.version);
+        observed = persistent_ ? utc_now() : std::string{};
         if (text.truncated) {
-            output += "[file scan limited to " + std::to_string(versions_ ? editable_bytes : file_limit) +
+            output += "[file scan limited to " + std::to_string(bytes) +
                 " bytes; partial lines omitted]\n";
         } else if (text.bytes.empty()) {
             output += "[empty file]\n";
@@ -231,10 +252,10 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
     if (next) {
         output += "next_line=" + std::to_string(next) + '\n';
     }
-    if (!version.empty()) {
+    if (editing_ && !version.empty()) {
         output += "version=" + version + '\n';
     }
-    return {ToolStatus::ok, std::move(output), std::move(version)};
+    return {ToolStatus::ok, std::move(output), std::move(version), std::move(observed)};
 }
 
 ToolResult ReadOnlyWorkspace::search(const platform::Node& node, const ToolCall& call,

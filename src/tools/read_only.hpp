@@ -8,9 +8,10 @@ namespace lay {
 class ReadOnlyWorkspace {
 public:
     ReadOnlyWorkspace(const std::filesystem::path& root, std::vector<std::string> excluded,
-                      bool versions = false);
+                      bool editing = false, bool persistent = false);
     std::string_view authorize(const ToolCall& call) const;
     ToolResult execute(const ToolCall& call, const StopRequested& stop_requested) const;
+    bool matches_file_version(std::string_view path, std::string_view version) const;
     std::string root_identity() const { return root_.identity(); }
 
 private:
@@ -24,7 +25,8 @@ private:
 
     platform::Node root_;
     std::vector<std::string> excluded_;
-    bool versions_;
+    bool editing_;
+    bool persistent_;
 };
 
 } // namespace lay

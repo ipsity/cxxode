@@ -31,6 +31,7 @@ struct ToolResult {
     ToolStatus status = ToolStatus::pending;
     std::string text;
     std::string version{};
+    std::string observed_utc{};
     bool operator==(const ToolResult&) const = default;
 };
 

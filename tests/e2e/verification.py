@@ -148,6 +148,9 @@ def verification_contract(base, cli, driver, cmake, ctest):
     output = denied.command(data=b"fix and verify\nn\ny\nn\n")
     assert output.count("command denied by user") == 2 and denied.count() == 0, output
     assert not any(run["dispatched"] for run in results(denied))
+    output = denied.command(extra=("--follow-up", "仅重复同一个测试", "--no-write"), data=b"")
+    assert "Run this command?" not in output and output.count("command denied by user") == 3
+    assert denied.count() == 0 and not any(run["dispatched"] for run in results(denied))
     noninteractive = new("run-piped")
     assert "approval_required" in noninteractive.command(1, driver=False, data=approvers)
     assert noninteractive.count() == 0 and not results(noninteractive)[0]["dispatched"]

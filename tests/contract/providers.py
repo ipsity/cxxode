@@ -1,6 +1,8 @@
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -66,7 +68,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
             pass
 
     def do_GET(self):
@@ -178,14 +180,19 @@ def tests(executable, base, server):
     citation = f"[citation] {SOURCE}:1\n"
     assert "Responses 完成" in stdout and "dispatches=1" in stdout and citation in stdout
     database_dir = state / ("LayCode" if os.name == "nt" else "lay-code") / "sessions"
-    database = sqlite3.connect(database_dir / "session-provider-contract.sqlite3")
-    try:
-        snapshot = json.loads(database.execute("SELECT snapshot FROM session").fetchone()[0])
-        assert snapshot["rounds"][-1]["text"] == split
-        assert all(attempt["first_byte_us"] > 0 for attempt in snapshot["model_attempts"])
-    finally:
-        database.close()
-    replayed, _ = cli(["--workspace", root, "--session", "provider-contract", "--resume"], [])
+    session_args = ["--workspace", root, "--session", "provider-contract"]
+    database_path = database_dir / "session-provider-contract.sqlite3"
+
+    def saved():
+        with closing(sqlite3.connect(database_path)) as database:
+            return json.loads(database.execute("SELECT snapshot FROM session").fetchone()[0])
+
+    snapshot = saved()
+    observed = snapshot["rounds"][0]["tools"][0]
+    assert snapshot["rounds"][-1]["text"] == split
+    assert all(attempt["first_byte_us"] > 0 for attempt in snapshot["model_attempts"])
+    assert len(observed["version"]) == 64 and observed["observed_utc"].endswith("Z")
+    replayed, _ = cli([*session_args, "--resume"], [])
     assert citation in replayed
     for answer, repaired in (
         (split.replace("第 1 行", "第 2 行"), False),
@@ -199,6 +206,77 @@ def tests(executable, base, server):
         assert (citation in stdout) == repaired
     stdout, _ = cli(starting, [("POST", "/relay/v1/responses", stream(completed([message(split)])))])
     assert "[citation]" not in stdout
+
+    (root / SOURCE).write_text("new line\nexternal rewrite", encoding="utf-8")
+    historical = (f"[historical citation] {SOURCE}:1 task=1 round=1 "
+                  f"version={observed['version']} observed={observed['observed_utc']}")
+    replayed, _ = cli([*session_args, "--resume"], [])
+    assert historical in replayed and citation not in replayed
+
+    follow_up = "保留记录，告诉我之前引用了哪里"
+
+    def older_evidence(payload):
+        assert payload["input"][0] == {"role": "user", "content": "Find the file"}
+        assert payload["input"][-1] == {"role": "user", "content": follow_up}
+        assert payload["input"][-2] == {"role": "assistant", "content": split}
+        assert payload["input"][1] == native
+        assert "task 1, round 1, version " + observed["version"] in payload["input"][3]["output"]
+        assert set(tool["name"] for tool in payload["tools"]) == {"read", "search"}
+        return completed([message(f"先前读取的是 `{SOURCE}:1`")]), 200, "text/event-stream"
+
+    shown, _ = cli([*session_args, "--follow-up", follow_up], [("POST", "/relay/v1/responses", older_evidence)])
+    assert shown.count(historical) == 2 and citation not in shown, shown
+    assert shown.index("[task 1]") < shown.index(historical) < shown.index("[task 2]")
+    replayed, _ = cli([*session_args, "--resume"], [])
+    assert shown[shown.index("[task 1]"):] == replayed
+
+    latest_item = {**item, "id": "fc_current", "call_id": "call_current"}
+    location = f"文件：`{SOURCE}`\n行号：第 2 行"
+
+    def current_evidence(payload):
+        proposed, result = payload["input"][-2:]
+        assert proposed["call_id"] == result["call_id"] == "call_current"
+        assert "2: external rewrite" in result["output"]
+        assert "task 3, round 4, version " in result["output"] and observed["version"] not in result["output"]
+        return completed([message(location)]), 200, "text/event-stream"
+
+    options = [*session_args, "--follow-up", "重新读取当前文件"]
+    fresh = ("POST", "/relay/v1/responses", stream(completed([latest_item])))
+    final = ("POST", "/relay/v1/responses", current_evidence)
+    if os.name != "nt":
+        requested, release = threading.Event(), threading.Event()
+
+        def wait_for_interrupt(payload):
+            result = current_evidence(payload)
+            requested.set()
+            assert release.wait(8)
+            return result
+
+        server.steps = [fresh, ("POST", "/relay/v1/responses", wait_for_interrupt)]
+        server.errors = []
+        with subprocess.Popen([executable, "--provider-config", config, *options], env=env,
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            try:
+                assert requested.wait(5)
+                process.send_signal(signal.SIGINT)
+                stdout, stderr = process.communicate(timeout=5)
+                assert process.returncode == 130 and b"[session] cancelled" in stdout, (stdout, stderr)
+            finally:
+                release.set()
+                if process.poll() is None:
+                    process.kill()
+        assert not server.steps and not server.errors, server.errors
+        cancelled = saved()
+        assert cancelled["tasks"][-1]["question"] == options[-1] and not cancelled["tasks"][-1]["closed"]
+        assert cancelled["dispatches"] == 2 and cancelled["rounds"][-1]["text"] == ""
+        shown, _ = cli([*session_args, "--resume"], [final])
+        restored = saved()
+        assert restored["dispatches"] == 2 and restored["requests"] == cancelled["requests"] + 1
+        assert restored["tasks"][-1]["id"] == cancelled["tasks"][-1]["id"]
+        assert restored["tasks"][-1]["active_ms"] >= cancelled["tasks"][-1]["active_ms"] > 0
+    else:
+        shown, _ = cli(options, [fresh, final])
+    assert f"[citation] {SOURCE}:2\n" in shown and f"[citation source] {SOURCE}:2 task=3 round=4" in shown
 
     incomplete = (response("response.output_text.delta", delta="未提交的预览")
                   + response("response.output_item.added", output_index=0, item={**item, "arguments": ""})

@@ -83,7 +83,7 @@ bool preflight(Round& round, bool edit_enabled, bool run_enabled) {
     return valid;
 }
 
-void save(const SessionJournal& journal, const Session& session, std::string_view point) {
+void save(const SessionJournal& journal, Session& session, std::string_view point) {
     if (journal.save) {
         journal.save(session, point);
     }
@@ -245,11 +245,15 @@ void recover(Session& session, const SessionJournal& journal) {
 
 } // namespace
 
+bool task_closed(const Session& session) {
+    return session.finished || session.stop == SessionStop::request_limit || session.stop == SessionStop::tool_limit ||
+        session.stop == SessionStop::time_limit;
+}
+
 void append_task(Session& session, std::string question, bool allow_edit) {
     if (session.tasks.empty()) {
         throw std::invalid_argument("Follow-ups require a persistent session.");
     }
-    const bool exhausted = session.stop == SessionStop::request_limit || session.stop == SessionStop::tool_limit;
     const auto first = session.tasks.back().first_round;
     for (const auto& round : std::span(session.rounds).subspan(first)) {
         if (std::ranges::any_of(round.tools, [](const ToolRecord& record) {
@@ -258,7 +262,7 @@ void append_task(Session& session, std::string question, bool allow_edit) {
             throw std::invalid_argument("The current task has pending tools. Resume it before adding a follow-up.");
         }
     }
-    if (!session.finished && !exhausted) {
+    if (!task_closed(session)) {
         throw std::invalid_argument("The current task is not closed (" + std::string(name(session.stop)) +
                                     "). Resume it before adding a follow-up.");
     }
@@ -289,7 +293,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
         if (!session.finished) {
             recover(session, journal);
         }
-        if (session.finished || session.stop == SessionStop::effect_unknown) {
+        if (session.finished || session.stop == SessionStop::effect_unknown || session.stop == SessionStop::time_limit) {
             return session;
         }
         session.stop = SessionStop::end_turn;

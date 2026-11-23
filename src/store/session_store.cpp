@@ -291,6 +291,9 @@ std::string encode_session(const Session& session) {
             if (record.run) {
                 tools.back()["run"] = encode_run(*record.run);
             }
+            if (!record.result.observed_utc.empty()) {
+                tools.back()["observed_utc"] = record.result.observed_utc;
+            }
             if (record.verification) {
                 tools.back()["verification"] = encode_verification(*record.verification);
             }
@@ -318,8 +321,10 @@ std::string encode_session(const Session& session) {
             {"first_request", task.first_request}, {"first_dispatch", task.first_dispatch},
             {"allow_edit", task.allow_edit},
             {"stop", current ? Json(static_cast<int>(session.stop)) : Json(static_cast<int>(*task.ended))},
-            {"closed", !current || session.finished || session.stop == SessionStop::request_limit ||
-                session.stop == SessionStop::tool_limit}});
+            {"closed", !current || task_closed(session)}});
+        if (task.active_ms) {
+            tasks.back()["active_ms"] = task.active_ms;
+        }
     }
     return Json{{"question", session.question}, {"rounds", std::move(rounds)}, {"requests", session.requests},
                 {"dispatches", session.dispatches}, {"stop", static_cast<int>(session.stop)},
@@ -373,7 +378,8 @@ Session decode_session(std::string_view payload, bool legacy = false) {
                 (!round.tools.empty() && record.text_offset < round.tools.back().text_offset)) {
                 throw std::runtime_error("invalid stored tool record");
             }
-            record.result = {static_cast<ToolStatus>(status), item.at("result"), item.at("version")};
+            record.result = {static_cast<ToolStatus>(status), item.at("result"), item.at("version"),
+                             item.value("observed_utc", std::string{})};
             for (const auto& arg : item.at("arguments")) {
                 record.call.arguments.push_back({arg.at(0), decode_argument(arg)});
             }
@@ -416,6 +422,7 @@ Session decode_session(std::string_view payload, bool legacy = false) {
         const auto end = current ? session.rounds.size() : tasks[i + 1].at("first_round").get<std::size_t>();
         Task task{item.at("question"), item.at("first_round"), item.at("first_request"),
                   item.at("first_dispatch"), item.at("allow_edit")};
+        task.active_ms = item.value("active_ms", std::size_t{0});
         const auto code = item.at("stop").get<int>();
         const bool closed = item.at("closed");
         if (item.at("id") != i + 1 || task.question.empty() || item.at("end_round") != end ||
@@ -426,8 +433,7 @@ Session decode_session(std::string_view payload, bool legacy = false) {
             (i != 0 && (task.first_request < session.tasks.back().first_request ||
                         task.first_dispatch < session.tasks.back().first_dispatch)) ||
             (!current && !closed) ||
-            (current && (code != stop || closed != (session.finished || session.stop == SessionStop::request_limit ||
-                                                    session.stop == SessionStop::tool_limit)))) {
+            (current && (code != stop || closed != task_closed(session)))) {
             throw std::runtime_error("invalid stored task boundaries");
         }
         if (!current) {

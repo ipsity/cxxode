@@ -156,6 +156,8 @@ lay-code.exe --workspace . --session parser --follow-up "刚才的判断依据�
 lay-code.exe --workspace . --session parser --resume
 ```
 
-追加时可加 `--no-write`，禁用本任务的编辑工具。若原会话启用了 `--allow-run`，运行命令仍需逐次批准。追加的原文先保存再请求模型。中断后用 `--resume` 恢复同一条任务，请求和工具额度从该任务的已用数量接续。
+追加时可加 `--no-write`，禁用本任务的编辑工具。若原会话启用了 `--allow-run`，运行命令仍需逐次批准。追加的原文先保存再请求模型。中断后用 `--resume` 恢复同一条任务，接续已记录的请求数、工具调用数和活动时间。等待审批的时间不计入 15 分钟额度。
+
+多任务会话会随引用显示来源任务、轮次、文件版本和读取时间。旧任务的引用以及当前文件版本无法核对的引用标为 `[historical citation]`。追加任务后重新读取文件，即可按当前版本引用。`Ctrl+C` 中断后，已保存的工具结果会随原任务恢复。
 
 核对 `effect_unknown` 的记录后，可用 `--resume --accept-unknown --close-task` 离线结清并保留未知状态，再追加任务。旧会话需先用 `lay-code.exe --migrate-session ID` 从格式 1 或 2 离线升级到格式 3。原格式备份会保存在会话目录。需要回到旧版程序时，请保全格式 3 数据库，再使用升级前的备份。

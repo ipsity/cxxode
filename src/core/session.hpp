@@ -83,6 +83,7 @@ struct Task {
     std::size_t first_dispatch = 0;
     bool allow_edit = true;
     std::optional<SessionStop> ended{};
+    std::size_t active_ms = 0;
     bool operator==(const Task&) const = default;
 };
 
@@ -147,7 +148,7 @@ struct RunPreparation {
 };
 
 struct SessionJournal {
-    std::function<void(const Session&, std::string_view)> save;
+    std::function<void(Session&, std::string_view)> save;
     std::function<EditPreparation(const ToolCall&, const Session&)> prepare_edit;
     std::function<ToolResult(const EditEvidence&)> recover_edit;
     std::function<void(const EditEvidence&)> cleanup_edit;
@@ -161,6 +162,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal);
 void append_task(Session& session, std::string question, bool allow_edit);
+bool task_closed(const Session& session);
 std::string_view name(SessionStop stop);
 std::size_t edit_revision(const Session& session);
 

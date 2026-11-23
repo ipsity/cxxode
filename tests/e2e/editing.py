@@ -160,6 +160,25 @@ def cases(base, cli, driver):
     assert edit["name"] == "edit" and not edit["dispatched"] and "Apply this edit?" not in output
     assert snapshot["dispatches"] == 2 and restricted.file.read_bytes() == NEW
 
+    timed = new("timed-follow-up")
+    timed.command()
+    process = timed.paused("after_follow_up", data=b"", extra=follow_up)
+    try:
+        wait_for(process, b"[checkpoint] after_follow_up")
+    finally:
+        finish(process, kill=True)
+    snapshot, _ = timed.saved()
+    snapshot["tasks"][-1]["active_ms"] = 15 * 60 * 1000
+    with closing(sqlite3.connect(timed.db)) as db:
+        db.execute("UPDATE session SET snapshot=?", (json.dumps(snapshot),))
+        db.commit()
+    assert "time_limit" in timed.command(1, resume=True, driver=False, data=b"")
+    expired, _ = timed.saved()
+    assert expired["requests"] == snapshot["requests"] and expired["dispatches"] == snapshot["dispatches"]
+    assert expired["tasks"][-1]["closed"] and expired["tasks"][-1]["active_ms"] == 15 * 60 * 1000
+    timed.command(extra=follow_up, driver=False, data=b"")
+    assert timed.saved()[0]["requests"] == expired["requests"] + 2
+
     denied = new("denied")
     assert "edit denied by user" in denied.command(data=b"fix fixture\nn\n")
     assert denied.file.read_bytes() == OLD and not edit_record(denied.saved()[0])["dispatched"]
