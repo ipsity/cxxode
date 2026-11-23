@@ -1,0 +1,130 @@
+diff --git a/src/core/benchmark.hpp b/src/core/benchmark.hpp
+index a465de5..8000c14 100644
+--- a/src/core/benchmark.hpp
++++ b/src/core/benchmark.hpp
+@@ -5,0 +6 @@
++#include <mutex>
+@@ -12,0 +14,6 @@ public:
++        record_duration(operation, tasks, bytes, elapsed);
++    }
++
++    static void record_duration(const char* operation, std::size_t tasks, std::size_t bytes, long long elapsed) {
++        static std::mutex trace;
++        const std::lock_guard lock(trace);
+diff --git a/src/core/session.cpp b/src/core/session.cpp
+index 871a4b0..033ae82 100644
+--- a/src/core/session.cpp
++++ b/src/core/session.cpp
+@@ -1,0 +2,4 @@
++#ifdef LAY_P22_EXPERIMENT
++#include "core/benchmark.hpp"
++#include <future>
++#endif
+@@ -168,0 +173,60 @@ bool collect_supplement(Session& session, const SessionJournal& journal) {
++#ifdef LAY_P22_EXPERIMENT
++bool experiment_pair_reads(Session& session, const ExecuteTool& execute, const StopRequested& stop,
++                           std::size_t limit, const AuthorizeTool& authorize, const SessionJournal& journal) {
++    const auto* workers = std::getenv("LAY_P22_READ_WORKERS");
++    auto& tools = session.rounds.back().tools;
++    if (!workers || std::string_view(workers) != "2" || !journal.save || journal.accept_supplement ||
++        !authorize || tools.size() < 2 || tools.size() > limit || stop() ||
++        !std::ranges::all_of(tools, [&](const ToolRecord& item) {
++            return !item.dispatched && item.result.status == ToolStatus::pending &&
++                (item.call.name == "read" || item.call.name == "search") && authorize(item.call).empty();
++        })) return false;
++
++    const auto dispatch = [&](ToolRecord& record) {
++        record.dispatched = true;
++        ++session.dispatches;
++        try {
++            save(journal, session, "dispatch");
++        } catch (...) {
++            record.dispatched = false;
++            --session.dispatches;
++            throw;
++        }
++    };
++    const auto commit = [&](ToolRecord& record, ToolResult result) {
++        record.result = std::move(result);
++        if (record.result.status != ToolStatus::ok) {
++            record.result.status = ToolStatus::failed;
++            pause_on_repeated_file_failure(session, record);
++        }
++        save(journal, session, "result");
++    };
++    bool failed = false;
++    for (std::size_t i = 0; i < tools.size();) {
++        if (stop()) session.stop = SessionStop::cancelled;
++        if (failed || session.stop != SessionStop::end_turn) {
++            auto& pending = tools[i++];
++            if (pending.result.status != ToolStatus::pending) continue;
++            pending.result = {ToolStatus::skipped, failed ? "prior_tool_failed" : std::string(name(session.stop))};
++            save(journal, session, "result");
++            continue;
++        }
++        auto& first = tools[i++];
++        dispatch(first);
++        auto observation = std::async(std::launch::async, [&] { return execute(first.call); });
++        if (i < tools.size() && !stop()) {
++            auto& second = tools[i++];
++            dispatch(second);
++            auto second_result = execute(second.call);
++            commit(first, observation.get());
++            commit(second, std::move(second_result));
++            failed = first.result.status != ToolStatus::ok || second.result.status != ToolStatus::ok;
++        } else {
++            commit(first, observation.get());
++            failed = first.result.status != ToolStatus::ok;
++        }
++    }
++    return true;
++}
++#endif
++
+@@ -171,0 +236,10 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
++#ifdef LAY_P22_EXPERIMENT
++    const BenchmarkTimer batch;
++    const auto width = session.rounds.back().tools.size();
++    if (session.dispatches - first_dispatch < tool_limit &&
++        experiment_pair_reads(session, execute, stop_requested, tool_limit - (session.dispatches - first_dispatch),
++                              authorize, journal)) {
++        batch.record("tool_batch", session.tasks.size(), width);
++        return;
++    }
++#endif
+@@ -271,0 +346,3 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
++#ifdef LAY_P22_EXPERIMENT
++    if (width) batch.record("tool_batch", session.tasks.size(), width);
++#endif
+diff --git a/src/tools/read_only.cpp b/src/tools/read_only.cpp
+index 550fea1..10de3a9 100644
+--- a/src/tools/read_only.cpp
++++ b/src/tools/read_only.cpp
+@@ -4,0 +5,3 @@
++#ifdef LAY_P22_EXPERIMENT
++#include "core/benchmark.hpp"
++#endif
+@@ -19,0 +23,3 @@ constexpr std::size_t entry_limit = 4096;
++#ifdef LAY_P22_EXPERIMENT
++thread_local long long content_io_ns = 0;
++#endif
+@@ -71,0 +78,3 @@ Text read_text(const platform::Node& node, std::size_t limit, bool track_version
++#ifdef LAY_P22_EXPERIMENT
++    const auto io_start = Clock::now();
++#endif
+@@ -72,0 +82,3 @@ Text read_text(const platform::Node& node, std::size_t limit, bool track_version
++#ifdef LAY_P22_EXPERIMENT
++    content_io_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - io_start).count();
++#endif
+@@ -164,0 +177,11 @@ ToolResult ReadOnlyWorkspace::execute(const ToolCall& call, const StopRequested&
++#ifdef LAY_P22_EXPERIMENT
++    const BenchmarkTimer tool;
++    content_io_ns = 0;
++    struct ReadTrace {
++        const BenchmarkTimer& timer;
++        ~ReadTrace() {
++            timer.record("tool_local", 1);
++            BenchmarkTimer::record_duration("tool_content_io", 1, 0, content_io_ns);
++        }
++    } trace{tool};
++#endif

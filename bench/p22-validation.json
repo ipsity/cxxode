@@ -1,0 +1,337 @@
+{
+  "milestone": "P22",
+  "source": "f9c8abf40f25ff874d9de92a310e1407efb922b3",
+  "workspaces_sha256": "2dca4ce2cebc498e11c775442320a88b68040b5a10ffe67c2f874881d4f33518",
+  "experiment_executable_sha256": "1878fab61fe3876acea176b1142e1205e83970c4e73a41abd140a8a97a0b5a4c",
+  "protocol": "responses",
+  "model": "recorded local Responses packets",
+  "delay_per_response_ms": 30,
+  "warmup_pairs_per_workload": 3,
+  "measured_pairs_per_workload": 30,
+  "order": "15 serial-first and 15 prototype-first pairs, alternating",
+  "modes": [
+    1,
+    2
+  ],
+  "p95_gain_threshold_percent_for_each_workload": 10,
+  "peak_memory_ratio_limit": 1.25,
+  "performance_gate_pass": false,
+  "production_decision": "retain serial",
+  "raw_samples_sha256": "0d799b425d880308c0e68d3befae422b3ccec100784a938a9e20a6b3eadd2c31",
+  "workloads": {
+    "compare-session-interfaces": {
+      "question": "Compare the session, store, edit and provider interfaces.",
+      "batch": [
+        [
+          "read",
+          {
+            "path": "src/core/session.hpp",
+            "line_count": 35
+          }
+        ],
+        [
+          "read",
+          {
+            "path": "src/store/session_store.hpp",
+            "line_count": 35
+          }
+        ],
+        [
+          "read",
+          {
+            "path": "src/tools/edit.hpp",
+            "line_count": 35
+          }
+        ],
+        [
+          "read",
+          {
+            "path": "src/model/provider.hpp",
+            "line_count": 35
+          }
+        ]
+      ],
+      "responses_sha256": [
+        "0936b4b4f237741d69bba52bc1519cd484e6562a950c7896ea63fd4779c6ec17",
+        "23314a07f0043109ce21255c122897ab618f0fa97e9b02525b272c4ff4ccd29e"
+      ],
+      "request_hashes_without_times": [
+        "2166550310334d228aad84a5b28d919802e9e724c007d8a7b71cda14f881a058",
+        "030d2f8296052bdda64f75efe566b0dcc5010bb0ef4bfdb451bf28005d054e9e"
+      ],
+      "statistics": {
+        "1": {
+          "end_to_end_ms": {
+            "count": 30,
+            "p50": 150.11405,
+            "p95": 162.6258
+          },
+          "workspace_tool_sum_ms": {
+            "count": 30,
+            "p50": 1.9868,
+            "p95": 2.3384
+          },
+          "file_content_io_sum_ms": {
+            "count": 30,
+            "p50": 0.1285,
+            "p95": 0.2672
+          },
+          "tool_batch_with_commits_ms": {
+            "count": 30,
+            "p50": 27.4647,
+            "p95": 34.3026
+          },
+          "sqlite_commits_sum_ms": {
+            "count": 30,
+            "p50": 37.10025,
+            "p95": 42.3294
+          },
+          "projection_sum_ms": {
+            "count": 30,
+            "p50": 0.1678,
+            "p95": 0.2947
+          },
+          "client_model_first_byte_sum_ms": {
+            "count": 30,
+            "p50": 63.287,
+            "p95": 63.751
+          },
+          "relay_delay_sum_ms": {
+            "count": 30,
+            "p50": 60.57445,
+            "p95": 60.9243
+          },
+          "peak_sampled_private_bytes": {
+            "count": 30,
+            "p50": 1939456.0,
+            "p95": 1970176
+          },
+          "checkpoint_count": {
+            "count": 30,
+            "p50": 14.0,
+            "p95": 14
+          }
+        },
+        "2": {
+          "end_to_end_ms": {
+            "count": 30,
+            "p50": 147.39085,
+            "p95": 165.9968
+          },
+          "workspace_tool_sum_ms": {
+            "count": 30,
+            "p50": 2.07575,
+            "p95": 2.3814
+          },
+          "file_content_io_sum_ms": {
+            "count": 30,
+            "p50": 0.1433,
+            "p95": 0.2449
+          },
+          "tool_batch_with_commits_ms": {
+            "count": 30,
+            "p50": 25.01985,
+            "p95": 26.9144
+          },
+          "sqlite_commits_sum_ms": {
+            "count": 30,
+            "p50": 36.9928,
+            "p95": 39.5033
+          },
+          "projection_sum_ms": {
+            "count": 30,
+            "p50": 0.167,
+            "p95": 0.3092
+          },
+          "client_model_first_byte_sum_ms": {
+            "count": 30,
+            "p50": 63.5275,
+            "p95": 79.497
+          },
+          "relay_delay_sum_ms": {
+            "count": 30,
+            "p50": 60.69495,
+            "p95": 61.0239
+          },
+          "peak_sampled_private_bytes": {
+            "count": 30,
+            "p50": 1964032.0,
+            "p95": 2015232
+          },
+          "checkpoint_count": {
+            "count": 30,
+            "p50": 14.0,
+            "p95": 14
+          }
+        }
+      },
+      "peak_private_bytes": {
+        "1": 2027520,
+        "2": 2048000
+      },
+      "end_to_end_p95_gain_percent": -2.073,
+      "paired_end_to_end_savings_ms": {
+        "count": 30,
+        "p50": 1.83645,
+        "p95": 24.2219
+      },
+      "speed_pass": false,
+      "memory_pass": true
+    },
+    "locate-cancellation-across-modules": {
+      "question": "Locate the cancellation API in both tools and model adapters.",
+      "batch": [
+        [
+          "search",
+          {
+            "path": "src/tools",
+            "query": "StopRequested",
+            "max_results": 12
+          }
+        ],
+        [
+          "search",
+          {
+            "path": "src/model",
+            "query": "StopRequested",
+            "max_results": 12
+          }
+        ]
+      ],
+      "responses_sha256": [
+        "d7d7fdbe7f6283e6e716b71e434379cdb3a7ee977da195ddcebc7b8bc17e468d",
+        "23314a07f0043109ce21255c122897ab618f0fa97e9b02525b272c4ff4ccd29e"
+      ],
+      "request_hashes_without_times": [
+        "0508d6458d52fae3381d4c95f9b3705c024a00c22d7308a597136db5147ed41a",
+        "beed88a78bae7811a2b5a02bd24652187a975fc2162f1d5c168a679bdac78e88"
+      ],
+      "statistics": {
+        "1": {
+          "end_to_end_ms": {
+            "count": 30,
+            "p50": 132.98415,
+            "p95": 140.9863
+          },
+          "workspace_tool_sum_ms": {
+            "count": 30,
+            "p50": 3.55675,
+            "p95": 4.1999
+          },
+          "file_content_io_sum_ms": {
+            "count": 30,
+            "p50": 0.54595,
+            "p95": 0.7485
+          },
+          "tool_batch_with_commits_ms": {
+            "count": 30,
+            "p50": 14.43975,
+            "p95": 17.8073
+          },
+          "sqlite_commits_sum_ms": {
+            "count": 30,
+            "p50": 23.7373,
+            "p95": 27.1863
+          },
+          "projection_sum_ms": {
+            "count": 30,
+            "p50": 0.127,
+            "p95": 0.1547
+          },
+          "client_model_first_byte_sum_ms": {
+            "count": 30,
+            "p50": 63.231,
+            "p95": 63.824
+          },
+          "relay_delay_sum_ms": {
+            "count": 30,
+            "p50": 60.55075,
+            "p95": 60.8896
+          },
+          "peak_sampled_private_bytes": {
+            "count": 30,
+            "p50": 1921024.0,
+            "p95": 1982464
+          },
+          "checkpoint_count": {
+            "count": 30,
+            "p50": 10.0,
+            "p95": 10
+          }
+        },
+        "2": {
+          "end_to_end_ms": {
+            "count": 30,
+            "p50": 131.73705,
+            "p95": 149.9571
+          },
+          "workspace_tool_sum_ms": {
+            "count": 30,
+            "p50": 3.66175,
+            "p95": 4.6685
+          },
+          "file_content_io_sum_ms": {
+            "count": 30,
+            "p50": 0.57395,
+            "p95": 0.7689
+          },
+          "tool_batch_with_commits_ms": {
+            "count": 30,
+            "p50": 12.0406,
+            "p95": 13.8951
+          },
+          "sqlite_commits_sum_ms": {
+            "count": 30,
+            "p50": 23.584,
+            "p95": 26.3103
+          },
+          "projection_sum_ms": {
+            "count": 30,
+            "p50": 0.11935,
+            "p95": 0.1512
+          },
+          "client_model_first_byte_sum_ms": {
+            "count": 30,
+            "p50": 63.3475,
+            "p95": 79.462
+          },
+          "relay_delay_sum_ms": {
+            "count": 30,
+            "p50": 60.6385,
+            "p95": 61.0224
+          },
+          "peak_sampled_private_bytes": {
+            "count": 30,
+            "p50": 1978368.0,
+            "p95": 2052096
+          },
+          "checkpoint_count": {
+            "count": 30,
+            "p50": 10.0,
+            "p95": 10
+          }
+        }
+      },
+      "peak_private_bytes": {
+        "1": 1986560,
+        "2": 2056192
+      },
+      "end_to_end_p95_gain_percent": -6.363,
+      "paired_end_to_end_savings_ms": {
+        "count": 30,
+        "p50": 1.30305,
+        "p95": 8.8626
+      },
+      "speed_pass": false,
+      "memory_pass": true
+    }
+  },
+  "prototype": {
+    "patch": "bench/p22-read-workers.patch",
+    "patch_sha256": "b56908ba291ca1b209943fdf7e25cf08cb1b7fc3d4708fd8d614ef6feaca4bad",
+    "build": "Windows 11, MinGW UCRT GCC 15.2.0, Release, LAY_WITH_ANTHROPIC and LAY_BENCHMARK_METRICS on, LAY_P22_EXPERIMENT defined",
+    "mode": "LAY_P22_READ_WORKERS=1 for the existing serial scheduler or =2 for the prototype, no difference in saved call order",
+    "reliability_gate": "not reached because P95 improvement was below threshold on both workloads",
+    "apply": "git apply --unidiff-zero <patch> from the frozen source"
+  }
+}
