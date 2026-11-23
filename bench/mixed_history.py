@@ -28,6 +28,14 @@ REFERENCE = "seed.txt:1"
 CTEST_ARGS = ["--output-on-failure", "-R", "empty config"]
 
 
+def includes_edit(task, navigation):
+    return task % 10 in (1, 2) or (navigation and task in TARGETS)
+
+
+def includes_check(task, navigation):
+    return task % 10 == 2 or (navigation and task == 1)
+
+
 class Relay(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -51,12 +59,12 @@ class Relay(BaseHTTPRequestHandler):
             item = call("seed", "read", {"path": SEED})
         elif not read:
             item = call("read", "read", {"path": CONFIG})
-        elif task % 10 in (1, 2) and f"call_{task}_edit" not in calls:
+        elif includes_edit(task, self.server.navigation) and f"call_{task}_edit" not in calls:
             version = re.search(r"^version=(\S+)$", read, re.M)[1]
             old_text = re.search(r"^1: (value=.*)$", read, re.M)[1]
             item = call("edit", "edit", {"path": CONFIG, "version": version,
                                         "old_text": old_text, "new_text": f"value={task:03d}"})
-        elif task % 10 == 2 and f"call_{task}_run" not in calls:
+        elif includes_check(task, self.server.navigation) and f"call_{task}_run" not in calls:
             item = call("run", "run", {"program": self.server.ctest, "args": CTEST_ARGS})
         else:
             answer = f"Task {task} done."
@@ -82,7 +90,7 @@ class Relay(BaseHTTPRequestHandler):
         self.wfile.write(reply)
 
 
-def add_task(terminal, task):
+def add_task(terminal, task, navigation=False):
     terminal.text = ""
     prompt = f"Mixed task {task:03d} inspect the fixture"
     if task in TARGETS:
@@ -90,9 +98,9 @@ def add_task(terminal, task):
     terminal.key(prompt, "> " + prompt)
     terminal.send(ESC + "OQ")
     reviews = []
-    if task % 10 in (1, 2):
-        reviews.append(("待批准 · 编辑", task % 10 == 2))
-    if task % 10 == 2:
+    if includes_edit(task, navigation):
+        reviews.append(("待批准 · 编辑", task % 10 != 1))
+    if includes_check(task, navigation):
         reviews.append(("待批准 · 运行", True))
     for review, approve in reviews:
         terminal.expect(review, timeout=10)
@@ -152,19 +160,25 @@ def sample(app, args, env, database, metrics, task, request_sizes, repeats):
             "edits_denied": operations["edit", True], "verifications": operations["run", False]}
 
 
-def run(app, ctest, repeats, base, server, packaged):
+def run(app, ctest, repeats, base, server, packaged, navigation_sample=None):
     root = base / "workspace"
     root.mkdir()
     seed, config = root / SEED, root / CONFIG
     seed.write_text("Original version marker\n", encoding="utf-8")
     padding = "\n" + "\n".join(f"fixture line {i:03d} " + "x" * 67 for i in range(55)) + "\n"
     config.write_text("value=000" + padding, encoding="utf-8")
+    failure_marker = root / "force-test-failure.txt"
+    if navigation_sample:
+        failure_marker.touch()
+    check = "from pathlib import Path; raise SystemExit(int(Path('force-test-failure.txt').exists()))"
+    test_program = check if navigation_sample else "print(42)"
     (root / "CTestTestfile.cmake").write_text(
-        f'add_test("empty config" [==[{sys.executable.replace(os.sep, "/")}]==] "-c" "print(42)")\n',
+        f'add_test("empty config" [==[{sys.executable.replace(os.sep, "/")}]==] "-c" [==[{test_program}]==])\n',
         encoding="utf-8")
     metrics = None if packaged else base / "trace.tsv"
     env = os.environ.copy()
-    if metrics:
+    if metrics or navigation_sample:
+        metrics = base / "trace.tsv"
         env["LAY_BENCHMARK_TRACE"] = str(metrics)
     if os.name == "nt":
         env["LOCALAPPDATA"] = str(base / "state")
@@ -176,7 +190,7 @@ def run(app, ctest, repeats, base, server, packaged):
     profile = configure(base, server, "fixture.json")
     args = ["--workspace", str(root), "--session", "mixed", "--provider-config", str(profile),
             "--write", CONFIG, "--allow-run"]
-    server.ctest, server.request_sizes = ctest.as_posix(), {}
+    server.ctest, server.request_sizes, server.navigation = ctest.as_posix(), {}, navigation_sample is not None
     samples = {}
     first = 1
     for target in TARGETS:
@@ -186,22 +200,28 @@ def run(app, ctest, repeats, base, server, packaged):
             for task in range(first, target + 1):
                 if task == 2:
                     seed.write_text("Externally rewritten version marker\n", encoding="utf-8")
+                    if navigation_sample:
+                        failure_marker.unlink()
                 if task % 10 == 0:
                     config.write_text(f"value=external-{task:03d}" + padding, encoding="utf-8")
-                add_task(terminal, task)
-        samples[str(target)] = sample(app, args, env, database, metrics, target, server.request_sizes[target], repeats)
+                add_task(terminal, task, server.navigation)
+        if navigation_sample:
+            samples[str(target)] = navigation_sample(app, args, env, database, metrics, target, server)
+        else:
+            samples[str(target)] = sample(app, args, env, database, metrics, target, server.request_sizes[target], repeats)
         print(f"Measured {target} tasks", file=sys.stderr, flush=True)
         first = target + 1
 
     saved = context(database)
     actions = [record for row in saved["rounds"] for record in row["tools"]]
     assert sum(entry["name"] == "read" for entry in actions) == 101
-    assert sum(entry["edit"] is not None and entry["status"] == 1 for entry in actions) == 10
+    assert sum(entry["edit"] is not None and entry["status"] == 1 for entry in actions) == 10 + (3 if navigation_sample else 0)
     assert sum(entry["result"] == "edit denied by user" and not entry["dispatched"] for entry in actions) == 10
     assert sum(entry.get("verification", {}).get("test_summary") == "CTest reported 1 passing test(s)."
                for entry in actions) == 10
     assert saved["requests"] == sum(len(sizes) for sizes in server.request_sizes.values())
-    assert all(row["earliest_denial_correct"] for row in samples.values())
+    if not navigation_sample:
+        assert all(row["earliest_denial_correct"] for row in samples.values())
     return samples
 
 

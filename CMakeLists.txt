@@ -17,6 +17,9 @@ target_link_libraries(lay_scripted_model PUBLIC lay_core)
 
 add_library(lay_tui STATIC app/tui.cpp app/tui_terminal.cpp app/tui_workspace.cpp)
 target_link_libraries(lay_tui PRIVATE lay_core)
+if(LAY_BENCHMARK_METRICS)
+    target_compile_definitions(lay_tui PRIVATE LAY_BENCHMARK_METRICS)
+endif()
 
 add_executable(lay-code app/main.cpp)
 target_link_libraries(lay-code PRIVATE lay_scripted_model lay_tui)

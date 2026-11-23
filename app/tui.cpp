@@ -2,6 +2,9 @@
 #include "tui_terminal.hpp"
 #include "tui_text.hpp"
 #include "tui_workspace.hpp"
+#ifdef LAY_BENCHMARK_METRICS
+#include "core/benchmark.hpp"
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -893,6 +896,9 @@ int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
     editor.refresh();
     screen.draw(terminal, size, editor.frame(size));
     while (const auto bytes = terminal.read(editor.input_wait_ms())) {
+#ifdef LAY_BENCHMARK_METRICS
+        const BenchmarkTimer timer;
+#endif
         const auto latest = terminal.size();
         const auto events = input.decode(*bytes);
         const auto old_ticket = editor.review_ticket();
@@ -903,6 +909,19 @@ int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
         size = latest;
         editor.refresh();
         screen.draw(terminal, size, editor.frame(size));
+#ifdef LAY_BENCHMARK_METRICS
+        if (events.size() == 1) {
+            switch (events.front().key) {
+                case Key::up: case Key::down: case Key::first: case Key::last:
+                    timer.record("tui-navigation", 0); break;
+                case Key::previous_page: case Key::next_page:
+                    timer.record("tui-page", 0); break;
+                case Key::details:
+                    timer.record("tui-expand", 0); break;
+                default: break;
+            }
+        }
+#endif
     }
     return 0;
 }
