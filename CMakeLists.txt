@@ -36,6 +36,7 @@ if(LAY_WITH_ANTHROPIC)
         target_link_libraries(lay_messages PRIVATE advapi32)
     endif()
     add_library(lay_workspace STATIC src/tools/read_only.cpp src/tools/citations.cpp src/tools/edit.cpp src/tools/run.cpp
+                                     src/tools/ctest.cpp
                                      src/platform/workspace.cpp src/platform/crypto.cpp src/platform/process.cpp)
     target_link_libraries(lay_workspace PUBLIC lay_core)
     add_library(lay_store STATIC src/store/session_store.cpp)
@@ -126,6 +127,9 @@ if(BUILD_TESTING)
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver> $<TARGET_FILE:process_contract>
             ${CMAKE_COMMAND} ${CMAKE_CTEST_COMMAND})
         set_tests_properties(verification.contract PROPERTIES TIMEOUT 90)
+        add_executable(ctest_contract tests/contract/ctest_contract.cpp)
+        target_link_libraries(ctest_contract PRIVATE lay_workspace)
+        add_test(NAME verification.ctest_records COMMAND ctest_contract)
         add_test(NAME tui.workspace COMMAND Python3::Interpreter -B
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/tui_workspace.py
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver> ${CMAKE_COMMAND} ${CMAKE_CTEST_COMMAND})

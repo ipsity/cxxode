@@ -78,4 +78,15 @@ std::string verification_reference(const Verification& result, const RunEvidence
         std::to_string(run.edit_revision) + (run.edit_revision < current_revision ? " (earlier workspace revision)" : "");
 }
 
+std::string test_case_details(const Verification& result) {
+    if (result.test_cases.empty()) return {};
+    std::string text = "Named CTest results from captured stdout";
+    for (const auto& test : result.test_cases) {
+        constexpr std::string_view outcomes[] = {"passed", "failed", "skipped", "disabled", "not run"};
+        text += "\n  [" + std::string(outcomes[static_cast<std::size_t>(test.outcome)]) + "] " +
+            test.name + " (stdout line " + std::to_string(test.stdout_line) + ')';
+    }
+    return text;
+}
+
 } // namespace lay

@@ -382,6 +382,10 @@ void show_verification(const lay::RunEvidence& run, const lay::Verification& ver
     }
     std::cout << '\n';
     std::cout << "  " << lay::verification_scope << '\n';
+    if (const auto cases = lay::test_case_details(verification); !cases.empty()) {
+        terminal_text(cases);
+        std::cout << '\n';
+    }
     for (const auto& [name, stream] : {std::pair{"stdout", &process.stdout_text},
                                         std::pair{"stderr", &process.stderr_text}}) {
         std::cout << "  " << name << ' ' << stream->total_bytes << " bytes, "

@@ -38,16 +38,27 @@ struct RunEvidence {
     bool operator==(const RunEvidence&) const = default;
 };
 
+enum class TestOutcome { passed, failed, skipped, disabled, not_run };
+
+struct TestCaseEvidence {
+    std::string name;
+    TestOutcome outcome;
+    std::size_t stdout_line;
+    bool operator==(const TestCaseEvidence&) const = default;
+};
+
 struct Verification {
     ProcessResult process;
     std::string observed_utc;
     std::string test_summary;
+    std::vector<TestCaseEvidence> test_cases{};
     bool operator==(const Verification&) const = default;
 };
 
 std::string describe(ProcessStatus status, std::int64_t code);
 std::string verification_text(const Verification& result);
 std::string verification_reference(const Verification& result, const RunEvidence& run, std::size_t current_revision);
+std::string test_case_details(const Verification& result);
 inline constexpr std::string_view verification_scope = "Current workspace verification: unknown.";
 std::string quoted_argument(std::string_view value);
 

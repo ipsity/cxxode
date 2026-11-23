@@ -253,11 +253,20 @@ CapturedOutput decode_output(const Json& out) {
 
 Json encode_verification(const Verification& value) {
     const auto& process = value.process;
-    return {{"status", static_cast<int>(process.status)}, {"code", process.code},
+    Json encoded{{"status", static_cast<int>(process.status)}, {"code", process.code},
             {"elapsed_ms", process.elapsed_ms}, {"diagnostic", process.diagnostic},
             {"stdout", encode_output(process.stdout_text)}, {"stderr", encode_output(process.stderr_text)},
             {"descendants_terminated", process.descendants_terminated},
             {"observed_utc", value.observed_utc}, {"test_summary", value.test_summary}};
+    if (!value.test_cases.empty()) {
+        auto cases = Json::array();
+        for (const auto& test : value.test_cases) {
+            cases.push_back({{"name", test.name}, {"outcome", static_cast<int>(test.outcome)},
+                             {"stdout_line", test.stdout_line}});
+        }
+        encoded["test_cases"] = std::move(cases);
+    }
+    return encoded;
 }
 
 Verification decode_verification(const Json& value) {
@@ -265,9 +274,21 @@ Verification decode_verification(const Json& value) {
     if (status < 0 || status > static_cast<int>(ProcessStatus::unknown)) {
         throw std::runtime_error("invalid stored process status");
     }
-    return {{static_cast<ProcessStatus>(status), value.at("code"), value.at("elapsed_ms"),
+    Verification verification{{static_cast<ProcessStatus>(status), value.at("code"), value.at("elapsed_ms"),
              value.at("diagnostic"), decode_output(value.at("stdout")), decode_output(value.at("stderr")),
              value.at("descendants_terminated")}, value.at("observed_utc"), value.at("test_summary")};
+    if (value.contains("test_cases")) {
+        const auto& cases = value.at("test_cases");
+        if (!cases.is_array() || cases.size() > 512) throw std::runtime_error("invalid stored test cases");
+        for (const auto& test : cases) {
+            const auto outcome = test.at("outcome").get<int>();
+            if (outcome < 0 || outcome > static_cast<int>(TestOutcome::not_run)) {
+                throw std::runtime_error("invalid stored test outcome");
+            }
+            verification.test_cases.push_back({test.at("name"), static_cast<TestOutcome>(outcome), test.at("stdout_line")});
+        }
+    }
+    return verification;
 }
 
 Json encode_attempt(const ModelAttempt& attempt) {

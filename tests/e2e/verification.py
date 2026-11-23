@@ -87,6 +87,9 @@ def verification_contract(base, cli, driver, cmake, ctest):
 
     approvers = b"fix and verify\ny\ny\ny\n"
     success = new("verified")
+    stale_report = success.root / "report.xml"
+    stale_bytes = b'<testsuite tests="1"><testcase name="OLD_RESULT_MUST_BE_IGNORED"/></testsuite>'
+    stale_report.write_bytes(stale_bytes)
     output = success.command(data=approvers)
     assert output.count("Run this command? [y/N] ") == 2 and success.count() == 2, output
     assert success.file.read_bytes() == b"empty_config = allow\n"
@@ -97,6 +100,14 @@ def verification_contract(base, cli, driver, cmake, ctest):
     assert [run["run"]["edit_revision"] for run in (run_before, run_after)] == [0, 1]
     assert run_after["run"]["arguments"] == ["--output-on-failure", "-R", "^empty_config$"]
     assert run_after["verification"]["observed_utc"].endswith("Z")
+    for report, outcome in ((run_before, 1), (run_after, 0)):
+        evidence = report["verification"]
+        testcase, = evidence["test_cases"]
+        stdout = evidence["stdout"]["head"] + evidence["stdout"]["tail"]
+        assert testcase["name"] == "empty_config" and testcase["outcome"] == outcome
+        assert "empty_config" in stdout.splitlines()[testcase["stdout_line"] - 1]
+    assert "[passed] empty_config" in output and "[failed] empty_config" in output
+    assert "OLD_RESULT_MUST_BE_IGNORED" not in output and stale_report.read_bytes() == stale_bytes
     assert "CTest reported 1 passing" in success.command(resume=True, driver=False, data=b"")
     assert success.count() == 2
     follow_up = "保留修改，只运行前一次失败的测试"
@@ -138,6 +149,15 @@ def verification_contract(base, cli, driver, cmake, ctest):
     no_tests = new("no-tests", no_tests=True)
     output = no_tests.command(data=approvers)
     assert output.split("[session]", 1)[0].count("CTest reported no tests.") == 2 and "passing test" not in output, output
+    assert all("test_cases" not in item["verification"] for item in results(no_tests))
+
+    skipped = new("skip-case")
+    (skipped.root / "CTestTestfile.cmake").write_text(
+        f'add_test(empty_config [==[{Path(cmake).as_posix()}]==] "-E" "false")\n'
+        "set_tests_properties(empty_config PROPERTIES SKIP_RETURN_CODE 1)\n", encoding="utf-8")
+    output = skipped.command(data=approvers)
+    assert "[skipped] empty_config" in output and "0 passing, 1 skipped" in output
+    assert all(item["verification"]["test_cases"][0]["outcome"] == 2 for item in results(skipped))
 
     stale = new("edited-again")
     output = stale.command(data=b"verify and edit again\ny\ny\ny\ny\n")

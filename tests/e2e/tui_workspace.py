@@ -635,8 +635,15 @@ def evidence_navigation(base, cli, driver, cmake, ctest):
             screen.expect("Complete / Saved revision" if ascii_ else "已完成")
             screen.key("draft to keep", "> draft to keep")
             screen.key("\x0f", "Saved files")
+            evidence_start = len(screen.text)
             screen.key(F8, "call verify-0")
             screen.expect("command exited 8")
+            for _ in range(8):
+                if "[failed] empty_config" in screen.text[evidence_start:]:
+                    break
+                screen.send(ESC + "[6~")
+                screen.quiet()
+            screen.expect("[failed] empty_config", evidence_start)
             screen.key(F10, "Saved files")
             screen.key(F9, "Files in task 1" if ascii_ else "本任务文件改动 · 任务 1")
             screen.expect("call edit-2")

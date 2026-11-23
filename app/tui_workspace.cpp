@@ -102,6 +102,8 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
                 }
                 if (!result.process.diagnostic.empty()) detail += "\n" + result.process.diagnostic;
                 if (!result.observed_utc.empty()) detail += "\nobserved " + result.observed_utc;
+                detail += "\nelapsed " + std::to_string(result.process.elapsed_ms) + " ms";
+                if (const auto cases = test_case_details(result); !cases.empty()) detail += '\n' + cases;
                 detail += "\n";
                 detail += verification_scope;
                 captured(detail, "stdout", result.process.stdout_text);

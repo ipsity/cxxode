@@ -1,10 +1,10 @@
 #include "tools/run.hpp"
 #include "core/utf8.hpp"
 #include "platform/process.hpp"
+#include "tools/ctest.hpp"
 #include "tools/utc.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <stdexcept>
 #include <utility>
 
@@ -102,76 +102,6 @@ fs::path find_on_path(const fs::path& basename, const TextList& environment) {
             break;
         }
         path.remove_prefix(split + 1);
-    }
-    return {};
-}
-
-std::optional<std::pair<unsigned int, unsigned int>> ctest_counts(std::string_view text) {
-    constexpr std::string_view marker = "% tests passed, ";
-    constexpr std::string_view all_passed = "% tests passed out of ";
-    std::optional<std::pair<unsigned int, unsigned int>> counts;
-    while (!text.empty()) {
-        const auto end = text.find('\n');
-        auto line = text.substr(0, end);
-        const auto first = line.find_first_not_of(" \t");
-        if (first != line.npos) {
-            line.remove_prefix(first);
-        }
-        unsigned percentage = 0, failed = 0, total = 0;
-        const auto prefix = std::from_chars(line.data(), line.data() + line.size(), percentage);
-        auto rest = line.substr(static_cast<std::size_t>(prefix.ptr - line.data()));
-        if (prefix.ec == std::errc{} && percentage == 100 && rest.starts_with(all_passed)) {
-            rest.remove_prefix(all_passed.size());
-            const auto limit = std::from_chars(rest.data(), rest.data() + rest.size(), total);
-            if (limit.ec == std::errc{} && limit.ptr == rest.data() + rest.size() && total) {
-                counts = std::pair(0u, total);
-            }
-        } else if (prefix.ec == std::errc{} && percentage <= 100 && rest.starts_with(marker)) {
-            rest.remove_prefix(marker.size());
-            const auto count = std::from_chars(rest.data(), rest.data() + rest.size(), failed);
-            rest.remove_prefix(static_cast<std::size_t>(count.ptr - rest.data()));
-            constexpr std::string_view middle = " tests failed out of ";
-            if (count.ec == std::errc{} && rest.starts_with(middle)) {
-                rest.remove_prefix(middle.size());
-                const auto limit = std::from_chars(rest.data(), rest.data() + rest.size(), total);
-                if (limit.ec == std::errc{} && limit.ptr == rest.data() + rest.size() && total && failed <= total) {
-                    counts = std::pair(failed, total);
-                }
-            }
-        }
-        if (end == text.npos) {
-            break;
-        }
-        text.remove_prefix(end + 1);
-    }
-    return counts;
-}
-
-std::string test_summary(const fs::path& executable, const ProcessResult& result) {
-    const auto basename = lower(utf8(executable.filename()));
-    if ((basename != "ctest" && basename != "ctest.exe") ||
-        result.status != ProcessStatus::exited || result.descendants_terminated) {
-        return {};
-    }
-    const auto& out = result.stdout_text;
-    const auto& err = result.stderr_text;
-    for (const auto* captured : {&out, &err}) {
-        const auto counts = captured->omitted_bytes == 0
-            ? ctest_counts(captured->head + captured->tail)
-            : ctest_counts(captured->tail);
-        if (counts) {
-            const auto [failed, total] = *counts;
-            if (failed == 0 && result.code == 0) {
-                return "CTest reported " + std::to_string(total) + " passing test(s).";
-            }
-            if (failed != 0 && result.code != 0) {
-                return "CTest reported " + std::to_string(failed) + " failed out of " + std::to_string(total) + " test(s).";
-            }
-        }
-        if (captured->head.find("No tests were found") != std::string::npos ||
-            captured->tail.find("No tests were found") != std::string::npos) {
-            return "CTest reported no tests.";
-        }
     }
     return {};
 }
@@ -282,8 +212,10 @@ RunPreparation RunWorkspace::prepare(const ToolCall& call, const Session& sessio
                 result.status = starting ? ProcessStatus::unknown : ProcessStatus::not_started;
                 result.diagnostic = error.what();
             }
-            const auto summary = test_summary(executable, result);
-            return {std::move(result), utc_now(), summary};
+            const auto basename = lower(utf8(executable.filename()));
+            Verification verification{std::move(result), utc_now(), {}};
+            if (basename == "ctest" || basename == "ctest.exe") observe_ctest(verification);
+            return verification;
         };
         return {std::move(evidence), {}, apply, false};
     } catch (const std::runtime_error& error) {
