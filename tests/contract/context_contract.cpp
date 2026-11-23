@@ -38,7 +38,7 @@ int main() {
             "old groups are dropped as a whole");
     const auto body = nlohmann::json::parse(result.body);
     const auto system = body.at("system").get<std::string>();
-    require(result.layout.template_version == 3 && system.find("cite the exact line") != system.npos &&
+    require(result.layout.template_version == 4 && system.find("cite the exact line") != system.npos &&
             system.find("include the exact path:line separately") != system.npos &&
             system.find("call the edit tool before the final answer") != system.npos &&
             system.find("host's approval prompt") != system.npos,
@@ -94,6 +94,25 @@ int main() {
             items.back().at("type") == "function_call_output" &&
             items.at(items.size() - 2).at("call_id") == items.back().at("call_id"),
             "Cross-task trimming preserves both user inputs and the complete current Responses tool group");
+
+    auto early_read = tool("seed-read", "read", {ToolStatus::ok, "seed.txt:1 original", "original-version"});
+    early_read.call.arguments.front().value = std::string("seed.txt");
+    std::vector<Round> repeated_reads{{"", {early_read}}, {"", {denied}}};
+    for (int i = 0; i < 36; ++i) {
+        const auto sequence = std::to_string(i);
+        repeated_reads.push_back({"", {tool("read-" + sequence, "read", {
+            ToolStatus::ok, std::string(2000, 'x'), "revision-" + sequence})}});
+    }
+    const std::vector<Task> many_tasks{{question, 0, 0, 0, true, SessionStop::end_turn},
+                                       {follow_up, repeated_reads.size(), 38, 0, false}};
+    limits.body_bytes = 4096;
+    const Request recall{follow_up, repeated_reads, 24, false, false, many_tasks};
+    const auto compact = messages::project(recall, responses, limits);
+    require(compact.layout.first_round > 2 && compact.body.size() <= limits.body_bytes &&
+            compact.body.find("(read seed.txt): observation recorded, version=original-version") != compact.body.npos &&
+            compact.body.find("user denied this action") != compact.body.npos &&
+            compact.body.find("revision-35") != compact.body.npos,
+            "Repeated reads cannot crowd the first file version, prior denials or the newest version out of history");
 
     messages::Stream anthropic;
     require(anthropic.push(

@@ -1,5 +1,8 @@
 #include "model/provider.hpp"
 #include "model/messages_codec.hpp"
+#ifdef LAY_BENCHMARK_METRICS
+#include "core/benchmark.hpp"
+#endif
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -444,7 +447,17 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
             stop_requested = std::move(stop_requested)](const Request& request, const EventSink& emit) {
         Generation generation{0, {}};
         try {
-            auto projection = messages::project(request, provider);
+            const auto project = [&](messages::ContextLimits limits = {}) {
+#ifdef LAY_BENCHMARK_METRICS
+                const BenchmarkTimer timer;
+#endif
+                auto result = messages::project(request, provider, limits);
+#ifdef LAY_BENCHMARK_METRICS
+                timer.record("projection", request.tasks.size(), result.body.size());
+#endif
+                return result;
+            };
+            auto projection = project();
             if (projection.body.empty()) {
                 generation.failure = GenerationFailure{SessionStop::context_limit, std::move(projection.diagnostic)};
                 return generation;
@@ -468,7 +481,7 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
                     attempt + 1 < limit && request.history.size() > 1) {
                     messages::ContextLimits smaller;
                     smaller.body_bytes = projection.body.size() / 2;
-                    auto candidate = messages::project(request, provider, smaller);
+                    auto candidate = project(smaller);
                     if (!candidate.body.empty()) {
                         repaired = true;
                         projection = std::move(candidate);

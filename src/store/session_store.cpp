@@ -1,6 +1,9 @@
 #include "store/session_store.hpp"
 #include "platform/crypto.hpp"
 #include "platform/workspace.hpp"
+#ifdef LAY_BENCHMARK_METRICS
+#include "core/benchmark.hpp"
+#endif
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -672,6 +675,9 @@ void SessionStore::save(const Session& session, std::string_view point) {
     if (force_full) {
         sql(db, "PRAGMA max_page_count=1");
     }
+#ifdef LAY_BENCHMARK_METRICS
+    const BenchmarkTimer timer;
+#endif
     Transaction transaction(db);
     if (force_full) {
         sql(db, "UPDATE session SET snapshot=CAST(zeroblob(4194304) AS TEXT) WHERE id=1");
@@ -690,6 +696,9 @@ void SessionStore::save(const Session& session, std::string_view point) {
     commit.step(SQLITE_DONE);
     transaction.commit();
     ++state_->revision;
+#ifdef LAY_BENCHMARK_METRICS
+    timer.record("checkpoint", session.tasks.size());
+#endif
     if (state_->checkpoint) {
         state_->checkpoint("after", point, session);
     }
