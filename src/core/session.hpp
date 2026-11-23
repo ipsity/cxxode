@@ -76,6 +76,16 @@ struct ModelAttempt {
     bool operator==(const ModelAttempt&) const = default;
 };
 
+struct Task {
+    std::string question;
+    std::size_t first_round = 0;
+    std::size_t first_request = 0;
+    std::size_t first_dispatch = 0;
+    bool allow_edit = true;
+    std::optional<SessionStop> ended{};
+    bool operator==(const Task&) const = default;
+};
+
 struct Session {
     std::string question;
     std::vector<Round> rounds;
@@ -85,6 +95,7 @@ struct Session {
     std::string diagnostic;
     bool finished = false;
     std::vector<ModelAttempt> model_attempts{};
+    std::vector<Task> tasks{};
     bool operator==(const Session&) const = default;
 };
 
@@ -94,6 +105,7 @@ struct Request {
     std::size_t attempts_left;
     bool edit_enabled = false;
     bool run_enabled = false;
+    std::span<const Task> tasks{};
 };
 
 struct GenerationFailure {
@@ -148,6 +160,7 @@ Session run_session(std::string question, const Generate& generate, const Execut
 Session continue_session(Session session, const Generate& generate, const ExecuteTool& execute,
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal);
+void append_task(Session& session, std::string question, bool allow_edit);
 std::string_view name(SessionStop stop);
 std::size_t edit_revision(const Session& session);
 

@@ -1,6 +1,7 @@
 #include "core/session.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <utility>
 
 namespace lay {
@@ -98,7 +99,8 @@ void record_process(ToolRecord& record, Verification verification) {
 }
 
 void settle_tools(Session& session, const ExecuteTool& execute, const StopRequested& stop_requested,
-                  std::size_t tool_limit, const AuthorizeTool& authorize, const SessionJournal& journal) {
+                  std::size_t first_dispatch, std::size_t tool_limit,
+                  const AuthorizeTool& authorize, const SessionJournal& journal) {
     std::string_view skip_reason;
     for (auto& record : session.rounds.back().tools) {
         if (record.result.status != ToolStatus::pending) {
@@ -112,7 +114,7 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
         } else if (stop_requested()) {
             session.stop = SessionStop::cancelled;
             skip_reason = name(session.stop);
-        } else if (skip_reason.empty() && session.dispatches == tool_limit) {
+        } else if (skip_reason.empty() && session.dispatches - first_dispatch >= tool_limit) {
             session.stop = SessionStop::tool_limit;
             skip_reason = name(session.stop);
         }
@@ -195,11 +197,12 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
 }
 
 void recover(Session& session, const SessionJournal& journal) {
-    if (session.rounds.empty() || !journal.save) {
+    const auto first = session.tasks.empty() ? 0 : session.tasks.back().first_round;
+    if (session.rounds.size() == first || !journal.save) {
         return;
     }
     if (journal.cleanup_edit) {
-        for (const auto& round : session.rounds) {
+        for (const auto& round : std::span(session.rounds).subspan(first)) {
             for (const auto& record : round.tools) {
                 if (record.edit && record.result.status == ToolStatus::ok) {
                     journal.cleanup_edit(*record.edit);
@@ -242,6 +245,30 @@ void recover(Session& session, const SessionJournal& journal) {
 
 } // namespace
 
+void append_task(Session& session, std::string question, bool allow_edit) {
+    if (session.tasks.empty()) {
+        throw std::invalid_argument("Follow-ups require a persistent session.");
+    }
+    const bool exhausted = session.stop == SessionStop::request_limit || session.stop == SessionStop::tool_limit;
+    const auto first = session.tasks.back().first_round;
+    for (const auto& round : std::span(session.rounds).subspan(first)) {
+        if (std::ranges::any_of(round.tools, [](const ToolRecord& record) {
+            return record.result.status == ToolStatus::pending;
+        })) {
+            throw std::invalid_argument("The current task has pending tools. Resume it before adding a follow-up.");
+        }
+    }
+    if (!session.finished && !exhausted) {
+        throw std::invalid_argument("The current task is not closed (" + std::string(name(session.stop)) +
+                                    "). Resume it before adding a follow-up.");
+    }
+    session.tasks.back().ended = session.stop;
+    session.tasks.push_back({std::move(question), session.rounds.size(), session.requests, session.dispatches, allow_edit});
+    session.finished = false;
+    session.stop = SessionStop::end_turn;
+    session.diagnostic.clear();
+}
+
 Session run_session(std::string question, const Generate& generate, const ExecuteTool& execute,
                     const StopRequested& stop_requested, Limits limits, const AuthorizeTool& authorize) {
     Session session;
@@ -252,17 +279,23 @@ Session run_session(std::string question, const Generate& generate, const Execut
 Session continue_session(Session session, const Generate& generate, const ExecuteTool& execute,
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal) {
-    const bool edit_enabled = journal.save && journal.prepare_edit;
+    const Task* task = session.tasks.empty() ? nullptr : &session.tasks.back();
+    const auto first_round = task ? task->first_round : 0;
+    const auto first_request = task ? task->first_request : 0;
+    const auto first_dispatch = task ? task->first_dispatch : 0;
+    const bool edit_enabled = journal.save && journal.prepare_edit && (!task || task->allow_edit);
     const bool run_enabled = journal.save && journal.prepare_run;
     try {
-        recover(session, journal);
+        if (!session.finished) {
+            recover(session, journal);
+        }
         if (session.finished || session.stop == SessionStop::effect_unknown) {
             return session;
         }
         session.stop = SessionStop::end_turn;
         session.diagnostic.clear();
         while (true) {
-            if (!session.rounds.empty()) {
+            if (session.rounds.size() > first_round) {
                 auto& round = session.rounds.back();
                 const bool untouched = std::ranges::all_of(round.tools, [](const ToolRecord& record) {
                     return !record.dispatched && record.result.status == ToolStatus::pending;
@@ -270,11 +303,11 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 if (untouched && !preflight(round, edit_enabled, run_enabled)) {
                     save(journal, session, "result");
                 } else {
-                    settle_tools(session, execute, stop_requested, limits.tool_calls, authorize, journal);
+                    settle_tools(session, execute, stop_requested, first_dispatch, limits.tool_calls, authorize, journal);
                 }
             }
             if (session.stop != SessionStop::end_turn || stop_requested() ||
-                session.requests >= limits.requests) {
+                session.requests - first_request >= limits.requests) {
                 if (session.stop == SessionStop::end_turn) {
                     session.stop = stop_requested() ? SessionStop::cancelled : SessionStop::request_limit;
                 }
@@ -283,13 +316,14 @@ Session continue_session(Session session, const Generate& generate, const Execut
 
             ReplyDraft draft;
             bool interrupted = false;
-            const auto remaining = limits.requests - session.requests;
+            const auto remaining = limits.requests - (session.requests - first_request);
             if (journal.save) {
                 ++session.requests;
                 save(journal, session, "request");
                 --session.requests;
             }
-            const auto result = generate({session.question, session.rounds, remaining, edit_enabled, run_enabled},
+            const auto result = generate({task ? task->question : session.question, session.rounds, remaining,
+                                          edit_enabled, run_enabled, session.tasks},
                                          [&](const ModelEvent& event) {
                 interrupted = interrupted || stop_requested();
                 return !interrupted && draft.receive(event);

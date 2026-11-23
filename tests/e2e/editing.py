@@ -50,9 +50,9 @@ class Fixture:
         assert result.returncode == code, (cli, result.returncode, output)
         return output
 
-    def paused(self, marker, *, data=b"fix fixture\ny\n"):
+    def paused(self, marker, *, data=b"fix fixture\ny\n", extra=()):
         env = {**self.env, "LAY_TEST_INTERACTIVE": "1", "LAY_TEST_PAUSE": marker}
-        process = subprocess.Popen([self.driver, *self.args], env=env, stdin=subprocess.PIPE,
+        process = subprocess.Popen([self.driver, *self.args, *extra], env=env, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         process.stdin.write(data)
         process.stdin.flush()
@@ -122,6 +122,43 @@ def cases(base, cli, driver):
     previous = regular.file.stat().st_ino
     assert "Apply this edit?" not in regular.command(resume=True, data=b"", driver=False)
     assert regular.file.stat().st_ino == previous and regular.file.read_bytes() == NEW
+
+    appended = new("saved-follow-up")
+    appended.command()
+    prior, _ = appended.saved()
+    follow_up = ("--follow-up", "重新读取修改后的配置", "--no-write")
+    for marker in ("after_follow_up", "after_reply"):
+        process = appended.paused(marker, data=b"", extra=follow_up)
+        try:
+            wait_for(process, f"[checkpoint] {marker}".encode())
+            assert "active writer" in appended.command(2, extra=follow_up, data=b"")
+            saved, _ = appended.saved()
+            assert saved["tasks"][-1]["question"] == follow_up[1]
+            if marker == "after_follow_up":
+                assert saved["requests"] == prior["requests"] and saved["dispatches"] == prior["dispatches"]
+                assert not saved["finished"]
+            else:
+                assert saved["finished"]
+        finally:
+            finish(process, kill=True)
+        if marker == "after_follow_up":
+            assert "not closed" in appended.command(2, extra=follow_up, data=b"")
+        shown = appended.command(resume=True, driver=False, data=b"")
+        assert follow_up[1] in shown
+        current, phases = appended.saved()
+        assert current["requests"] == prior["requests"] + 2 and current["dispatches"] == prior["dispatches"] + 1
+        assert current["tasks"][-1]["id"] == len(current["tasks"])
+        assert phases.count("follow_up") == len(current["tasks"]) - 1
+        prior = current
+
+    restricted = new("restricted-follow-up")
+    restricted.command()
+    output = restricted.command(extra=("--follow-up", "create fixture", "--no-write"), data=b"")
+    snapshot, _ = restricted.saved()
+    first = snapshot["tasks"][-1]["first_round"]
+    edit, = snapshot["rounds"][first]["tools"]
+    assert edit["name"] == "edit" and not edit["dispatched"] and "Apply this edit?" not in output
+    assert snapshot["dispatches"] == 2 and restricted.file.read_bytes() == NEW
 
     denied = new("denied")
     assert "edit denied by user" in denied.command(data=b"fix fixture\nn\n")
@@ -226,11 +263,11 @@ def cases(base, cli, driver):
     future = new("future")
     future.command(data=b"fix fixture\nn\n")
     with closing(sqlite3.connect(future.db)) as db:
-        db.execute("PRAGMA user_version=3")
+        db.execute("PRAGMA user_version=4")
         db.commit()
     assert "unsupported session database format" in future.command(2, resume=True, data=b"")
     with closing(sqlite3.connect(future.db)) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
 
     migration = new("migration")
     process = migration.paused("after_edit_dispatch")
@@ -243,6 +280,7 @@ def cases(base, cli, driver):
         finish(process, kill=True)
     old, checkpoints = migration.saved()
     del old["model_attempts"]
+    del old["tasks"]
     payload = json.dumps(old)
     with closing(sqlite3.connect(migration.db)) as db:
         db.execute("UPDATE session SET snapshot=?", (payload,))
@@ -258,10 +296,56 @@ def cases(base, cli, driver):
         assert db.execute("SELECT snapshot FROM session").fetchone()[0] == payload
         assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     updated, phases = migration.saved()
+    tasks = updated.pop("tasks")
+    assert tasks[0]["id"] == 1 and tasks[0]["question"] == old["question"] and not tasks[0]["closed"]
     assert updated.pop("model_attempts") == [] and updated == old
-    assert phases == checkpoints + ["migrated_v1_to_v2"]
+    assert phases == checkpoints + ["migrated_v1_to_v3"]
     assert "effect_unknown" in migration.command(1, resume=True, data=b"", driver=False)
     assert migration.file.read_bytes() == OLD and migration.saved()[1].count("dispatch") == 2
+    assert "effect_unknown" in migration.command(2, extra=("--follow-up", "Inspect recovered file"), data=b"")
+    migration.command(resume=True, extra=("--accept-unknown", "--close-task"), data=b"")
+    migration.command(extra=("--follow-up", "Inspect recovered file", "--no-write"), data=b"")
+    assert migration.saved()[0]["tasks"][0]["closed"] and migration.file.read_bytes() == OLD
+
+    for status in ("finished", "pending", "unknown"):
+        legacy = new("legacy-v2-" + status)
+        if status == "unknown":
+            process = legacy.paused("after_edit_dispatch")
+            try:
+                wait_for(process, b"[checkpoint] after_edit_dispatch")
+            finally:
+                finish(process, kill=True)
+            assert "effect_unknown" in legacy.command(1, resume=True, driver=False, data=b"")
+        else:
+            legacy.command(0 if status == "finished" else 1, data=b"fix fixture\ny\n",
+                           driver=status == "finished")
+        old, _ = legacy.saved()
+        del old["tasks"]
+        payload = json.dumps(old)
+        with closing(sqlite3.connect(legacy.db)) as db:
+            db.execute("UPDATE session SET snapshot=?", (payload,))
+            db.execute("PRAGMA user_version=2")
+            db.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON checkpoints "
+                       "BEGIN SELECT RAISE(ABORT, 'fixture rejected the migration checkpoint'); END")
+            db.commit()
+        assert "--migrate-session" in legacy.command(2, resume=True, data=b"")
+        migrate = [cli, "--migrate-session", "legacy-v2-" + status]
+        rejected = subprocess.run(migrate, env=legacy.env, capture_output=True, timeout=5)
+        assert rejected.returncode == 2 and b"fixture rejected the migration checkpoint" in rejected.stderr, rejected
+        with closing(sqlite3.connect(legacy.db)) as db:
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+            assert db.execute("SELECT snapshot FROM session").fetchone()[0] == payload
+            db.execute("DROP TRIGGER fail_upgrade")
+        result = subprocess.run(migrate, env=legacy.env, capture_output=True, timeout=5)
+        assert result.returncode == 0, result.stderr
+        updated, _ = legacy.saved()
+        task, = updated.pop("tasks")
+        assert updated == old and task["id"] == 1 and task["closed"] == (status == "finished")
+        if status == "pending":
+            assert "pending tools" in legacy.command(2, extra=("--follow-up", "Read again"), data=b"")
+        if status == "unknown":
+            assert task["stop"] == old["stop"] and edit_record(updated)["dispatched"]
+            assert "effect_unknown" in legacy.command(2, extra=("--follow-up", "Read again"), data=b"")
 
 
 if __name__ == "__main__":

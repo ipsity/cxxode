@@ -99,6 +99,30 @@ def verification_contract(base, cli, driver, cmake, ctest):
     assert run_after["verification"]["observed_utc"].endswith("Z")
     assert "CTest reported 1 passing" in success.command(resume=True, driver=False, data=b"")
     assert success.count() == 2
+    follow_up = "保留修改，只运行前一次失败的测试"
+    output = success.command(1, driver=False, extra=("--follow-up", follow_up, "--no-write"), data=b"")
+    assert "approval_required" in output and success.count() == 2
+    output = success.command(resume=True, data=b"y\n")
+    assert f"[task 2] {follow_up}" in output and output.count("Run this command? [y/N] ") == 1
+    assert "Apply this edit?" not in output and success.count() == 3
+    snapshot, phases = success.saved()
+    first, second = snapshot["tasks"]
+    assert (first["id"], second["id"], second["allow_edit"], second["closed"]) == (1, 2, False, True)
+    assert phases.count("follow_up") == 1
+    assert first["end_round"] == second["first_round"]
+    assert [record["name"] for r in snapshot["rounds"][second["first_round"]:] for record in r["tools"]] == ["run"]
+    assert results(success)[-1]["run"]["arguments"] == run_before["run"]["arguments"]
+    assert success.file.read_bytes() == b"empty_config = allow\n"
+
+    process = success.paused("before_run_result", data=b"y\n",
+                             extra=("--follow-up", "再次运行同一用例", "--no-write"))
+    try:
+        wait_for(process, b"[checkpoint] before_run_result")
+        assert success.count() == 4 and results(success)[-1]["dispatched"]
+    finally:
+        finish(process, kill=True)
+    output = success.command(1, resume=True, data=b"y\n")
+    assert "effect_unknown" in output and "Run this command?" not in output and success.count() == 4
 
     missing = new("missing")
     output = missing.command(data=b"verify with missing program\ny\n")

@@ -95,4 +95,22 @@ int main() {
     const Round skipped_read{"", {{expected_call, false, {ToolStatus::skipped, "tool_limit"}}}};
     check("tool budget exhausted before dispatch", Script::normal, {24, 0}, false, "",
         {question, {skipped_read}, 1, 0, SessionStop::tool_limit, {}});
+
+    auto exhausted = run_session(question, scripted_model(Script::normal),
+        [](const ToolCall&) { return ToolResult{ToolStatus::ok, "allowed"}; }, [] { return false; }, {1, 1});
+    exhausted.tasks.push_back({question});
+    const std::string follow_up = "Check again using the new task's budget.";
+    append_task(exhausted, follow_up, false);
+    const auto continued = continue_session(std::move(exhausted),
+        [&](const Request& request, const EventSink& emit) {
+            require(request.question == follow_up && request.attempts_left == 1 && request.tasks.size() == 2,
+                    "The follow-up sees its own instruction and a fresh request allowance");
+            emit(ProposeTool{expected_call});
+            emit(FinishReply{ReplyStop::tool_use});
+            return Generation{};
+        }, [&](const ToolCall&) { return ToolResult{ToolStatus::ok, "new observation"}; },
+        [] { return false; }, {1, 1}, {}, {});
+    require(continued.tasks.front().ended == SessionStop::request_limit && continued.requests == 2 &&
+            continued.dispatches == 2 && continued.rounds.back().tools.front().result.text == "new observation",
+            "The previous task's dispatch count does not consume the follow-up allowance");
 }

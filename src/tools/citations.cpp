@@ -58,8 +58,10 @@ std::string_view take_line(std::string_view& text) {
 }
 
 bool observed_source(const Session& session, std::string_view path, std::string_view label) {
-    for (auto round = session.rounds.rbegin(); round != session.rounds.rend(); ++round) {
-        for (auto record = round->tools.rbegin(); record != round->tools.rend(); ++record) {
+    const auto first = session.tasks.empty() ? 0 : session.tasks.back().first_round;
+    for (auto i = session.rounds.size(); i > first; --i) {
+        const auto& tools = session.rounds[i - 1].tools;
+        for (auto record = tools.rbegin(); record != tools.rend(); ++record) {
             if (!record->dispatched) {
                 continue;
             }
@@ -107,7 +109,7 @@ bool already_cited(std::string_view text, std::string_view citation) {
 
 std::vector<std::string> verified_source_citations(const Session& session) {
     std::vector<std::string> citations;
-    if (!session.finished || session.rounds.empty()) {
+    if (!session.finished || session.stop != SessionStop::end_turn || session.rounds.empty()) {
         return citations;
     }
     const std::string_view answer = session.rounds.back().text;

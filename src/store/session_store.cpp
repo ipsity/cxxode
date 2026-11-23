@@ -26,7 +26,7 @@ namespace {
 
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
-constexpr std::int64_t current_format = 2;
+constexpr std::int64_t current_format = 3;
 
 std::string utf8(const fs::path& path) {
     const auto bytes = path.u8string();
@@ -309,10 +309,22 @@ std::string encode_session(const Session& session) {
     for (const auto& attempt : session.model_attempts) {
         attempts.push_back(encode_attempt(attempt));
     }
+    auto tasks = Json::array();
+    for (std::size_t i = 0; i < session.tasks.size(); ++i) {
+        const auto& task = session.tasks[i];
+        const bool current = i + 1 == session.tasks.size();
+        tasks.push_back({{"id", i + 1}, {"question", task.question}, {"first_round", task.first_round},
+            {"end_round", current ? session.rounds.size() : session.tasks[i + 1].first_round},
+            {"first_request", task.first_request}, {"first_dispatch", task.first_dispatch},
+            {"allow_edit", task.allow_edit},
+            {"stop", current ? Json(static_cast<int>(session.stop)) : Json(static_cast<int>(*task.ended))},
+            {"closed", !current || session.finished || session.stop == SessionStop::request_limit ||
+                session.stop == SessionStop::tool_limit}});
+    }
     return Json{{"question", session.question}, {"rounds", std::move(rounds)}, {"requests", session.requests},
                 {"dispatches", session.dispatches}, {"stop", static_cast<int>(session.stop)},
                 {"diagnostic", session.diagnostic}, {"finished", session.finished},
-                {"model_attempts", std::move(attempts)}}.dump();
+                {"model_attempts", std::move(attempts)}, {"tasks", std::move(tasks)}}.dump();
 }
 
 ArgumentValue decode_argument(const Json& item) {
@@ -329,7 +341,7 @@ ArgumentValue decode_argument(const Json& item) {
     }
 }
 
-Session decode_session(std::string_view payload) {
+Session decode_session(std::string_view payload, bool legacy = false) {
     const auto json = Json::parse(payload);
     Session session;
     session.question = json.at("question");
@@ -389,6 +401,39 @@ Session decode_session(std::string_view payload) {
             }
         }
         session.rounds.push_back(std::move(round));
+    }
+    if (legacy) {
+        session.tasks.push_back({session.question});
+        return session;
+    }
+    const auto& tasks = json.at("tasks");
+    if (!tasks.is_array() || tasks.empty()) {
+        throw std::runtime_error("session snapshot has no tasks");
+    }
+    for (std::size_t i = 0; i < tasks.size(); ++i) {
+        const auto& item = tasks[i];
+        const bool current = i + 1 == tasks.size();
+        const auto end = current ? session.rounds.size() : tasks[i + 1].at("first_round").get<std::size_t>();
+        Task task{item.at("question"), item.at("first_round"), item.at("first_request"),
+                  item.at("first_dispatch"), item.at("allow_edit")};
+        const auto code = item.at("stop").get<int>();
+        const bool closed = item.at("closed");
+        if (item.at("id") != i + 1 || task.question.empty() || item.at("end_round") != end ||
+            task.first_round > end || end > session.rounds.size() ||
+            task.first_request > session.requests || task.first_dispatch > session.dispatches ||
+            code < 0 || code > static_cast<int>(SessionStop::context_limit) ||
+            (i == 0 && (task.first_round || task.first_request || task.first_dispatch || task.question != session.question)) ||
+            (i != 0 && (task.first_request < session.tasks.back().first_request ||
+                        task.first_dispatch < session.tasks.back().first_dispatch)) ||
+            (!current && !closed) ||
+            (current && (code != stop || closed != (session.finished || session.stop == SessionStop::request_limit ||
+                                                    session.stop == SessionStop::tool_limit)))) {
+            throw std::runtime_error("invalid stored task boundaries");
+        }
+        if (!current) {
+            task.ended = static_cast<SessionStop>(code);
+        }
+        session.tasks.push_back(std::move(task));
     }
     return session;
 }
@@ -463,7 +508,7 @@ struct SessionStore::Impl {
         const auto path = directory / (name + ".sqlite3");
         const auto status = fs::symlink_status(path);
         if (fs::exists(status) != !question.has_value()) {
-            throw std::runtime_error(question ? "session already exists; use --resume" : "session does not exist");
+            throw std::runtime_error(question ? "session already exists; use --resume or --follow-up" : "session does not exist");
         }
         if (!question && (!fs::is_regular_file(status) || fs::hard_link_count(path) != 1)) {
             throw std::runtime_error("unsupported session database file");
@@ -471,8 +516,8 @@ struct SessionStore::Impl {
         db = connect(path, question.has_value());
         auto* connection = db.get();
         const auto version = format(connection);
-        if (!question && version == 1) {
-            throw std::runtime_error("Session format 1 requires offline migration with --migrate-session ID.");
+        if (!question && (version == 1 || version == 2)) {
+            throw std::runtime_error("This session requires offline migration with --migrate-session ID.");
         }
         if (version != (question ? 0 : current_format)) {
             throw std::runtime_error("unsupported session database format");
@@ -483,9 +528,10 @@ struct SessionStore::Impl {
             sql(connection, "CREATE TABLE session(id INTEGER PRIMARY KEY CHECK(id=1), scope TEXT NOT NULL,"
                             " revision INTEGER NOT NULL, snapshot TEXT NOT NULL) STRICT");
             sql(connection, "CREATE TABLE checkpoints(revision INTEGER PRIMARY KEY, phase TEXT NOT NULL) STRICT");
-            sql(connection, "PRAGMA user_version=2");
+            sql(connection, "PRAGMA user_version=3");
             Session initial;
             initial.question = *question;
+            initial.tasks.push_back({initial.question});
             Statement insert(connection, "INSERT INTO session VALUES(1, ?, 0, ?)");
             insert.bind(1, scope);
             insert.bind(2, encode_session(initial));
@@ -533,7 +579,7 @@ std::string SessionStore::migrate(std::string_view id) {
     if (version == current_format) {
         return {};
     }
-    if (version != 1) {
+    if (version != 1 && version != 2) {
         throw std::runtime_error("unsupported session database format");
     }
     sql(db.get(), "PRAGMA trusted_schema=OFF");
@@ -548,8 +594,9 @@ std::string SessionStore::migrate(std::string_view id) {
         scope = input.text(1);
         revision = input.integer(2);
     }
-    const auto snapshot = decode_session(original);
-    const auto backup_path = directory / (name + ".v1-" + platform::random_suffix() + ".sqlite3");
+    const auto snapshot = decode_session(original, true);
+    const auto source_version = std::to_string(version);
+    const auto backup_path = directory / (name + ".v" + source_version + "-" + platform::random_suffix() + ".sqlite3");
     reserve_backup(backup_path);
     {
         const auto backup = connect(backup_path, false);
@@ -566,7 +613,7 @@ std::string SessionStore::migrate(std::string_view id) {
         verify_database(backup.get());
         Statement saved(backup.get(), "SELECT snapshot, scope, revision FROM session WHERE id=1");
         saved.step(SQLITE_ROW);
-        if (format(backup.get()) != 1 || saved.text(0) != original || saved.text(1) != scope ||
+        if (format(backup.get()) != version || saved.text(0) != original || saved.text(1) != scope ||
             saved.integer(2) != revision) {
             throw std::runtime_error("migration backup differs from the original session");
         }
@@ -583,10 +630,11 @@ std::string SessionStore::migrate(std::string_view id) {
     if (sqlite3_changes(db.get()) != 1 || decode_session(upgraded) != snapshot) {
         throw std::runtime_error("session changed or could not be verified during migration");
     }
-    Statement checkpoint(db.get(), "INSERT INTO checkpoints VALUES(?, 'migrated_v1_to_v2')");
+    Statement checkpoint(db.get(), "INSERT INTO checkpoints VALUES(?, ?)");
     checkpoint.bind(1, revision + 1);
+    checkpoint.bind(2, "migrated_v" + source_version + "_to_v3");
     checkpoint.step(SQLITE_DONE);
-    sql(db.get(), "PRAGMA user_version=2");
+    sql(db.get(), "PRAGMA user_version=3");
     verify_database(db.get());
     transaction.commit();
     return utf8(backup_path);

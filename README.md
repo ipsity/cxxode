@@ -137,7 +137,7 @@ $deps = Join-Path $env:TEMP 'lay-code-p4-deps'
 python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $mingw --curl (Join-Path $deps 'curl-install') --curl-license (Join-Path $deps 'curl-8.23.0/COPYING') --curl-source (Join-Path $deps 'curl-8.23.0.tar.xz') --json-license (Join-Path $mingw 'share/licenses/json/LICENSE.MIT') --output ./out --build 'MinGW UCRT Release' --version 0.1.0-rc5
 ```
 
-长会话保留原始问题和最近的完整工具组，请求超限时以本地事实清单替换更早的轮次。完整证据仍保存在 SQLite。P2 和 P3 会话可用 `lay-code.exe --migrate-session ID` 离线升至格式 2，备份保存在会话目录。
+长会话保留每个任务的用户原文和最近的完整工具组。请求超限时以本地事实清单替换更早的轮次，完整证据仍保存在 SQLite。
 
 完成服务商的密钥和模型配置后，可以在交互终端运行 36 次冻结评测。每题使用独立 Git 仓库，编辑和命令仍由终端逐次批准。报告包含验收结果、变更范围、调用次数，以及提供方返回的 token 计数。定位题接受 `path:line` 或相邻的文件和行号字段。报告分别用 `citation_format` 和 `model_citation_format` 记录 CLI 输出与模型原文的格式合规次数。
 
@@ -146,3 +146,16 @@ python -B packaging/windows.py --exe ./build/windows-rc1/lay-code.exe --mingw $m
 ```powershell
 python -B bench/live_quality.py --cli ./build/windows-rc1/lay-code.exe --provider passion --model YOUR_MODEL_ID --output ./out/quality-run
 ```
+
+## 在持久会话中追加任务
+
+首次提问仍使用 `--session` 和 `--question`。当前任务结清后，可以在另一个终端进程中追加任务。保留原来的工作区、模型和权限参数。存在待批准或待核对的动作时，先恢复原任务。
+
+```powershell
+lay-code.exe --workspace . --session parser --follow-up "刚才的判断依据是哪一行？"
+lay-code.exe --workspace . --session parser --resume
+```
+
+追加时可加 `--no-write`，禁用本任务的编辑工具。若原会话启用了 `--allow-run`，运行命令仍需逐次批准。追加的原文先保存再请求模型。中断后用 `--resume` 恢复同一条任务，请求和工具额度从该任务的已用数量接续。
+
+核对 `effect_unknown` 的记录后，可用 `--resume --accept-unknown --close-task` 离线结清并保留未知状态，再追加任务。旧会话需先用 `lay-code.exe --migrate-session ID` 从格式 1 或 2 离线升级到格式 3。原格式备份会保存在会话目录。需要回到旧版程序时，请保全格式 3 数据库，再使用升级前的备份。

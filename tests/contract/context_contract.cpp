@@ -53,5 +53,33 @@ int main() {
     const auto overflow = messages::project(request, "fixture-model", limits);
     require(overflow.body.empty() && overflow.diagnostic.find("latest complete tool group") != overflow.diagnostic.npos,
             "mandatory overflowing context gets an explicit explanation");
+
+    const std::string follow_up = "保留上一次修改，这次只核对配置。";
+    const std::vector<Task> tasks{{question, 0, 0, 0, true, SessionStop::end_turn}, {follow_up, 2, 2, 1, false}};
+    const auto native = nlohmann::json{{"type", "reasoning"}, {"id", "rs_follow_up"}, {"encrypted_content", "opaque"}};
+    const std::vector<Round> across_tasks{
+        {"", {edit}}, {"Previous change is complete.", {}},
+        {"", {tool("follow-up-read", "read", {ToolStatus::ok, "config.txt:4 current contents"})},
+         {{native.dump(), 0, 0}}}
+    };
+    Provider responses;
+    responses.protocol = Protocol::responses;
+    responses.model = "fixture-model";
+    const Request continued{follow_up, across_tasks, 24, false, false, tasks};
+    const auto full = messages::project(continued, responses);
+    const auto full_items = nlohmann::json::parse(full.body).at("input");
+    require(full_items.at(0).at("content") == question &&
+            full_items.at(3).at("content") == "Previous change is complete." &&
+            full_items.at(4).at("content") == follow_up && full_items.at(5) == native,
+            "Responses history keeps the new user turn after the prior completed task");
+    limits.body_bytes = 8192;
+    const auto trimmed = messages::project(continued, responses, limits);
+    const auto items = nlohmann::json::parse(trimmed.body).at("input");
+    require(trimmed.layout.first_round > 0 && items.at(0).at("content").at(0).at("text") == question &&
+            items.at(items.size() - 4).at("content") == follow_up && items.at(items.size() - 3) == native &&
+            items.at(items.size() - 2).at("type") == "function_call" &&
+            items.back().at("type") == "function_call_output" &&
+            items.at(items.size() - 2).at("call_id") == items.back().at("call_id"),
+            "Cross-task trimming preserves both user inputs and the complete current Responses tool group");
     std::cout << "Deterministic context projection preserved constraints and complete tool groups.\n";
 }

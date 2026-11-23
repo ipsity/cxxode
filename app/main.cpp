@@ -62,8 +62,11 @@ struct Options {
     std::string id;
     std::string writable;
     std::optional<std::string> question;
+    std::optional<std::string> follow_up;
     bool resume = false;
     bool accept_unknown = false;
+    bool close_task = false;
+    bool no_write = false;
     bool allow_run = false;
     bool list_models = false;
     bool set_provider_key = false;
@@ -76,7 +79,9 @@ void usage(std::ostream& stream) {
            << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
            << "       Use --session ID to keep a workspace session. Enable --write FILE or --allow-run as needed.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
+           << "       Use --follow-up TEXT [--no-write] to append to a closed session task.\n"
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
+           << "       Add --close-task to record that acknowledgement without another model request.\n"
            << "       lay-code --migrate-session ID\n";
 }
 
@@ -101,6 +106,14 @@ Options options(std::span<const std::string> arguments) {
         }
         if (option == "--allow-run" && !result.allow_run) {
             result.allow_run = true;
+            continue;
+        }
+        if (option == "--no-write" && !result.no_write) {
+            result.no_write = true;
+            continue;
+        }
+        if (option == "--close-task" && !result.close_task) {
+            result.close_task = true;
             continue;
         }
         if (option == "--list-models" && !result.list_models) {
@@ -131,6 +144,8 @@ Options options(std::span<const std::string> arguments) {
             result.writable = value;
         } else if (option == "--question" && !result.question) {
             result.question = value;
+        } else if (option == "--follow-up" && !result.follow_up) {
+            result.follow_up = value;
         } else {
             throw std::invalid_argument("Invalid, duplicate or excessive workspace option.");
         }
@@ -138,7 +153,8 @@ Options options(std::span<const std::string> arguments) {
     if (result.list_models || result.set_provider_key) {
         if ((result.list_models && result.set_provider_key) || !result.workspace.empty() || !result.model.empty() ||
             !result.excluded.empty() || !result.id.empty() || !result.writable.empty() || result.question ||
-            result.resume || result.accept_unknown || result.allow_run) {
+            result.resume || result.accept_unknown || result.allow_run || result.follow_up ||
+            result.no_write || result.close_task) {
             throw std::invalid_argument("Model listing and key setup accept only provider selection options.");
         }
         return result;
@@ -146,11 +162,13 @@ Options options(std::span<const std::string> arguments) {
     if (result.workspace.empty()) {
         throw std::invalid_argument("Choose a workspace with --workspace PATH.");
     }
-    if ((result.id.empty() && (!result.writable.empty() || result.allow_run || result.resume)) ||
+    if ((result.id.empty() && (!result.writable.empty() || result.allow_run || result.resume || result.follow_up)) ||
+        (result.follow_up && (result.resume || result.question)) ||
+        (result.no_write && !result.follow_up) || (result.close_task && !result.accept_unknown) ||
         (result.accept_unknown && !result.resume) || (result.question && result.resume) ||
         (result.model == "fixture-edit" && result.writable.empty()) ||
         (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
-        throw std::invalid_argument("Use --session ID for editing, running or resuming. Supply --question only when starting.");
+        throw std::invalid_argument("Use --session ID for persistent tasks. Choose one of --question, --resume or --follow-up.");
     }
     return result;
 }
@@ -353,7 +371,18 @@ int render(const lay::Session& session, bool workspace) {
 #ifdef LAY_WITH_ANTHROPIC
     const auto revision = lay::edit_revision(session);
 #endif
-    for (const auto& round : session.rounds) {
+    std::size_t task = 0;
+    const auto show_tasks = [&](std::size_t round) {
+        while (session.tasks.size() > 1 && task < session.tasks.size() && session.tasks[task].first_round == round) {
+            std::cout << "[task " << task + 1 << "] ";
+            terminal_text(session.tasks[task].question);
+            std::cout << '\n';
+            ++task;
+        }
+    };
+    for (std::size_t i = 0; i < session.rounds.size(); ++i) {
+        show_tasks(i);
+        const auto& round = session.rounds[i];
         for (const auto& record : round.tools) {
 #ifdef LAY_WITH_ANTHROPIC
             if (record.run && record.verification) {
@@ -400,6 +429,7 @@ int render(const lay::Session& session, bool workspace) {
             }
         }
     }
+    show_tasks(session.rounds.size());
 #ifdef LAY_WITH_ANTHROPIC
     if (workspace) {
         for (const auto& citation : lay::verified_source_citations(session)) {
@@ -439,7 +469,8 @@ lay::Generate fixture_edit_model(std::string path) {
                 emit(FinishReply{ReplyStop::tool_use});
             }
         };
-        if (request.history.empty()) {
+        const auto first = request.tasks.empty() ? 0 : request.tasks.back().first_round;
+        if (request.history.size() == first) {
             if (request.question == "create fixture") {
                 propose({"create-1", "edit", {{"path", path}, {"version", std::string("absent")},
                                              {"new_text", std::string("empty_config = allow\n")}}});
@@ -448,7 +479,7 @@ lay::Generate fixture_edit_model(std::string path) {
             }
         } else {
             const auto& previous = request.history.back().tools.front();
-            if (previous.call.name == "read" && !previous.result.version.empty()) {
+            if (request.tasks.size() <= 1 && previous.call.name == "read" && !previous.result.version.empty()) {
                 propose({"edit-1", "edit", {{"path", path}, {"version", previous.result.version},
                     {"old_text", std::string("empty_config = reject")},
                     {"new_text", std::string("empty_config = allow")}}});
@@ -470,6 +501,24 @@ lay::Generate fixture_verify_model(std::string path) {
             }
         };
         const auto round = request.history.size();
+        if (request.tasks.size() > 1) {
+            if (round == request.tasks.back().first_round) {
+                for (auto previous = request.history.rbegin(); previous != request.history.rend(); ++previous) {
+                    for (const auto& record : previous->tools) {
+                        if (record.call.name == "run") {
+                            auto call = record.call;
+                            call.id = "follow-up-" + std::to_string(request.tasks.size());
+                            propose(std::move(call));
+                            return {};
+                        }
+                    }
+                }
+            }
+            if (emit(TextDelta{"The host recorded the follow-up verification above."})) {
+                emit(FinishReply{ReplyStop::end_turn});
+            }
+            return {};
+        }
         if (round == 0 || round == 3) {
             const auto program = request.question == "verify with missing program"
                 ? "lay-code-fixture-ctest-unavailable" : "ctest";
@@ -583,11 +632,12 @@ std::optional<std::string> read_approval() {
 lay::StoreCheckpoint test_checkpoint() {
 #ifdef LAY_TEST_HOOKS
     return [](std::string_view stage, std::string_view point, const lay::Session& snapshot) {
-        if (snapshot.rounds.empty() || snapshot.rounds.back().tools.empty()) {
+        const bool has_tool = !snapshot.rounds.empty() && !snapshot.rounds.back().tools.empty();
+        if (point != "follow_up" && !(point == "reply" && snapshot.finished) && !has_tool) {
             return false;
         }
-        const auto& call = snapshot.rounds.back().tools.back().call;
-        const auto name = std::string(stage) + "_" + call.name + "_" + std::string(point);
+        const auto name = std::string(stage) + "_" + (point == "follow_up" || !has_tool ? "" :
+            snapshot.rounds.back().tools.back().call.name + "_") + std::string(point);
         if (const auto* full = std::getenv("LAY_TEST_FULL"); full && name == full) {
             return true;
         }
@@ -688,15 +738,26 @@ int run_workspace(const Options& settings) {
     const lay::SessionScope scope{root, workspace.root_identity(), fixture ? "local" : lay::provider_scope(selected),
                                   selected.model, settings.writable, settings.excluded, settings.allow_run};
     std::optional<std::string> question;
-    if (!settings.resume) {
+    if (!settings.resume && !settings.follow_up) {
         show_scope();
         question = settings.question ? question_input(*settings.question) : prompt();
     }
     lay::SessionStore store(settings.id, scope, std::move(question), test_checkpoint());
     auto session = store.load();
+    if (settings.follow_up) {
+        lay::append_task(session, question_input(*settings.follow_up), !settings.no_write);
+        store.save(session, "follow_up");
+        show_scope();
+    }
     if (settings.accept_unknown) {
-        if (session.stop != lay::SessionStop::effect_unknown) {
+        if (session.stop != lay::SessionStop::effect_unknown || session.finished) {
             throw std::invalid_argument("Resume and review the unknown effect before accepting it.");
+        }
+        if (settings.close_task) {
+            session.finished = true;
+            store.save(session, "closed_unknown");
+            render(session, true);
+            return 0;
         }
         session.stop = lay::SessionStop::end_turn;
         store.save(session, "accept_unknown");
@@ -819,7 +880,7 @@ int run(std::span<const std::string> arguments) {
         if (arguments.size() == 2 && arguments[0] == "--migrate-session") {
             const auto backup = lay::SessionStore::migrate(arguments[1]);
             if (backup.empty()) {
-                std::cout << "Session format 2 is already current.\n";
+                std::cout << "Session format 3 is already current.\n";
             } else {
                 std::cout << "Migrated session to format 2. Backup ";
                 terminal_text(backup);
