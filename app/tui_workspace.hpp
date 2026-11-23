@@ -21,6 +21,9 @@ struct Transcript {
     bool closed;
     SessionStop stop;
     std::string diagnostic;
+    TaskActions actions;
+    std::int64_t revision;
+    bool storage_failed;
 };
 
 struct Review {
@@ -55,7 +58,7 @@ public:
 private:
     void publish(const Session& snapshot, std::string_view point,
                  const std::function<std::vector<std::string>(std::size_t)>& citations,
-                 std::span<const std::string> edits);
+                 std::span<const std::string> edits, CheckpointView checkpoint);
     std::optional<bool> review(std::size_t task, const ToolCall& call, std::string title, std::string detail);
     void execute(const WorkspaceCommand& command);
 

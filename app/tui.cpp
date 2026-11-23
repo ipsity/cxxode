@@ -537,11 +537,13 @@ public:
                 reset_decision();
                 return true;
             }
-            if (key == Key::acknowledge && !combined && !view_.busy && unknown()) {
-                if (confirming_unknown_) launch({WorkspaceAction::close_unknown});
+            if (key == Key::acknowledge && !combined && !view_.busy && view_.transcript &&
+                (unknown() || view_.transcript->actions.close)) {
+                if (confirming_unknown_) launch({unknown() ? WorkspaceAction::close_unknown : WorkspaceAction::close_task});
                 else {
                     confirming_unknown_ = true;
-                    notice_ = label("核对后再次按 F3 结清。", "Check effects. Press F3 again to close.");
+                    notice_ = unknown() ? label("核对后再次按 F3 结清。", "Check effects. Press F3 again to close.") :
+                        label("再次按 F3 结束任务并保留已保存结果。", "Press F3 again to close and keep saved results.");
                 }
                 return true;
             }
@@ -551,11 +553,12 @@ public:
                 return true;
             }
             if (key == Key::submit && !combined && !view_.busy && !unknown()) {
-                if (!view_.transcript && settings_.resume) {
+                if ((!view_.transcript && settings_.resume) || needs_reload()) {
                     launch({WorkspaceAction::inspect});
-                } else if (view_.transcript && !view_.transcript->closed) {
+                } else if (view_.transcript && view_.transcript->actions.resume) {
                     launch({WorkspaceAction::resume});
-                } else if (draft_.text.find_first_not_of(' ') != draft_.text.npos) {
+                } else if ((!view_.transcript || view_.transcript->actions.follow_up) &&
+                           draft_.text.find_first_not_of(' ') != draft_.text.npos) {
                     const auto action = view_.transcript ? WorkspaceAction::follow_up : WorkspaceAction::start;
                     submitted_ = std::exchange(draft_, Draft{});
                     submitted_after_ = task_count(view_);
@@ -588,13 +591,21 @@ public:
 private:
     static std::size_t ticket(const WorkspaceView& view) { return view.review ? view.review->ticket : 0; }
     static std::size_t task_count(const WorkspaceView& view) { return view.transcript ? view.transcript->tasks : 0; }
-    bool unknown() const { return view_.transcript && !view_.transcript->closed &&
-                                 view_.transcript->stop == SessionStop::effect_unknown; }
+    bool unknown() const { return view_.transcript && view_.transcript->actions.acknowledge_unknown; }
+    bool needs_reload() const {
+        if (!view_.transcript || !view_.transcript->storage_failed) return false;
+        const auto actions = view_.transcript->actions;
+        return view_.transcript->revision < 0 ||
+            !(actions.resume || actions.close || actions.follow_up || actions.acknowledge_unknown);
+    }
     bool can_narrow() const { return settings_.writable && view_.transcript && !view_.review; }
     std::string_view label(std::string_view zh, std::string_view en) const { return ascii_ ? en : zh; }
 
     std::string_view draft_label() const {
         if (view_.review) return label("审核当前动作", "Review current action");
+        if (view_.transcript && view_.transcript->actions.close) {
+            return label("F3 结束任务并保留已保存结果", "F3 closes the task and keeps saved results");
+        }
         if (can_narrow()) {
             return allow_edit_ ? label("F4 禁用后续任务的编辑工具", "F4 disables edits for the next task") :
                                  label("后续任务已禁用编辑工具 · F4 切换", "Next task: edits off / F4 toggles");
@@ -610,14 +621,24 @@ private:
         }
         if (!view_.error.empty()) return std::string(label("会话错误", "Session error"));
         if (!view_.transcript) return std::string(label("等待任务", "Ready for a task"));
+        if (view_.transcript->storage_failed) {
+            if (view_.transcript->revision < 0) {
+                return std::string(label("保存失败 · 无法读取存档", "Save failed / Checkpoint unavailable"));
+            }
+            return std::string(label("保存失败 · 已保存版本 ", "Save failed / Saved revision ")) +
+                std::to_string(view_.transcript->revision);
+        }
         if (view_.transcript->stop == SessionStop::effect_unknown) {
             return std::string(view_.transcript->closed ? label("效果未知 · 已结清", "Effect unknown / Closed") :
                                                         label("效果未知 · 等待核对", "Effect unknown / Check result"));
         }
         if (view_.transcript->stop == SessionStop::cancelled) return std::string(label("已停止", "Stopped"));
         if (view_.transcript->closed && view_.transcript->stop == SessionStop::end_turn) {
-            return std::string(label("已完成", "Complete"));
+            return std::string(label("已完成 · 已保存版本 ", "Complete / Saved revision ")) +
+                std::to_string(view_.transcript->revision);
         }
+        if (view_.transcript->closed) return std::string(label("任务已结束 · ", "Task closed / ")) +
+            std::string(name(view_.transcript->stop));
         return std::string(label("任务暂停 · ", "Task paused / ")) + std::string(name(view_.transcript->stop));
     }
 
@@ -627,8 +648,10 @@ private:
                                             label("Tab 输入决定，↑↓ 翻阅动作详情。", "Tab to decide. Up/Down to review.");
         if (view_.busy) return label("可编辑下一条草稿。", "You can edit the next draft.");
         if (unknown()) return label("先核对工作区，再用 F3 结清。", "Check the workspace, then press F3.");
-        if (!view_.transcript && settings_.resume) return label("F2 重新打开会话。", "F2 retries opening the session.");
-        if (view_.transcript && !view_.transcript->closed) return label("F2 恢复当前任务，保留草稿。",
+        if ((!view_.transcript && settings_.resume) || needs_reload()) {
+            return label("F2 重新打开会话。", "F2 retries opening the session.");
+        }
+        if (view_.transcript && view_.transcript->actions.resume) return label("F2 恢复当前任务，保留草稿。",
                                                                        "F2 resumes the current task.");
         return label("F2 提交草稿，回车确认输入法候选。", "F2 submits draft. Enter keeps editing.");
     }

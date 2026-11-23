@@ -383,6 +383,64 @@ class EvidenceFixture(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
 
+def task_closing(base, cli, driver):
+    from editing import Fixture, NEW, OLD, edit_record, wait_for
+
+    paused = Fixture(base, "offline-close-approval", cli, driver)
+    paused.command(1, driver=False)
+    before, _ = paused.saved()
+    with open_tui(paused, "--resume") as terminal:
+        terminal.expect("任务暂停 · approval_required")
+        terminal.expect("F3 结束任务")
+        terminal.key(F3, "再次按 F3 结束任务")
+        terminal.key(F3, "任务已结束")
+    saved, phases = paused.saved()
+    assert saved["finished"] and saved["requests"] == before["requests"]
+    assert saved["dispatches"] == before["dispatches"] and paused.file.read_bytes() == OLD
+    assert edit_record(saved)["result"] == "task closed by user" and phases[-1] == "closed_task"
+
+    fault = Fixture(base, "final-reply-full", cli, driver)
+    args = ["--tui", *fault.args, "--mono"]
+    env = {**fault.env, "LAY_TEST_FULL": "before_reply"}
+    with console(driver, args, 27, 95, env) as terminal:
+        terminal.expect("等待任务")
+        submit(terminal, "fix fixture")
+        terminal.expect("待批准 · 编辑")
+        approve(terminal)
+        terminal.expect("保存失败 · 已保存版本")
+        terminal.expect("回复尚未保存 · The host recorded the result above.")
+        assert "已完成" not in terminal.text
+        saved, phases = fault.saved()
+        assert not saved["finished"] and phases[-1] == "request"
+        assert fault.file.read_bytes() == NEW and saved["dispatches"] == 2
+        assert "The host recorded the result above." not in [row["text"] for row in saved["rounds"]]
+        terminal.expect("F3 结束任务")
+        terminal.key("new draft", "> new draft")
+        terminal.key(F2, "保存失败 · 已保存版本")
+        assert len(fault.saved()[0]["tasks"]) == 1 and fault.saved()[0]["dispatches"] == 2
+    assert "not closed" in fault.command(2, driver=False, extra=("--follow-up", "new task"), data=b"")
+    saved, _ = fault.saved()
+    fault.command(driver=False, resume=True, extra=("--close-task",), data=b"")
+    closed, _ = fault.saved()
+    assert closed["finished"] and closed["requests"] == saved["requests"]
+    assert closed["dispatches"] == saved["dispatches"]
+    fault.command(driver=False, extra=("--follow-up", "new task", "--no-write"), data=b"")
+    assert len(fault.saved()[0]["tasks"]) == 2
+
+    unknown = Fixture(base, "generic-close-unknown", cli, driver)
+    process = unknown.paused("after_edit_dispatch")
+    try:
+        wait_for(process, b"[checkpoint] after_edit_dispatch")
+    finally:
+        finish(process, kill=True)
+    saved, _ = unknown.saved()
+    blocked = unknown.command(2, driver=False, resume=True, extra=("--close-task",), data=b"")
+    assert "Review any unknown effects first" in blocked
+    recovered, _ = unknown.saved()
+    assert recovered["dispatches"] == saved["dispatches"] and recovered["requests"] == saved["requests"]
+    assert edit_record(recovered)["status"] == 4 and unknown.file.read_bytes() == OLD
+
+
 def shared_evidence(base, cli, driver, cmake, ctest):
     fixture = VerificationFixture(base, "evidence", cli, driver, cmake, ctest)
     fixture.file.write_bytes(b"empty_config = allow\n")
@@ -448,6 +506,7 @@ if __name__ == "__main__":
         other_pairs(base, program, driver, cmake, ctest)
         recovery(base, program, driver, cmake, ctest)
         cancel_running(base, program, driver, cmake, ctest)
+        task_closing(base, program, driver)
         previews(base, program)
         shared_evidence(base, program, driver, cmake, ctest)
     print("Verified TUI/CLI facts, fresh approval, cancellation, crash recovery and retry preview isolation.")

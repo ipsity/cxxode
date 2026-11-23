@@ -2,6 +2,7 @@
 
 #include "core/session.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
@@ -27,6 +28,7 @@ public:
     ~SessionStore();
 
     Session load() const;
+    std::int64_t revision() const;
     void save(const Session& session, std::string_view point);
     static std::string migrate(std::string_view id);
 

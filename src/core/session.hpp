@@ -165,6 +165,13 @@ struct SessionJournal {
     std::function<RunPreparation(const ToolCall&, const Session&)> prepare_run{};
 };
 
+struct TaskActions {
+    bool resume = false;
+    bool close = false;
+    bool follow_up = false;
+    bool acknowledge_unknown = false;
+};
+
 Session run_session(std::string question, const Generate& generate, const ExecuteTool& execute,
                     const StopRequested& stop_requested, Limits limits = {},
                     const AuthorizeTool& authorize = {});
@@ -172,6 +179,8 @@ Session continue_session(Session session, const Generate& generate, const Execut
                          const StopRequested& stop_requested, Limits limits,
                          const AuthorizeTool& authorize, const SessionJournal& journal);
 void append_task(Session& session, std::string question, bool allow_edit);
+TaskActions task_actions(const Session& session);
+void close_task(Session& session);
 void recover_session(Session& session, const SessionJournal& journal);
 bool task_closed(const Session& session);
 std::string_view name(SessionStop stop);

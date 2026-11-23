@@ -268,7 +268,7 @@ def cases(base, cli, driver):
         if expected == OLD:
             assert not edit_record(fixture.saved()[0])["dispatched"]
         else:
-            assert f"applied {FILE}" in output
+            assert f"applied {FILE}" not in output
             assert "observed bytes match expected after state" in fixture.command(1, resume=True, data=b"")
 
     identity = new("identity")

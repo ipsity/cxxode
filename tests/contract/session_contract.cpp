@@ -113,4 +113,21 @@ int main() {
     require(continued.tasks.front().ended == SessionStop::request_limit && continued.requests == 2 &&
             continued.dispatches == 2 && continued.rounds.back().tools.front().result.text == "new observation",
             "The previous task's dispatch count does not consume the follow-up allowance");
+
+    Session limited;
+    limited.question = question;
+    limited.tasks.push_back({question});
+    const auto no_dispatch = [](const ToolCall&) -> ToolResult { throw std::runtime_error("Unexpected dispatch"); };
+    auto paused = continue_session(std::move(limited),
+        [](const Request&, const EventSink&) {
+            return Generation{0, GenerationFailure{SessionStop::context_limit, "Context is full before sending"}};
+        }, no_dispatch, [] { return false; }, {}, {}, {});
+    auto actions = task_actions(paused);
+    require(actions.resume && actions.close && !actions.follow_up && paused.requests == 0,
+            "A local context limit offers an offline exit without a model attempt");
+    close_task(paused);
+    require(task_actions(paused).follow_up && paused.requests == 0, "Closing the task does not request the model");
+    append_task(paused, follow_up, false);
+    require(paused.tasks.front().ended == SessionStop::context_limit && paused.tasks.back().first_request == 0,
+            "The next task keeps the original stop reason and starts with a fresh budget");
 }

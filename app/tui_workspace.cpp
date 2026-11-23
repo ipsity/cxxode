@@ -35,9 +35,10 @@ void captured(std::string& detail, std::string_view name, const CapturedOutput& 
 }
 
 Transcript project(const Session& snapshot, bool ascii, const std::vector<std::vector<std::string>>& source_notes,
-                   std::span<const std::string> edits) {
+                   std::span<const std::string> edits, CheckpointView checkpoint) {
     Transcript output{{}, snapshot.tasks.size(), task_closed(snapshot), snapshot.stop,
-                      safe_text(snapshot.diagnostic, ascii)};
+                      safe_text(snapshot.diagnostic, ascii), task_actions(snapshot), checkpoint.revision,
+                      !checkpoint.storage_error.empty()};
     const auto current_revision = edit_revision(snapshot);
     const auto add = [&](std::string title, std::string_view detail) {
         output.cards.push_back({safe_text(title, ascii), safe_text(detail, ascii, true)});
@@ -101,6 +102,11 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
     }
     tasks_at(snapshot.rounds.size());
     for (const auto& note : edits) add(short_line(note), note);
+    if (!checkpoint.observed_reply.empty()) {
+        const auto label = ascii ? "Unsaved reply / " : "回复尚未保存 · ";
+        add(std::string(label) + short_line(checkpoint.observed_reply), checkpoint.observed_reply);
+    }
+    if (output.storage_failed) output.diagnostic = safe_text(checkpoint.storage_error, ascii);
     return output;
 }
 
@@ -186,14 +192,15 @@ void WorkspaceWorker::decide(std::size_t ticket, bool approved) {
 
 void WorkspaceWorker::publish(const Session& snapshot, std::string_view point,
                               const std::function<std::vector<std::string>(std::size_t)>& citations,
-                              std::span<const std::string> edits) {
+                              std::span<const std::string> edits, CheckpointView checkpoint) {
     if (citations) {
         std::vector<std::vector<std::string>> notes;
         for (std::size_t i = 0; i < snapshot.rounds.size(); ++i) notes.push_back(citations(i));
         source_notes_ = std::move(notes);
     }
     // A request changes the preview and counters only. Keep the committed cards.
-    auto transcript = point == "request" ? nullptr : std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_, edits));
+    auto transcript = point == "request" ? nullptr :
+        std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_, edits, checkpoint));
     const std::lock_guard lock(mutex_);
     view_.preview.clear();
     view_.requesting = point == "request";
@@ -216,8 +223,9 @@ std::optional<bool> WorkspaceWorker::review(std::size_t task, const ToolCall& ca
 void WorkspaceWorker::execute(const WorkspaceCommand& command) {
     const WorkspacePort port{
         [&] { return cancelled_.load(std::memory_order_relaxed); },
-        [&](const Session& session, std::string_view point, const auto& citations, std::span<const std::string> edits) {
-            try { publish(session, point, citations, edits); } catch (...) {}
+        [&](const Session& session, std::string_view point, const auto& citations, std::span<const std::string> edits,
+            CheckpointView checkpoint) {
+            try { publish(session, point, citations, edits, checkpoint); } catch (...) {}
         },
         [&](std::string_view text) {
             auto scope = safe_text(text, ascii_);

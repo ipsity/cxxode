@@ -679,6 +679,10 @@ std::string SessionStore::migrate(std::string_view id) {
     return utf8(backup_path);
 }
 
+std::int64_t SessionStore::revision() const {
+    return state_->revision;
+}
+
 void SessionStore::save(const Session& session, std::string_view point) {
     auto* db = state_->db.get();
     const bool force_full = state_->checkpoint && state_->checkpoint("before", point, session);

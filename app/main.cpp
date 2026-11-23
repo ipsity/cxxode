@@ -88,6 +88,7 @@ void usage(std::ostream& stream) {
            << "       Use --allow-run to propose commands for approval.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
            << "       Use --follow-up TEXT [--no-write] to append to a closed session task.\n"
+           << "       Use --resume --close-task to close a paused task offline and keep saved results.\n"
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
            << "       Add --close-task to record that acknowledgement without another model request.\n"
            << "       lay-code --migrate-session ID\n";
@@ -180,7 +181,7 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
     }
     if ((result.id.empty() && (!result.writable.empty() || result.allow_run || result.resume || result.follow_up)) ||
         (result.follow_up && (result.resume || result.question)) ||
-        (result.no_write && !result.follow_up) || (result.close_task && !result.accept_unknown) ||
+        (result.no_write && !result.follow_up) || (result.close_task && !result.resume) ||
         (result.accept_unknown && !result.resume) || (result.question && result.resume) ||
         (result.model == "fixture-edit" && result.writable.empty()) ||
         (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
@@ -743,15 +744,15 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     const auto progress = [&](const lay::Session& snapshot) {
         return editors.size() == 2 ? lay::edit_progress(snapshot, settings.writable) : std::vector<std::string>{};
     };
-    const auto publish = [&](const lay::Session& snapshot, std::string_view point) {
+    const auto publish = [&](const lay::Session& snapshot, std::string_view point, lay::tui::CheckpointView checkpoint) {
         if (!port) return;
         const auto edits = point == "request" ? std::vector<std::string>{} : progress(snapshot);
         if (point == "loaded" || point == "finished") {
             port->checkpoint(snapshot, point, [&](std::size_t round) {
                 return lay::source_evidence(snapshot, round, workspace);
-            }, edits);
+            }, edits, checkpoint);
         } else {
-            port->checkpoint(snapshot, point, {}, edits);
+            port->checkpoint(snapshot, point, {}, edits, checkpoint);
         }
     };
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
@@ -769,12 +770,12 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         deadline = Clock::now() + task_time - std::chrono::milliseconds(
             std::min<std::size_t>(used_ms, task_time.count()));
     };
-    const auto finish = [&](lay::Session session) {
+    const auto finish = [&](lay::Session session, lay::tui::CheckpointView checkpoint = {}) {
         if (!persistent && session.stop == lay::SessionStop::cancelled && !interrupted_now()) {
             session.stop = lay::SessionStop::time_limit;
         }
         if (port) {
-            publish(session, "finished");
+            publish(session, "finished", checkpoint);
             return 0;
         }
         for (const auto& note : progress(session)) {
@@ -831,14 +832,14 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         show_scope();
         question = settings.question ? question_input(*settings.question) : prompt();
     }
-    lay::SessionStore store(settings.id, scope, std::move(question), port ? lay::StoreCheckpoint{} : test_checkpoint());
+    lay::SessionStore store(settings.id, scope, std::move(question), test_checkpoint());
     auto session = store.load();
     if (settings.follow_up) {
         lay::append_task(session, question_input(*settings.follow_up), !settings.no_write);
         store.save(session, "follow_up");
         show_scope();
     }
-    publish(session, "loaded");
+    publish(session, "loaded", {store.revision()});
     if (settings.accept_unknown) {
         if (session.stop != lay::SessionStop::effect_unknown || session.finished) {
             throw std::invalid_argument("Resume and review the unknown effect before accepting it.");
@@ -846,7 +847,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         if (settings.close_task) {
             session.finished = true;
             store.save(session, "closed_unknown");
-            finish(std::move(session));
+            finish(std::move(session), {store.revision()});
             return 0;
         }
         session.stop = lay::SessionStop::end_turn;
@@ -895,6 +896,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         }
         return review_answer("Run this command? [y/N] ");
     };
+    std::string unsaved_reply;
     lay::SessionJournal journal{};
     journal.save = [&](auto& snapshot, auto point) {
         const auto activity = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - deadline);
@@ -906,8 +908,13 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
                 close_cancelled_task(snapshot);
             }
         }
-        store.save(snapshot, point);
-        publish(snapshot, point);
+        try {
+            store.save(snapshot, point);
+        } catch (...) {
+            if (point == "reply" && snapshot.finished) unsaved_reply = snapshot.rounds.back().text;
+            throw;
+        }
+        publish(snapshot, point, {store.revision()});
     };
     if (!editors.empty()) {
         journal.prepare_edit = [&](const auto& call, const auto& snapshot) -> lay::EditPreparation {
@@ -953,7 +960,15 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     }
     if (action == lay::tui::WorkspaceAction::inspect) {
         if (!session.finished) lay::recover_session(session, journal);
-        return finish(std::move(session));
+        return finish(std::move(session), {store.revision()});
+    }
+    if (settings.close_task) {
+        if (!session.finished) lay::recover_session(session, journal);
+        lay::close_task(session);
+        store.save(session, "closed_task");
+        if (!port) std::cout << "[saved revision " << store.revision() << "]\n";
+        finish(std::move(session), {store.revision()});
+        return 0;
     }
     lay::Generate model;
     if (settings.model == "fixture-verify") {
@@ -974,12 +989,36 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             return generate(request, emit);
         };
     }
-    return finish(lay::continue_session(std::move(session), model, read, cancel, {}, authorize, journal));
+    auto result = lay::continue_session(std::move(session), model, read, cancel, {}, authorize, journal);
+    if (result.stop != lay::SessionStop::storage_error) {
+        return finish(std::move(result), {store.revision()});
+    }
+    std::optional<lay::Session> saved;
+    try { saved = store.load(); } catch (const std::exception&) {}
+    const lay::tui::CheckpointView checkpoint{saved ? store.revision() : -1, result.diagnostic, unsaved_reply};
+    if (port) {
+        if (saved) publish(*saved, "finished", checkpoint);
+        else port->checkpoint({}, "finished", {}, {}, checkpoint);
+        return 0;
+    }
+    if (saved) {
+        std::cout << "[saved revision " << store.revision() << "]\n";
+        finish(std::move(*saved), checkpoint);
+    }
+    if (!unsaved_reply.empty()) {
+        std::cout << "[observed reply - not saved]\n";
+        terminal_text(unsaved_reply);
+        std::cout << '\n';
+    }
+    std::cout << "[session] storage_error ";
+    terminal_text(result.diagnostic);
+    std::cout << '\n';
+    return 1;
 }
 
 int workspace_tui(std::span<const std::string> arguments) {
     const auto settings = options(arguments, true);
-    if (settings.workspace.empty() || settings.id.empty() || settings.follow_up || settings.accept_unknown ||
+    if (settings.workspace.empty() || settings.id.empty() || settings.follow_up || settings.accept_unknown || settings.close_task ||
         settings.list_models || settings.set_provider_key) {
         throw std::invalid_argument("Workspace TUI requires --workspace PATH --session ID. Use F2 to submit and --resume to open a saved session.");
     }
@@ -995,8 +1034,9 @@ int workspace_tui(std::span<const std::string> arguments) {
             next.resume = false;
             next.follow_up = command.question;
             next.no_write = !command.allow_edit;
-        } else if (command.action == lay::tui::WorkspaceAction::close_unknown) {
-            next.accept_unknown = true;
+        } else if (command.action == lay::tui::WorkspaceAction::close_task ||
+                   command.action == lay::tui::WorkspaceAction::close_unknown) {
+            next.accept_unknown = command.action == lay::tui::WorkspaceAction::close_unknown;
             next.close_task = true;
         }
         run_workspace(next, &port, command.action);

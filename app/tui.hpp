@@ -11,7 +11,7 @@ namespace lay::tui {
 
 int run(std::span<const std::string> arguments);
 
-enum class WorkspaceAction { prepare, inspect, start, follow_up, resume, close_unknown };
+enum class WorkspaceAction { prepare, inspect, start, follow_up, resume, close_task, close_unknown };
 
 struct WorkspaceCommand {
     WorkspaceAction action;
@@ -19,11 +19,17 @@ struct WorkspaceCommand {
     bool allow_edit = true;
 };
 
+struct CheckpointView {
+    std::int64_t revision = -1;
+    std::string_view storage_error{};
+    std::string_view observed_reply{};
+};
+
 struct WorkspacePort {
     StopRequested stopping;
     std::function<void(const Session&, std::string_view,
                        const std::function<std::vector<std::string>(std::size_t)>&,
-                       std::span<const std::string>)> checkpoint;
+                       std::span<const std::string>, CheckpointView)> checkpoint;
     std::function<void(std::string_view)> scope;
     std::function<void(std::string_view)> preview;
     std::function<std::optional<bool>(std::size_t, const ToolCall&, std::string, std::string)> review;

@@ -227,6 +227,9 @@ void recover_session(Session& session, const SessionJournal& journal) {
         } else if (record.edit) {
             record.result = journal.recover_edit(*record.edit);
             session.stop = SessionStop::effect_unknown;
+        } else if (record.call.name == "edit" || record.call.name == "run") {
+            record.result = {ToolStatus::unknown, "A dispatched action is missing its recovery evidence."};
+            session.stop = SessionStop::effect_unknown;
         } else {
             // A new observation is safe for reads and counts as a new dispatch.
             record.dispatched = false;
@@ -250,6 +253,37 @@ bool task_closed(const Session& session) {
         session.stop == SessionStop::time_limit;
 }
 
+TaskActions task_actions(const Session& session) {
+    if (session.tasks.empty() || session.stop == SessionStop::storage_error) return {};
+    const auto active = std::span(session.rounds).subspan(session.tasks.back().first_round);
+    bool pending = false;
+    for (const auto& round : active) {
+        for (const auto& tool : round.tools) {
+            if (tool.result.status != ToolStatus::pending) continue;
+            if (tool.dispatched && (tool.call.name == "edit" || tool.call.name == "run")) return {};
+            pending = true;
+        }
+    }
+    if (task_closed(session)) return {.follow_up = !pending};
+    if (session.stop == SessionStop::effect_unknown) return {.acknowledge_unknown = true};
+    return {.resume = true, .close = true};
+}
+
+void close_task(Session& session) {
+    if (!task_actions(session).close) {
+        throw std::invalid_argument("The task cannot be closed here. Review any unknown effects first.");
+    }
+    for (auto& round : std::span(session.rounds).subspan(session.tasks.back().first_round)) {
+        for (auto& tool : round.tools) {
+            if (tool.result.status == ToolStatus::pending) {
+                tool.result = {ToolStatus::skipped, "task closed by user"};
+            }
+        }
+    }
+    if (session.stop == SessionStop::end_turn) session.stop = SessionStop::cancelled;
+    session.finished = true;
+}
+
 void append_task(Session& session, std::string question, bool allow_edit) {
     if (session.tasks.empty()) {
         throw std::invalid_argument("Follow-ups require a persistent session.");
@@ -262,7 +296,7 @@ void append_task(Session& session, std::string question, bool allow_edit) {
             throw std::invalid_argument("The current task has pending tools. Resume it before adding a follow-up.");
         }
     }
-    if (!task_closed(session)) {
+    if (!task_actions(session).follow_up) {
         throw std::invalid_argument("The current task is not closed (" + std::string(name(session.stop)) +
                                     "). Resume it before adding a follow-up.");
     }
@@ -365,6 +399,7 @@ Session continue_session(Session session, const Generate& generate, const Execut
         if (!journal.save) {
             throw;
         }
+        session.finished = false;
         session.stop = SessionStop::storage_error;
         session.diagnostic = error.what();
     }
