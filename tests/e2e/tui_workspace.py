@@ -367,7 +367,7 @@ class EvidenceFixture(BaseHTTPRequestHandler):
         self.server.requests += 1
         path = self.server.filename
         if index < 2:
-            action, args = ("run", {"program": "ctest", "args": ["-R", "^empty_config$"]}) if index == 0 else (
+            action, args = ("run", {"program": "ctest", "args": ["-R", "^empty_config$|no match"]}) if index == 0 else (
                 "read", {"path": path})
             item = {"type": "function_call", "id": f"fc_evidence_{index}", "call_id": f"call_evidence_{index}",
                     "name": action, "arguments": json.dumps(args, ensure_ascii=False)}
@@ -399,7 +399,15 @@ def shared_evidence(base, cli, driver, cmake, ctest):
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
-            fixture.command(data=b"Check this configuration and cite the source.\ny\n")
+            with console(cli, ["--tui", *fixture.args, "--mono"], 16, 48, fixture.env) as terminal:
+                terminal.expect("等待任务")
+                submit(terminal, "检查配置并引用出处")
+                terminal.expect("任务 1  /  call_evidence_0")
+                terminal.key(ESC + "[F", '参数 1 "^empty_config$|no match"')
+                assert fixture.count() == 0 and server.requests == 1
+                terminal.key(ESC + "[H", "任务 1  /  call_evidence_0")
+                approve(terminal)
+                terminal.expect("已完成")
             saved = fixture.saved()
             run, read = [row["tools"][0] for row in saved[0]["rounds"][:2]]
             observed = run["verification"]["observed_utc"]
