@@ -22,6 +22,7 @@ FOLLOW_UP = "保留刚才的修改，仅运行空配置用例"
 F2 = ESC + "OQ"
 F3 = ESC + "OR"
 F4 = ESC + "OS"
+F5 = ESC + "[15~"
 
 
 def approve(terminal):
@@ -83,14 +84,26 @@ def compare(base, cli, driver, cmake, ctest):
         terminal.send(F2)
         terminal.expect("待批准 · 运行 ctest")
         terminal.expect("任务 1  /  verify-0")
+        terminal.key(F2, "请先完成当前审批")
+        assert tui.count() == 0
         terminal.send("\ty\r")
         terminal.quiet()
         assert tui.count() == 0 and "> y" not in terminal.text
         terminal.key("\t", "空回车拒绝")
-        terminal.key(ESC + "[200~y\r\n第二行\r\n" + ESC + "[201~", "已忽略粘贴或排队回车")
+        terminal.key(ESC + "[200~yes\r\n第二行\r\n" + ESC + "[201~", "已忽略粘贴或排队回车")
+        terminal.key("\t", "空回车拒绝")
+        terminal.key("y", "> y")
+        terminal.resize(10, 30)
+        terminal.expect("请放大窗口")
+        terminal.send("\ty\r")
+        terminal.quiet()
+        assert tui.count() == 0
         resized = len(terminal.text)
         terminal.resize(16, 48)
         terminal.expect("\x1b[16;1H", resized)
+        terminal.expect("任务 1  /  verify-0", resized)
+        terminal.send("\r")
+        terminal.quiet()
         assert tui.count() == 0
         approve(terminal)
         terminal.expect("待批准 · 编辑")
@@ -179,6 +192,11 @@ def recovery(base, cli, driver, cmake, ctest):
         terminal.expect("效果未知 · 等待核对")
         terminal.expect("effect unknown")
         assert fixture.count() == 1 and fixture.saved()[0]["dispatches"] == 1
+        terminal.key("x", "> x")
+        waiting = fixture.saved()
+        terminal.key(F2, "草稿未发送 · 先核对未知效果")
+        assert fixture.saved() == waiting
+        terminal.key("\x7f", "> ")
         terminal.key(F3, "核对后再次按 F3")
         terminal.key(F3, "效果未知 · 已结清")
         terminal.key(F4, "后续任务已禁用编辑工具")
@@ -336,7 +354,7 @@ def previews(base, cli):
                 submit(terminal, "Test the model retry")
                 terminal.expect("PREVIEW_FIRST")
                 terminal.key("next draft", "> next draft")
-                terminal.send(F2)
+                terminal.key(F2, "草稿未发送，可以继续编辑")
                 terminal.quiet()
                 assert server.attempts == 1
                 server.release[0].set()
@@ -416,7 +434,13 @@ def task_closing(base, cli, driver):
         assert "The host recorded the result above." not in [row["text"] for row in saved["rounds"]]
         terminal.expect("F3 结束任务")
         terminal.key("new draft", "> new draft")
-        terminal.key(F2, "保存失败 · 已保存版本")
+        terminal.expect("F5 继续原任务")
+        unsaved = fault.saved()
+        terminal.key(F2, "草稿未发送 · F5 继续原任务")
+        assert fault.saved() == unsaved
+        start = len(terminal.text)
+        terminal.send(F5)
+        terminal.expect("保存失败 · 已保存版本", start)
         assert len(fault.saved()[0]["tasks"]) == 1 and fault.saved()[0]["dispatches"] == 2
     assert "not closed" in fault.command(2, driver=False, extra=("--follow-up", "new task"), data=b"")
     saved, _ = fault.saved()
@@ -462,6 +486,7 @@ def shared_evidence(base, cli, driver, cmake, ctest):
                 submit(terminal, "检查配置并引用出处")
                 terminal.expect("任务 1  /  call_evidence_0")
                 terminal.key(ESC + "[F", '参数 1 "^empty_config$|no match"')
+                terminal.expect("输出摘录将发送至 http://127.0.0.1")
                 assert fixture.count() == 0 and server.requests == 1
                 terminal.key(ESC + "[H", "任务 1  /  call_evidence_0")
                 approve(terminal)
@@ -494,6 +519,32 @@ def shared_evidence(base, cli, driver, cmake, ctest):
             server.shutdown()
 
 
+def draft_input(base, cli, driver):
+    from editing import Fixture
+
+    fixture = Fixture(base, "draft-input", cli, driver)
+    with open_tui(fixture) as terminal:
+        terminal.expect("等待任务")
+        terminal.key(F2, "请先输入任务草稿")
+        terminal.send(ESC + "[200~line1\nline2" + ESC + "[201~")
+        terminal.expect("line2")
+        if os.name != "nt":
+            terminal.expect("> line1 line2")
+            terminal.expect("粘贴的换行和制表符已转为空格")
+        assert not fixture.db.exists()
+    with open_tui(fixture, "--ascii") as terminal:
+        terminal.expect("Ready for a task")
+        terminal.key("a" * 4094 + "中bbignored", "Draft limit: 4096 bytes")
+        terminal.quiet()
+        assert not fixture.db.exists()
+        terminal.send(F2)
+        terminal.expect("Needs approval / Edit")
+        assert terminal.text.isascii()
+        saved, _ = fixture.saved()
+        assert saved["tasks"][0]["question"] == "a" * 4094 + "bb"
+        assert saved["requests"] == 2 and saved["dispatches"] == 1
+
+
 if __name__ == "__main__":
     if os.name == "nt":
         from tui import PtyProcess
@@ -507,6 +558,7 @@ if __name__ == "__main__":
         recovery(base, program, driver, cmake, ctest)
         cancel_running(base, program, driver, cmake, ctest)
         task_closing(base, program, driver)
+        draft_input(base, program, driver)
         previews(base, program)
         shared_evidence(base, program, driver, cmake, ctest)
     print("Verified TUI/CLI facts, fresh approval, cancellation, crash recovery and retry preview isolation.")

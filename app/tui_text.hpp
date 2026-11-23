@@ -82,16 +82,19 @@ inline std::vector<std::string> wrap(std::string_view text, int width) {
 
 class Draft {
 public:
+    static constexpr std::size_t max_bytes = 4096;
     std::string text;
     std::size_t cursor = 0;
 
-    void insert(std::string_view value) {
-        if (text.size() + value.size() <= 4096) {
-            text.insert(cursor, value);
-            cursor += value.size();
+    bool insert(std::string_view value) {
+        if (text.size() + value.size() > max_bytes) return false;
+        text.insert(cursor, value);
+        cursor += value.size();
+        if (cursor != text.size()) {
             const auto boundaries = cells(text);
             cursor = std::ranges::lower_bound(boundaries, cursor, {}, &Cell::offset)->offset;
         }
+        return true;
     }
 
     void move(bool forward, bool erase) {

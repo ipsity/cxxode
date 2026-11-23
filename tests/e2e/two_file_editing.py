@@ -158,6 +158,7 @@ def normal(base, cli, driver):
             terminal.expect("+    start = (number - 1) * size")
             decide(terminal)
             terminal.expect(f"待批准 · 编辑 {TEST}")
+            terminal.expect("修改已保存 · " + SOURCE)
             assert changes(fixture) == [NEW_SOURCE, OLD_TEST]
             terminal.expect("+assert page([1, 2, 3], 2, 2) == [3]")
             decide(terminal)

@@ -13,12 +13,13 @@ namespace {
 
 enum class Key {
     text, enter, escape, tab, stop, details, submit, up, down, left, right, first, last,
-    previous_page, next_page, backspace, erase, paste, acknowledge, edit_scope
+    previous_page, next_page, backspace, erase, paste, paste_space, acknowledge, edit_scope, resume
 };
 
 struct Event {
     Key key;
     std::string text{};
+    bool pasted = false;
 };
 
 class Input {
@@ -34,7 +35,7 @@ public:
                 length = escape(input, events, bytes.empty());
             } else if (first < 0x20 || first == 0x7f) {
                 if (pasting_) {
-                    if (first == '\n' || first == '\r' || first == '\t') events.push_back({Key::text, " "});
+                    if (first == '\n' || first == '\r' || first == '\t') events.push_back({Key::paste_space, " ", true});
                 } else {
                     switch (first) {
                         case '\r': case '\n': events.push_back({Key::enter}); break;
@@ -55,7 +56,7 @@ public:
                     const auto value = scalar(text);
                     if (!(value >= 0x80 && value <= 0x9f) && !(value >= 0x202a && value <= 0x202e) &&
                         !(value >= 0x2066 && value <= 0x2069)) {
-                        events.push_back({Key::text, std::string(text)});
+                        events.push_back({Key::text, std::string(text), pasting_});
                     }
                 }
             }
@@ -99,6 +100,7 @@ private:
                 {"OQ", Key::submit}, {"[12~", Key::submit},
                 {"OR", Key::acknowledge}, {"[13~", Key::acknowledge},
                 {"OS", Key::edit_scope}, {"[14~", Key::edit_scope},
+                {"[15~", Key::resume},
             };
             if (const auto match = std::ranges::find(keys, sequence, [](const auto& item) { return item.first; });
                 match != std::end(keys)) {
@@ -171,7 +173,7 @@ public:
         line(approval() ? (focused_ ? label("输入 y 或 yes 后回车批准。空回车拒绝。",
                                             "y or yes + Enter approves. Enter denies.") :
                                      label("Tab 输入决定，审批仅用于演示。", "Tab to decide. Simulated approval.")) :
-                          label("F2 提交草稿，回车确认输入法候选。", "F2 submits draft. Enter keeps editing."));
+                          label("F2 提交草稿 · Enter 保留草稿", "F2 submits draft. Enter keeps editing."));
         if (!notice_.empty()) {
             line(notice_);
         } else {
@@ -250,7 +252,8 @@ public:
                 return true;
             } else if (!approval() || focused_) {
                 auto& draft = approval() ? decision_ : draft_;
-                if (key == Key::text && (!focused_ || draft.text.size() < 8)) draft.insert(event.text);
+                if ((key == Key::text || key == Key::paste_space) &&
+                    (!focused_ || draft.text.size() < 8)) draft.insert(event.text);
                 if (key == Key::left || key == Key::right) draft.move(key == Key::right, false);
                 if (key == Key::backspace || key == Key::erase) draft.move(key == Key::erase, true);
             }
@@ -485,7 +488,7 @@ public:
         std::string rule;
         for (int i = 0; i < width; ++i) rule += label("─", "-");
         line(rule);
-        line(label("Ctrl+O 详情 · Ctrl+C 停止 · Esc 退出", "Ctrl+O details / Ctrl+C stop / Esc quit"));
+        line(shortcuts());
         line(instruction());
         line(notice_.empty() ? draft_label() : notice_);
         if (!view_.review || focused_) {
@@ -498,9 +501,13 @@ public:
         return result;
     }
 
-    bool handle(const std::vector<Event>& batch, Size size, bool new_review) {
+    bool handle(const std::vector<Event>& batch, Size size, bool new_review, bool resized) {
         const bool combined = batch.size() > 1;
         const bool compact = size.columns < 34 || size.rows < 12;
+        if (resized && focused_) {
+            reset_decision();
+            notice_ = label("窗口已调整，按 Tab 重新决定。", "Window resized. Use Tab to decide.");
+        }
         for (const auto& event : batch) {
             const auto key = event.key;
             if (key == Key::stop) {
@@ -517,8 +524,13 @@ public:
                 reset_decision();
                 return true;
             }
-            if (compact || new_review || view_.stopping) continue;
+            if (compact) continue;
             if (key != Key::acknowledge) confirming_unknown_ = false;
+            if (key == Key::submit) {
+                if (!combined) submit();
+                continue;
+            }
+            if (new_review || view_.stopping) continue;
             if (view_.review && key == Key::tab) {
                 if (focused_) reset_decision();
                 else if (!combined) {
@@ -549,22 +561,15 @@ public:
             }
             if (key == Key::edit_scope && !combined && can_narrow()) {
                 allow_edit_ = !allow_edit_;
-                notice_ = {};
+                notice_ = allow_edit_ ? label("后续任务已启用编辑工具", "Next task: edits on") :
+                                       label("后续任务已禁用编辑工具", "Next task: edits off");
                 return true;
             }
-            if (key == Key::submit && !combined && !view_.busy && !unknown()) {
+            if (key == Key::resume && !combined && !view_.busy) {
                 if ((!view_.transcript && settings_.resume) || needs_reload()) {
                     launch({WorkspaceAction::inspect});
                 } else if (view_.transcript && view_.transcript->actions.resume) {
                     launch({WorkspaceAction::resume});
-                } else if ((!view_.transcript || view_.transcript->actions.follow_up) &&
-                           draft_.text.find_first_not_of(' ') != draft_.text.npos) {
-                    const auto action = view_.transcript ? WorkspaceAction::follow_up : WorkspaceAction::start;
-                    submitted_ = std::exchange(draft_, Draft{});
-                    submitted_after_ = task_count(view_);
-                    submitted_allow_edit_ = allow_edit_;
-                    launch({action, submitted_.text, allow_edit_});
-                    allow_edit_ = true;
                 }
                 return true;
             }
@@ -580,9 +585,20 @@ public:
             }
             if (!view_.review || focused_) {
                 auto& draft = focused_ ? decision_ : draft_;
-                if (key == Key::text && (!focused_ || draft.text.size() < 8)) draft.insert(event.text);
+                if ((key == Key::text || key == Key::paste_space) && (!focused_ || draft.text.size() < 8)) {
+                    if (!focused_ && !event.pasted) notice_ = {};
+                    const bool inserted = draft.insert(event.text);
+                    if (!focused_ && (!inserted || draft.text.size() == Draft::max_bytes)) {
+                        notice_ = label("草稿已到 4096 字节上限", "Draft limit: 4096 bytes");
+                    } else if (key == Key::paste_space) {
+                        notice_ = label("粘贴的换行和制表符已转为空格", "Paste line breaks and tabs became spaces");
+                    }
+                }
                 if (key == Key::left || key == Key::right) draft.move(key == Key::right, false);
-                if (key == Key::backspace || key == Key::erase) draft.move(key == Key::erase, true);
+                if (key == Key::backspace || key == Key::erase) {
+                    draft.move(key == Key::erase, true);
+                    notice_ = {};
+                }
             }
         }
         return true;
@@ -601,10 +617,50 @@ private:
     bool can_narrow() const { return settings_.writable && view_.transcript && !view_.review; }
     std::string_view label(std::string_view zh, std::string_view en) const { return ascii_ ? en : zh; }
 
+    void submit() {
+        if (view_.review) {
+            notice_ = label("请先完成当前审批，草稿未发送。", "Finish the current review. Draft unsent.");
+        } else if (view_.busy || view_.stopping) {
+            notice_ = label("草稿未发送，可以继续编辑。", "Draft unsent. Keep editing.");
+        } else if ((!view_.transcript && settings_.resume) || needs_reload()) {
+            notice_ = label("草稿未发送 · F5 重开会话", "Draft unsent / F5 opens the session");
+        } else if (unknown()) {
+            notice_ = label("草稿未发送 · 先核对未知效果", "Draft unsent / Check unknown effects");
+        } else if (view_.transcript && view_.transcript->actions.resume) {
+            notice_ = label("草稿未发送 · F5 继续原任务", "Draft unsent / F5 continues the task");
+        } else if (view_.transcript && !view_.transcript->actions.follow_up) {
+            notice_ = label("草稿未发送，请重开会话。", "Draft unsent. Reopen the session.");
+        } else if (draft_.text.find_first_not_of(' ') == draft_.text.npos) {
+            notice_ = label("请先输入任务草稿。", "Enter a task first.");
+        } else {
+            const auto action = view_.transcript ? WorkspaceAction::follow_up : WorkspaceAction::start;
+            submitted_ = std::exchange(draft_, Draft{});
+            submitted_after_ = task_count(view_);
+            submitted_allow_edit_ = allow_edit_;
+            launch({action, submitted_.text, allow_edit_});
+            allow_edit_ = true;
+        }
+    }
+
+    std::string_view shortcuts() const {
+        if (focused_) return label("Esc 返回审阅 · Ctrl+C 停止", "Esc returns to review / Ctrl+C stop");
+        if (view_.review) return label("Ctrl+C 停止 · Esc 退出", "Ctrl+C stop / Esc quit");
+        const bool details = view_.transcript && !view_.transcript->cards.empty();
+        if (view_.busy) {
+            return details ? label("Ctrl+O 详情 · Ctrl+C 停止 · Esc 退出", "Ctrl+O details / Ctrl+C stop / Esc quit") :
+                             label("Ctrl+C 停止 · Esc 退出", "Ctrl+C stop / Esc quit");
+        }
+        return details ? label("Ctrl+O 详情 · Esc 退出", "Ctrl+O details / Esc quit") : label("Esc 退出", "Esc quit");
+    }
+
     std::string_view draft_label() const {
-        if (view_.review) return label("审核当前动作", "Review current action");
-        if (view_.transcript && view_.transcript->actions.close) {
-            return label("F3 结束任务并保留已保存结果", "F3 closes the task and keeps saved results");
+        if (view_.review) {
+            if (view_.transcript && !view_.transcript->saved_edit.empty()) return view_.transcript->saved_edit;
+            return label("审核当前动作", "Review current action");
+        }
+        if (!draft_.text.empty()) {
+            return allow_edit_ ? label("草稿未发送 · 退出丢弃", "Draft unsent / discarded on exit") :
+                                 label("草稿未发送 · 禁止写入 · 退出丢弃", "Unsent / edits off / lost on exit");
         }
         if (can_narrow()) {
             return allow_edit_ ? label("F4 禁用后续任务的编辑工具", "F4 disables edits for the next task") :
@@ -617,7 +673,7 @@ private:
         if (view_.stopping) return std::string(label("正在停止", "Stopping"));
         if (view_.review) return std::string(label("待批准 · ", "Needs approval / ")) + view_.review->title;
         if (view_.busy) {
-            return std::string(view_.requesting ? label("请求中", "Requesting model") : label("工作中", "Working"));
+            return std::string(view_.requesting ? label("正在等模型", "Waiting for model") : label("工作中", "Working"));
         }
         if (!view_.error.empty()) return std::string(label("会话错误", "Session error"));
         if (!view_.transcript) return std::string(label("等待任务", "Ready for a task"));
@@ -649,11 +705,12 @@ private:
         if (view_.busy) return label("可编辑下一条草稿。", "You can edit the next draft.");
         if (unknown()) return label("先核对工作区，再用 F3 结清。", "Check the workspace, then press F3.");
         if ((!view_.transcript && settings_.resume) || needs_reload()) {
-            return label("F2 重新打开会话。", "F2 retries opening the session.");
+            return label("F5 重新打开会话。", "F5 opens the session.");
         }
-        if (view_.transcript && view_.transcript->actions.resume) return label("F2 恢复当前任务，保留草稿。",
-                                                                       "F2 resumes the current task.");
-        return label("F2 提交草稿，回车确认输入法候选。", "F2 submits draft. Enter keeps editing.");
+        if (view_.transcript && view_.transcript->actions.resume) {
+            return label("F5 继续原任务 · F3 结束任务", "F5 continue task / F3 end task");
+        }
+        return label("F2 提交草稿 · Enter 保留草稿", "F2 submits draft. Enter keeps editing.");
     }
 
     void reset_decision() {
@@ -773,9 +830,9 @@ int run_workspace(const WorkspaceScreen& settings, const WorkspaceWork& work) {
         const auto old_ticket = editor.review_ticket();
         const auto changed = editor.refresh();
         if (!changed && events.empty() && latest == size) continue;
-        size = latest;
         const auto next_ticket = editor.review_ticket();
-        if (!editor.handle(events, size, next_ticket && next_ticket != old_ticket)) break;
+        if (!editor.handle(events, latest, next_ticket && next_ticket != old_ticket, latest != size)) break;
+        size = latest;
         editor.refresh();
         screen.draw(terminal, size, editor.frame(size));
     }

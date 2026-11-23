@@ -24,6 +24,7 @@ struct Transcript {
     TaskActions actions;
     std::int64_t revision;
     bool storage_failed;
+    std::string saved_edit{};
 };
 
 struct Review {

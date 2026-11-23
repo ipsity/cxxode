@@ -98,11 +98,12 @@ public:
               written == text.size(), "WriteFile input");
     }
 
-    void expect(std::string_view text, std::size_t start = 0) {
+    std::string_view expect(std::string_view text, std::size_t start = 0, std::string_view alternate = {}) {
         const auto deadline = std::chrono::steady_clock::now() + 12s;
         while (std::chrono::steady_clock::now() < deadline) {
             drain();
-            if (screen_.find(text, start) != screen_.npos) return;
+            if (screen_.find(text, start) != screen_.npos) return text;
+            if (!alternate.empty() && screen_.find(alternate, start) != screen_.npos) return alternate;
             if (WaitForSingleObject(process_.value, 10) == WAIT_OBJECT_0) break;
         }
         const auto offset = screen_.size() > 2048 ? screen_.size() - 2048 : 0;
@@ -199,8 +200,8 @@ int wmain(int argc, wchar_t** argv) {
             return 0;
         }
         Terminal terminal(argv[1], argv[2]);
-        terminal.expect("F2 resumes the current task.");
-        terminal.key("\x1bOQ", "Needs approval / Edit config.txt");
+        const auto resume = terminal.expect("F5 continue task", 0, "F2 resumes the current task.");
+        terminal.key(resume.starts_with("F5") ? "\x1b[15~" : "\x1bOQ", "Needs approval / Edit config.txt");
         terminal.expect("+empty_config = allow");
         terminal.key("\t", "y or yes + Enter approves");
         terminal.key("y", "> y");

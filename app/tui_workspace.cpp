@@ -61,6 +61,10 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
                 " · call " + tool.call.id;
             if (tool.edit) {
                 detail += "\n" + edit_review_details(*tool.edit);
+                if (task == snapshot.tasks.size() && tool.dispatched && tool.result.status == ToolStatus::ok) {
+                    output.saved_edit = safe_text(std::string(ascii ? "Edit saved / " : "修改已保存 · ") + tool.edit->path,
+                                                  ascii);
+                }
             }
             if (tool.run) {
                 detail += "\nexecutable " + quoted_argument(tool.run->program) +
