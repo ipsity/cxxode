@@ -1,0 +1,57 @@
+{
+  "frozen_source": "266f438a6e8f24ba7988da86ce3d64c8d9bddff7",
+  "workspaces_sha256": "c5dfcc26d17786b88d774b236c28f3979f89fd64ce9e027779ecb9746fd28405",
+  "executable_sha256": "17d60d6c44e68d8925e6362e16b2759f4ec4d0c9903269aba6faa47a38a6ef70",
+  "protocol": "responses",
+  "model": "scripted loopback",
+  "cases": {
+    "cpp-symbol-rename": {
+      "single_session": {
+        "edit_approvals": 2,
+        "observed_review_ms_per_file": [
+          2.967,
+          2.821
+        ],
+        "posts": 4,
+        "three_path_launch_rejected": true,
+        "hidden_behavior_passed": false,
+        "adjacent_file_unchanged": true
+      },
+      "split_two_sessions": {
+        "hidden_behavior_passed": true,
+        "posts": 8,
+        "edit_approvals": 3,
+        "observed_review_ms_per_file": [
+          2.967,
+          2.821,
+          3.423
+        ]
+      }
+    },
+    "config-and-ctest": {
+      "single_session": {
+        "edit_approvals": 2,
+        "observed_review_ms_per_file": [
+          2.803,
+          3.46
+        ],
+        "posts": 4,
+        "three_path_launch_rejected": true,
+        "hidden_behavior_passed": false,
+        "adjacent_file_unchanged": true
+      },
+      "split_two_sessions": {
+        "hidden_behavior_passed": true,
+        "posts": 8,
+        "edit_approvals": 3,
+        "observed_review_ms_per_file": [
+          2.803,
+          3.46,
+          2.652
+        ]
+      }
+    }
+  },
+  "single_session_success": 0,
+  "case_count": 2
+}
