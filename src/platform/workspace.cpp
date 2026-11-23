@@ -413,7 +413,7 @@ bool Node::editable() const {
     struct stat info{};
     return input && ::fstat(native(input.handle_), &info) == 0 &&
         S_ISREG(info.st_mode) && info.st_uid == ::geteuid() && info.st_nlink == 1 &&
-        !(info.st_mode & 07000) && ::flistxattr(native(input.handle_), nullptr, 0) == 0;
+        (info.st_mode & S_IWUSR) && !(info.st_mode & 07000) && ::flistxattr(native(input.handle_), nullptr, 0) == 0;
 #endif
 }
 

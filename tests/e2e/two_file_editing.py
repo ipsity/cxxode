@@ -188,7 +188,10 @@ def normal(base, cli, driver):
         fixture.args[idx + 3] = fixture.args[idx + 1]
         assert "must be distinct" in fixture.command(2, driver=False, resume=True, data=b"")
         fixture.args[idx + 3] = original
-        assert "excessive" in fixture.command(2, driver=False, resume=True, extra=("--write", OTHER), data=b"")
+        assert "session scope changed" in fixture.command(2, driver=False, resume=True,
+                                                          extra=("--write", OTHER), data=b"")
+        assert "excessive" in fixture.command(2, driver=False, resume=True,
+                                            extra=("--write", OTHER, "--write", "fourth.txt"), data=b"")
         assert "workspace-relative file" in fixture.command(2, driver=False, resume=True,
                                                              extra=("--exclude", "tests"), data=b"")
         assert server.requests == 5

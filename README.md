@@ -77,7 +77,7 @@ Windows 用户可在终端运行 `--set-provider-key`，隐藏录入的密钥会
 
 ## P2 单文件编辑与恢复
 
-`--session ID` 启用持久会话。用一次或两次 `--write FILE` 可以授权最多两个精确的工作区相对文件路径。每次编辑先展示该文件的差异、已读取的版本和预期结果摘要。输入 `y` 批准当前差异。非交互输入会在等待批准时暂停，可在终端重新打开同一会话。
+`--session ID` 启用持久会话。重复 `--write FILE` 可授权最多三个不同的精确文件路径，用 `/` 分隔目录。新建文件也填写精确目标。恢复时传入原来的路径清单，参数次序可交换。每份差异仍单独审批，输入 `y` 批准当前差异。CLI 会显示多文件的处理状态，TUI 用 F9 查看。
 
 ```powershell
 lay-code.exe --tui --workspace . --session pager --write src/pager.py --write tests/test_paging.py --allow-run

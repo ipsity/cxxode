@@ -295,8 +295,12 @@ EditPreparation EditWorkspace::prepare(const ToolCall& call, const Session& sess
         if (approval != Approval::approved) {
             return {std::move(evidence), std::string(denied), {}};
         }
-        if (!current(parent(), evidence)) {
-            return {std::move(evidence), "file changed during approval", {}};
+        try {
+            if (!current(parent(), evidence)) {
+                return {std::move(evidence), "file changed during approval", {}};
+            }
+        } catch (const std::runtime_error& error) {
+            return {std::move(evidence), error.what(), {}};
         }
         auto execute = [this, plan = evidence, bytes = std::move(bytes), stop] {
             return apply(plan, bytes, stop);

@@ -130,6 +130,11 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
     }
     tasks_at(snapshot.rounds.size());
     if (!snapshot.tasks.empty()) {
+        if (!edits.empty()) {
+            if (!task_files.empty()) task_files += "\n\n";
+            task_files += ascii ? "Authorized paths" : "已授权路径";
+            for (const auto& note : edits) task_files += '\n' + note;
+        }
         const auto title = std::string(ascii ? "Files in task " : "本任务文件改动 · 任务 ") +
             std::to_string(snapshot.tasks.size());
         output.task_files = Card{title,

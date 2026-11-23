@@ -49,6 +49,8 @@ std::atomic_flag interrupted;
 void on_interrupt(int) { interrupted.test_and_set(std::memory_order_relaxed); }
 bool stopping() { return interrupted.test(std::memory_order_relaxed); }
 
+constexpr std::size_t max_writable_paths = 3;
+
 #if defined(_WIN32) && defined(LAY_WITH_ANTHROPIC)
 BOOL WINAPI on_console_control(DWORD event) {
     if (event != CTRL_C_EVENT && event != CTRL_BREAK_EVENT) {
@@ -92,7 +94,8 @@ void usage(std::ostream& stream) {
            << "       lay-code --workspace PATH [--provider NAME] [--model MODEL] [--exclude RELATIVE_PATH ...]\n"
            << "       lay-code --list-models [--provider NAME] [--provider-config PATH]\n"
            << "       lay-code --set-provider-key [--provider NAME] [--provider-config PATH]\n"
-           << "       Use --session ID to keep a workspace session. Use up to two --write FILE options.\n"
+           << "       Use --session ID to keep a workspace session. Use up to " << max_writable_paths
+           << " --write FILE options.\n"
            << "       Use --allow-run to propose commands for approval.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
            << "       Use --resume --inspect to view saved results without contacting the model.\n"
@@ -170,7 +173,7 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
             result.excluded.push_back(value);
         } else if (option == "--session" && result.id.empty()) {
             result.id = value;
-        } else if (option == "--write" && result.writable.size() < 2) {
+        } else if (option == "--write" && result.writable.size() < max_writable_paths) {
             result.writable.push_back(value);
         } else if (option == "--question" && !result.question) {
             result.question = value;
@@ -211,7 +214,7 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
         throw std::invalid_argument("Use --session ID for persistent tasks. Choose one of --question, --resume or --follow-up.");
     }
-    if (result.writable.size() == 2 && (result.model == "fixture-edit" || result.model == "fixture-verify")) {
+    if (result.writable.size() > 1 && (result.model == "fixture-edit" || result.model == "fixture-verify")) {
         throw std::invalid_argument("The built-in editing fixtures take one --write path.");
     }
     std::ranges::sort(result.writable);
@@ -810,8 +813,9 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         const auto editor = std::ranges::find_if(editors, [&](const auto& item) { return item.allows(path); });
         return editor == editors.end() ? nullptr : &*editor;
     };
+    const bool multiple_writable_paths = editors.size() > 1;
     const auto progress = [&](const lay::Session& snapshot) {
-        return editors.size() == 2 ? lay::edit_progress(snapshot, settings.writable) : std::vector<std::string>{};
+        return multiple_writable_paths ? lay::edit_progress(snapshot, settings.writable) : std::vector<std::string>{};
     };
     lay::Limits limits;
 #ifdef LAY_TEST_HOOKS
@@ -858,7 +862,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             terminal_text(note);
             std::cout << '\n';
         }
-        return render(session, &workspace, editors.size() == 2, limits);
+        return render(session, &workspace, multiple_writable_paths, limits);
     };
     if (port) {
         port->scope(fixture ? std::string(label("本地离线夹具", "Local fixture")) :
@@ -876,6 +880,11 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             terminal_text(selected.model);
         }
         std::cout << ".\n";
+        for (const auto& path : settings.writable) {
+            std::cout << "[write scope] ";
+            terminal_text(path);
+            std::cout << '\n';
+        }
     };
     std::optional<PreviewOutput> preview_output;
     if (!fixture && !port) {

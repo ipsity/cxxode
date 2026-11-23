@@ -109,6 +109,10 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/two_file_editing.py
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
         set_tests_properties(editing.two_files PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
+        add_test(NAME editing.three_files COMMAND Python3::Interpreter -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/three_file_editing.py
+            $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
+        set_tests_properties(editing.three_files PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
         add_test(NAME editing.supplement COMMAND Python3::Interpreter -B
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/supplement.py
             $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
