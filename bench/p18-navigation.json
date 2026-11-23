@@ -37,8 +37,9 @@
     "out/p18-rc9-baseline.json": "8c32b9d0ec1d9c3918fe4326a3949dfba5a6b75aedfe7a7166f9bc8a02fd72"
   },
   "desktop_observation": {
-    "real_screen_reader": "pending",
-    "real_terminal_visibility": "pending",
+    "real_screen_reader": "gap: Windows Narrator started, but speech for approval scope and denial could not be confirmed",
+    "real_terminal_visibility": "pass: same-package Windows Terminal screenshots and user narrow-window approval confirmation",
+    "rc12_acceptance": "bench/p19-rc12-validation.json",
     "cli_fallback": "--resume --inspect"
   }
 }

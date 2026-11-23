@@ -166,13 +166,40 @@ def decide(terminal, approve):
     terminal.process.write("\r")
 
 
-def process_trials(app, root, state):
+def running_cancellations(app, root, state, server, config):
+    feedback, cleanup = [], []
+    for index in range(20):
+        marker = root / f"cancel-{index}.json"
+        reset_process_fixture(server, "flood-until-cancelled", marker)
+        terminal = Terminal(commands(app, root, f"cancel-{index}", config, "--allow-run"), state)
+        try:
+            terminal.expect(READY)
+            submit(terminal, "Cancel a running fixture command")
+            decide(terminal, True)
+            until(lambda: marker.is_file() and marker.stat().st_size > 0)
+            children = json.loads(marker.read_text(encoding="ascii"))
+            assert len(children) == 2 and all(map(process_alive, children))
+            started = time.perf_counter_ns()
+            terminal.process.write("\x03")
+            until(lambda: terminal.observe() or "正在停止" in terminal.text or "已停止" in terminal.text)
+            feedback.append(milliseconds(started))
+            until(lambda: not any(map(process_alive, children)))
+            cleanup.append(milliseconds(started))
+            terminal.expect("已停止")
+        finally:
+            close(terminal)
+    return {"cancel_feedback": measurements(feedback), "child_cleanup_observed": measurements(cleanup)}
+
+
+def process_trials(app, root, state, *, capture_stress=True):
     private = memory_reader()
     with ThreadingHTTPServer(("127.0.0.1", 0), ProcessFixture) as server:
         config = configure(root, server, "process.json")
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
+            if not capture_stress:
+                return running_cancellations(app, root, state, server, config)
             marker = root / "capture-pid.txt"
             reset_process_fixture(server, "flood", marker)
             terminal = Terminal(commands(app, root, "capture", config, "--allow-run"), state)
@@ -203,29 +230,7 @@ def process_trials(app, root, state):
                            "peak_private_bytes": peak, "additional_private_bytes": peak - idle, **streams}
             finally:
                 close(terminal)
-            feedback, cleanup = [], []
-            for index in range(20):
-                marker = root / f"cancel-{index}.json"
-                reset_process_fixture(server, "flood-until-cancelled", marker)
-                terminal = Terminal(commands(app, root, f"cancel-{index}", config, "--allow-run"), state)
-                try:
-                    terminal.expect(READY)
-                    submit(terminal, "Cancel a running fixture command")
-                    decide(terminal, True)
-                    until(lambda: marker.is_file() and marker.stat().st_size > 0)
-                    children = json.loads(marker.read_text(encoding="ascii"))
-                    assert len(children) == 2 and all(map(process_alive, children))
-                    started = time.perf_counter_ns()
-                    terminal.process.write("\x03")
-                    until(lambda: terminal.observe() or "正在停止" in terminal.text or "已停止" in terminal.text)
-                    feedback.append(milliseconds(started))
-                    until(lambda: not any(map(process_alive, children)))
-                    cleanup.append(milliseconds(started))
-                    terminal.expect("已停止")
-                finally:
-                    close(terminal)
-            return {"capture": capture, "cancel_feedback": measurements(feedback),
-                    "child_cleanup_observed": measurements(cleanup)}
+            return {"capture": capture, **running_cancellations(app, root, state, server, config)}
         finally:
             server.release.set()
             server.shutdown()
@@ -267,6 +272,8 @@ def history_sample(app, root, state):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
+    parser.add_argument("--interaction-gates", action="store_true",
+                        help="Measure startup, input, preview and running-command cancellation without the standalone flood capture.")
     args = parser.parse_args()
     app = args.executable.resolve(strict=True)
     with TemporaryDirectory(prefix="lay-p7-benchmark-") as directory:
@@ -277,7 +284,8 @@ def main():
         result = {"executable_sha256": hashlib.sha256(app.read_bytes()).hexdigest(),
                   "terminal": "Windows ConPTY", "startup": startup(app, root, state),
                   "complete_preview_event_to_terminal": previews(app, root, state),
-                  "process": process_trials(app, root, state), "saved_history": history_sample(app, root, state)}
+                  "process": process_trials(app, root, state, capture_stress=not args.interaction_gates),
+                  "saved_history": history_sample(app, root, state)}
     print(json.dumps(result, indent=2))
 
 

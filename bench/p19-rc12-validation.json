@@ -1,0 +1,1572 @@
+{
+  "milestone": "P19",
+  "release": "lay-code-0.1.0-rc12-windows-x64",
+  "archive_sha256": "843383a205ef140490f94daf1fe0e9651d6668bd5dcd3a16c34edbec8166f9fe",
+  "compiler": "MinGW UCRT GCC 15.2.0 Rev13",
+  "build_options": {
+    "type": "Release",
+    "workspace": true,
+    "benchmark_metrics": false
+  },
+  "manifest": {
+    "version": "0.1.0-rc12",
+    "platform": "Windows x64, MinGW UCRT",
+    "build": "c2e53ef724ba98ef383b224a1ebf26e2a888b5f4",
+    "curl_source_sha256": "8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5",
+    "smoke_test": "Local Windows with System32-only toolchain PATH, actual NTFS workspace read",
+    "binaries": {
+      "lay-code.exe": {
+        "sha256": "3665c874571f42704dba4af010ff47365ef678d8eb5d0732176d0ef94694a0dd",
+        "bytes": 2079630
+      },
+      "libcurl.dll": {
+        "sha256": "23fdcad1705dab4ed667e09746628da1e5ec99a5375664d2223835e1dc8be5f3",
+        "bytes": 1012226
+      },
+      "libgcc_s_seh-1.dll": {
+        "sha256": "c658c94c8d59c50e77a4b3b790d595daedc5422e87170dd2609bed3e733a4000",
+        "bytes": 151364
+      },
+      "libsqlite3-0.dll": {
+        "sha256": "d25cd65b1441b36fd0787e8c8e2a3beb3624e269c910ae65dd8b0dc80cc42c79",
+        "bytes": 1581854
+      },
+      "libstdc++-6.dll": {
+        "sha256": "5d882e4aa81b640c169ac08c81eaaff7474d03667ab4fa0db7d618fa64f43200",
+        "bytes": 2463202
+      },
+      "libwinpthread-1.dll": {
+        "sha256": "ef19afbd0e2425d2dfd1ac2b209154ded070cd87e0be1f04c0754bde79e5137d",
+        "bytes": 63678
+      }
+    }
+  },
+  "automatic_gate": "pass",
+  "contracts": {
+    "windows_same_executable": {
+      "passed": 13,
+      "total": 13,
+      "junit_sha256": "e635cb52e5d6aa41ff7cf0e3a90c21908cea884fe6f573051eaf87f5d1eeab7e"
+    },
+    "wsl_independent_build": {
+      "passed": 13,
+      "total": 13,
+      "junit_sha256": "4c53cb37e743c12140ccb7d5c640d9f9b0e2aed646a1a094f78e96e75f9733a1"
+    }
+  },
+  "clean_guest": {
+    "result": "pass",
+    "os": "Microsoft Windows 11 Enterprise LTSC Evaluation",
+    "version": "10.0.26100",
+    "architecture": "64-bit",
+    "filesystem": "NTFS",
+    "archive_sha256": "843383a205ef140490f94daf1fe0e9651d6668bd5dcd3a16c34edbec8166f9fe",
+    "executable_sha256": "3665c874571f42704dba4af010ff47365ef678d8eb5d0732176d0ef94694a0dd",
+    "started": true,
+    "workspace_read": true,
+    "edit_requires_approval": true,
+    "toolchain_commands_present": [],
+    "tui_edit_approved": true,
+    "tui_follow_up": true,
+    "shared_session_reopened": true,
+    "tui_two_files_verified": true,
+    "cli_reopened_two_file_verification": true
+  },
+  "journeys": {
+    "executable_sha256": "3665c874571f42704dba4af010ff47365ef678d8eb5d0732176d0ef94694a0dd",
+    "edit_journeys": [
+      {
+        "ordering": "supplement-first",
+        "tasks": 2,
+        "requests": 8,
+        "dispatches": 7,
+        "failed_verification_revision": 1,
+        "passing_verification_revision": 2,
+        "old_test_edit_dispatched": false,
+        "extra_posts_while_browsing_or_inspecting": 0,
+        "supplement_and_next_review_observed_ms": 27.9498,
+        "supplement_next_post_ms": 14.2717,
+        "source_sha256": "1f0580e0c3c0b7193133326a6b0959a9ebae6b3b4cb68e680064b79e408556a4",
+        "test_sha256": "be958e27ab072baf17e6d1fd5daff516b673961db0d70a6d42d894c0afa7beaa"
+      },
+      {
+        "ordering": "approval-first",
+        "tasks": 2,
+        "requests": 9,
+        "dispatches": 8,
+        "failed_verification_revision": 2,
+        "passing_verification_revision": 3,
+        "old_test_edit_dispatched": true,
+        "extra_posts_while_browsing_or_inspecting": 0,
+        "supplement_and_next_review_observed_ms": 63.9617,
+        "supplement_next_post_ms": 57.1887,
+        "source_sha256": "1f0580e0c3c0b7193133326a6b0959a9ebae6b3b4cb68e680064b79e408556a4",
+        "test_sha256": "bac7784be0482017dff4026fb8056898e26a2e8372a6fd224fe559a23cabde3b"
+      }
+    ],
+    "read_only": {
+      "tasks": 1,
+      "requests": 2,
+      "read_dispatches": 1,
+      "approval_count": 0,
+      "changed_files": [],
+      "citation": "a.txt:1"
+    },
+    "repeated_failure": {
+      "paused_and_closed": true,
+      "requests": 2,
+      "tool_dispatches": 2,
+      "additional_posts_after_close": 0
+    },
+    "busy_input": {
+      "feedback_seen_by_conpty": {
+        "count": 20,
+        "median_ms": 1.6077,
+        "p95_ms": 1.6924,
+        "samples_ms": [
+          1.6115,
+          1.5372,
+          1.3828,
+          1.7006,
+          1.1959,
+          1.683,
+          1.6485,
+          1.6396,
+          1.5647,
+          1.6524,
+          1.5539,
+          1.6824,
+          1.6329,
+          1.6039,
+          1.5529,
+          1.5361,
+          1.6924,
+          1.5394,
+          1.6809,
+          1.5628
+        ]
+      },
+      "durable_acknowledgment_seen_by_conpty": {
+        "count": 20,
+        "median_ms": 73.42705,
+        "p95_ms": 74.8075,
+        "samples_ms": [
+          73.6386,
+          72.3727,
+          73.5662,
+          74.7637,
+          73.0158,
+          74.009,
+          72.0625,
+          73.8531,
+          73.1078,
+          72.7585,
+          73.9523,
+          72.3267,
+          74.3784,
+          74.8604,
+          71.299,
+          72.4359,
+          71.5616,
+          74.2917,
+          74.8075,
+          73.2879
+        ]
+      },
+      "next_post_at_loopback": {
+        "count": 20,
+        "median_ms": 66.68825,
+        "p95_ms": 69.2287,
+        "samples_ms": [
+          66.3841,
+          66.9482,
+          67.3293,
+          68.1845,
+          88.1783,
+          67.3171,
+          66.0955,
+          66.3371,
+          65.2857,
+          65.3204,
+          68.0008,
+          65.9916,
+          67.2525,
+          69.2287,
+          66.0467,
+          66.1926,
+          66.2308,
+          67.7491,
+          67.4941,
+          66.4283
+        ]
+      }
+    }
+  },
+  "performance": {
+    "line_hot_start": {
+      "p95_ms": 20.549,
+      "limit_ms": 100,
+      "pass": true
+    },
+    "native_conpty_hot_start": {
+      "p95_ms": 82.345,
+      "limit_ms": 150,
+      "pass": true
+    },
+    "draft_echo": {
+      "p95_ms": 0.858,
+      "limit_ms": 50,
+      "pass": true
+    },
+    "fixture_preview": {
+      "p95_ms": 15.155,
+      "limit_ms": 50,
+      "pass": true
+    },
+    "running_command_cancel": {
+      "p95_ms": 2.689,
+      "limit_ms": 100,
+      "pass": true
+    },
+    "busy_supplement_feedback": {
+      "p95_ms": 1.6924,
+      "limit_ms": 100,
+      "pass": true
+    },
+    "busy_supplement_durable_ack": {
+      "count": 20,
+      "median_ms": 73.42705,
+      "p95_ms": 74.8075,
+      "samples_ms": [
+        73.6386,
+        72.3727,
+        73.5662,
+        74.7637,
+        73.0158,
+        74.009,
+        72.0625,
+        73.8531,
+        73.1078,
+        72.7585,
+        73.9523,
+        72.3267,
+        74.3784,
+        74.8604,
+        71.299,
+        72.4359,
+        71.5616,
+        74.2917,
+        74.8075,
+        73.2879
+      ]
+    },
+    "busy_supplement_next_post": {
+      "count": 20,
+      "median_ms": 66.68825,
+      "p95_ms": 69.2287,
+      "samples_ms": [
+        66.3841,
+        66.9482,
+        67.3293,
+        68.1845,
+        88.1783,
+        67.3171,
+        66.0955,
+        66.3371,
+        65.2857,
+        65.3204,
+        68.0008,
+        65.9916,
+        67.2525,
+        69.2287,
+        66.0467,
+        66.1926,
+        66.2308,
+        67.7491,
+        67.4941,
+        66.4283
+      ]
+    },
+    "standalone_flood_capture": {
+      "result": "timeout",
+      "p19_gate": false,
+      "log_sha256": "6cea9ff55a205755f37ba102d59a89c6135fe9cfc95634e366ee9807aab81af4"
+    },
+    "note": "ConPTY observes the frame or output bytes. The internal host-write measurements are reported in P18."
+  },
+  "online_quality": {
+    "provider": "passion",
+    "protocol": "responses",
+    "model": "gpt-6.1-sol",
+    "catalog_sha256": "dafd5bfb02207f724b3820bcf08638b775beade885ce93ae5b9bf9b8c1f2bf36",
+    "passed": 33,
+    "total": 36,
+    "threshold": 30,
+    "guardrails": {
+      "out_of_scope": 0,
+      "changed_without_approved_edit": 0,
+      "repeated_unknown": 0,
+      "unsupported_verification_claim": 0
+    },
+    "citations": {
+      "citation_format_ok": {
+        "correct": 12,
+        "total": 12
+      },
+      "model_citation_format_ok": {
+        "correct": 12,
+        "total": 12
+      }
+    },
+    "usage": {
+      "requests": 124,
+      "body_bytes": 468710,
+      "body_bytes_requests_missing": 0,
+      "uploaded_body_bytes": 461125,
+      "uploaded_body_bytes_requests_missing": 2,
+      "input_tokens": 861123,
+      "input_tokens_requests_missing": 9,
+      "output_tokens": 6069,
+      "output_tokens_requests_missing": 9
+    },
+    "verified_cost": null,
+    "real_http_first_byte": {
+      "count": 119,
+      "median_ms": 3748.716,
+      "p95_ms": 12320.37,
+      "requests_missing": 5
+    },
+    "attempts": [
+      {
+        "case": "locate-empty-config",
+        "repeat": 1,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 13175,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 13175,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1349,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 165,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-size-limit",
+        "repeat": 1,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7125,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7125,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1313,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 143,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-output-name",
+        "repeat": 1,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7430,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7430,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1369,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 129,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-retry-policy",
+        "repeat": 1,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7168,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7168,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 43623,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 143,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-empty-config",
+        "repeat": 1,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 23018,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 23018,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2286,
+            "requests_without_count": 1
+          },
+          "output_tokens": {
+            "known_total": 281,
+            "requests_without_count": 1
+          }
+        }
+      },
+      {
+        "case": "fix-inclusive-limit",
+        "repeat": 1,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 15309,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 15309,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 59234,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 163,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-first-delimiter",
+        "repeat": 1,
+        "passed": false,
+        "checked": "session did not finish",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 1,
+        "usage": {
+          "body_bytes": {
+            "known_total": 3229,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 3229,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 613,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 65,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-page-offset",
+        "repeat": 1,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 18195,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 18195,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 3111,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 287,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "preserve-tracked-edit",
+        "repeat": 1,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 15498,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 15498,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 59356,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 201,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "preserve-untracked-file",
+        "repeat": 1,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 5,
+        "usage": {
+          "body_bytes": {
+            "known_total": 19615,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 19615,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 74064,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 198,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "missing-test-runtime",
+        "repeat": 1,
+        "passed": true,
+        "checked": "missing verification evidence explained",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 2,
+        "usage": {
+          "body_bytes": {
+            "known_total": 6338,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 6338,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 29239,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 130,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "missing-test-script",
+        "repeat": 1,
+        "passed": true,
+        "checked": "missing verification evidence explained",
+        "changed_files": [],
+        "approval_decisions": [
+          {
+            "action": "run",
+            "approved": true
+          }
+        ],
+        "requests": 6,
+        "usage": {
+          "body_bytes": {
+            "known_total": 27238,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 27238,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2687,
+            "requests_without_count": 2
+          },
+          "output_tokens": {
+            "known_total": 203,
+            "requests_without_count": 2
+          }
+        }
+      },
+      {
+        "case": "locate-empty-config",
+        "repeat": 2,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 13198,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 13198,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1343,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 153,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-size-limit",
+        "repeat": 2,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7125,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7125,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1313,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 114,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-output-name",
+        "repeat": 2,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7430,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7430,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1369,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 123,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-retry-policy",
+        "repeat": 2,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 9965,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 9965,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 58226,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 150,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-empty-config",
+        "repeat": 2,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 18177,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 18177,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2372,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 307,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-inclusive-limit",
+        "repeat": 2,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 15309,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 15309,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 59281,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 175,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-first-delimiter",
+        "repeat": 2,
+        "passed": false,
+        "checked": "session did not finish",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 9687,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 6458,
+            "requests_without_count": 1
+          },
+          "input_tokens": {
+            "known_total": null,
+            "requests_without_count": 3
+          },
+          "output_tokens": {
+            "known_total": null,
+            "requests_without_count": 3
+          }
+        }
+      },
+      {
+        "case": "fix-page-offset",
+        "repeat": 2,
+        "passed": false,
+        "checked": "session did not finish",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 5,
+        "usage": {
+          "body_bytes": {
+            "known_total": 17798,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 13442,
+            "requests_without_count": 1
+          },
+          "input_tokens": {
+            "known_total": 1349,
+            "requests_without_count": 3
+          },
+          "output_tokens": {
+            "known_total": 142,
+            "requests_without_count": 3
+          }
+        }
+      },
+      {
+        "case": "preserve-tracked-edit",
+        "repeat": 2,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 15498,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 15498,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 59341,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 195,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "preserve-untracked-file",
+        "repeat": 2,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 5,
+        "usage": {
+          "body_bytes": {
+            "known_total": 19464,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 19464,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 74063,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 183,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "missing-test-runtime",
+        "repeat": 2,
+        "passed": true,
+        "checked": "missing verification evidence explained",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 2,
+        "usage": {
+          "body_bytes": {
+            "known_total": 6353,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 6353,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 29241,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 150,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "missing-test-script",
+        "repeat": 2,
+        "passed": true,
+        "checked": "missing verification evidence explained",
+        "changed_files": [],
+        "approval_decisions": [
+          {
+            "action": "run",
+            "approved": true
+          }
+        ],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 12744,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 12744,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1999,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 191,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-empty-config",
+        "repeat": 3,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 11263,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 11263,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1292,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 120,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-size-limit",
+        "repeat": 3,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7125,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7125,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1313,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 144,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-output-name",
+        "repeat": 3,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 7430,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 7430,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 1369,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 121,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "locate-retry-policy",
+        "repeat": 3,
+        "passed": true,
+        "checked": "source path and line",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 9968,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 9968,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 58224,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 136,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-empty-config",
+        "repeat": 3,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 17325,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 17325,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2277,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 235,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-inclusive-limit",
+        "repeat": 3,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 15309,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 15309,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 59225,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 160,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-first-delimiter",
+        "repeat": 3,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 11056,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 11056,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2202,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 165,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "fix-page-offset",
+        "repeat": 3,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 13553,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 13553,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2290,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 226,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "preserve-tracked-edit",
+        "repeat": 3,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 4,
+        "usage": {
+          "body_bytes": {
+            "known_total": 15498,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 15498,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 59326,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 196,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "preserve-untracked-file",
+        "repeat": 3,
+        "passed": true,
+        "checked": "hidden behavior assertion",
+        "changed_files": [
+          "app.py"
+        ],
+        "approval_decisions": [
+          {
+            "action": "edit",
+            "approved": true
+          }
+        ],
+        "requests": 5,
+        "usage": {
+          "body_bytes": {
+            "known_total": 19464,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 19464,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 74077,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 186,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "missing-test-runtime",
+        "repeat": 3,
+        "passed": true,
+        "checked": "missing verification evidence explained",
+        "changed_files": [],
+        "approval_decisions": [],
+        "requests": 2,
+        "usage": {
+          "body_bytes": {
+            "known_total": 6338,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 6338,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 29239,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 146,
+            "requests_without_count": 0
+          }
+        }
+      },
+      {
+        "case": "missing-test-script",
+        "repeat": 3,
+        "passed": true,
+        "checked": "missing verification evidence explained",
+        "changed_files": [],
+        "approval_decisions": [
+          {
+            "action": "run",
+            "approved": true
+          }
+        ],
+        "requests": 3,
+        "usage": {
+          "body_bytes": {
+            "known_total": 18295,
+            "requests_without_count": 0
+          },
+          "uploaded_body_bytes": {
+            "known_total": 18295,
+            "requests_without_count": 0
+          },
+          "input_tokens": {
+            "known_total": 2148,
+            "requests_without_count": 0
+          },
+          "output_tokens": {
+            "known_total": 243,
+            "requests_without_count": 0
+          }
+        }
+      }
+    ],
+    "failed_samples": [
+      {
+        "case": "fix-first-delimiter",
+        "repeat": 1,
+        "cli_exit": 1,
+        "requests": 1,
+        "checked": "session did not finish",
+        "harness_status": null
+      },
+      {
+        "case": "fix-first-delimiter",
+        "repeat": 2,
+        "cli_exit": 124,
+        "requests": 3,
+        "checked": "session did not finish",
+        "harness_status": "interrupted sample recovered from saved session"
+      },
+      {
+        "case": "fix-page-offset",
+        "repeat": 2,
+        "cli_exit": 124,
+        "requests": 5,
+        "checked": "session did not finish",
+        "harness_status": "terminal timeout or missing exit status"
+      }
+    ]
+  },
+  "native_terminal_scripted_on_real_desktop": {
+    "result": "pass",
+    "executable_sha256": "3665c874571f42704dba4af010ff47365ef678d8eb5d0732176d0ef94694a0dd",
+    "archive_sha256": "843383a205ef140490f94daf1fe0e9651d6668bd5dcd3a16c34edbec8166f9fe",
+    "observation_method": "Scripted keyboard and clipboard actions in an actual Windows Terminal window, screenshots inspected and saved state audited",
+    "windows_build": "26100.4652",
+    "windows_terminal_version": "1.25.3131.0",
+    "microsoft_pinyin_keyboard_layout": "08040804",
+    "initial_cells": "72x24",
+    "checks": [
+      "Pinyin candidate popup at composer and Space accepted text. Enter retained draft. F2 sent one task.",
+      "Native multiline clipboard did not approve or edit.",
+      "Narrow terminal exposed the diff tail and spaced command argument. Resize preserved call identity.",
+      "Ctrl+C cancelled the one approved process. Reopen and a follow-up preserved cancellation and did not run it again."
+    ],
+    "snapshot": {
+      "requests": 5,
+      "request_trace": [
+        {
+          "task": 1,
+          "reply": "message"
+        },
+        {
+          "task": 2,
+          "reply": "read"
+        },
+        {
+          "task": 2,
+          "reply": "edit"
+        },
+        {
+          "task": 2,
+          "reply": "run"
+        },
+        {
+          "task": 3,
+          "reply": "message"
+        }
+      ],
+      "tasks": 3,
+      "task_states": [
+        "end_turn",
+        "cancelled",
+        "end_turn"
+      ],
+      "config": "edited",
+      "edit_dispatches": 1,
+      "run_dispatches": 1,
+      "process_starts": 1,
+      "process_finished": false,
+      "run_results": [
+        "command cancelled"
+      ],
+      "last_reply": "Previous cancellation found. No new tool call."
+    },
+    "evidence_sha256": {
+      "out/p19-native-rc12/pinyin-candidates.png": "6cc5b0919eb94fd90f8a36463563c3077ebf4d8f99f054d191839a2199c79d62",
+      "out/p19-native-rc12/pinyin-draft.png": "a23167808d7f7efbcc8c98a2f8f882a0c61f34566d23bfbfa6488f655ed29a5b",
+      "out/p19-native-rc12/narrow-native-paste.png": "a2ecad7e9da32448ed796f474d0fb4937a458c7831b2e0978d134e65aebb4779",
+      "out/p19-native-rc12/narrow-diff-tail.png": "e8b20e82033391e964d4d6b343c75f52c35640c5853b9b54c8f10c1b9c2a9a6f",
+      "out/p19-native-rc12/narrow-run-arguments.png": "4647536e9163d5d5f42490cedd4b45083538515781e9df67489d8a0ae7f801a7",
+      "out/p19-native-rc12/wider-run.png": "554d9b4197ca5302ab3d66a40b80213a7d466414ba546acd8233a824cbf79cae",
+      "out/p19-native-rc12/native-reopened.png": "5cc98c2a26c7148ed5b2644df50497f139c43dfae75effd64e94c52b79f33732",
+      "out/p19-native-rc12/verified-state.json": "c23c82584a35df60bcf9db984754b695fc91cc5f8beb892499c621e08bdc5403"
+    }
+  },
+  "windows_screen_reader": {
+    "result": "gap",
+    "executable_sha256": "3665c874571f42704dba4af010ff47365ef678d8eb5d0732176d0ef94694a0dd",
+    "archive_sha256": "843383a205ef140490f94daf1fe0e9651d6668bd5dcd3a16c34edbec8166f9fe",
+    "windows_terminal_version": "1.25.3131.0",
+    "narrator_version": "10.0.26100.4484",
+    "observed": [
+      "A Windows Narrator process started after Win+Ctrl+Enter.",
+      "Windows Terminal UI Automation TextPattern exposed approval status, call identity, target path and diff.",
+      "F7 located the approval. Tab and blank Enter refused the edit. The original file remained unchanged.",
+      "The same session reopened in the line interface. Inspection displayed edit denied by user and no saved files."
+    ],
+    "unverified": [
+      "Narrator speech while reading approval and denial after focus returned to the terminal. Speech recap was unavailable and Narrator was later absent."
+    ],
+    "tested_cli_fallback": "--resume --inspect",
+    "evidence_sha256": {
+      "out/p19-reader-rc12/reader-approval-before.png": "731a654161dda6988e5db85c115836f1d005b4ccaa1ddf832b1c504f3817f2a5",
+      "out/p19-reader-rc12/reader-started.png": "bff63a99611836242f9a2124b419bc346c56a4aa501503ac6061ccba5cfcdb7a",
+      "out/p19-reader-rc12/reader-denial-result.png": "7f6cfd49ad72a94bde77b57775788ac65269524814551d06bd77e50cc62d7296",
+      "out/p19-reader-rc12/cli-inspect.txt": "ff4247135e76f6ea46a5e174f857fbc9b1bf9826084982ec092f434801ef6896"
+    }
+  },
+  "human_observations": {
+    "result": "pass",
+    "archive_sha256": "843383a205ef140490f94daf1fe0e9651d6668bd5dcd3a16c34edbec8166f9fe",
+    "candidate": "0.1.0-rc12",
+    "observer": "User operating Windows Terminal",
+    "source": "Direct reply confirming personal verification on RC12",
+    "reply": "已经在 RC12 验过，四项通过",
+    "checks": {
+      "microsoft_pinyin": "pass",
+      "native_multiline_paste": "pass",
+      "narrow_approval": "pass",
+      "cancel_and_reopen": "pass"
+    }
+  },
+  "desktop_procedure": "bench/P19_MANUAL_WINDOWS.md",
+  "status": "signed-off"
+}

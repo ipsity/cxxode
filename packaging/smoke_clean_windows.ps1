@@ -68,8 +68,15 @@ try {
     if ([IO.File]::ReadAllText($file) -ne $original) { throw 'Smoke test altered the fixture.' }
     $tuiTested = $false
     if ($TuiProbe) {
-        $probeOutput = (& $TuiProbe $exe $workspace.FullName | Out-String)
-        if ($LASTEXITCODE -ne 0 -or $probeOutput -notmatch 'TUI_EDIT_FOLLOW_UP_PASS') {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $probeOutput = (& $TuiProbe $exe $workspace.FullName 2>&1 | Out-String)
+            $probeExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($probeExit -ne 0 -or $probeOutput -notmatch 'TUI_EDIT_FOLLOW_UP_PASS') {
             throw "Unexpected TUI smoke result $probeOutput"
         }
         if ([IO.File]::ReadAllText($file) -ne ($original -replace 'reject', 'allow')) {

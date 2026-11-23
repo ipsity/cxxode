@@ -1,0 +1,14 @@
+{
+  "result": "pass",
+  "archive_sha256": "843383a205ef140490f94daf1fe0e9651d6668bd5dcd3a16c34edbec8166f9fe",
+  "candidate": "0.1.0-rc12",
+  "observer": "User operating Windows Terminal",
+  "source": "Direct reply confirming personal verification on RC12",
+  "reply": "已经在 RC12 验过，四项通过",
+  "checks": {
+    "microsoft_pinyin": "pass",
+    "native_multiline_paste": "pass",
+    "narrow_approval": "pass",
+    "cancel_and_reopen": "pass"
+  }
+}

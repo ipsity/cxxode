@@ -166,7 +166,12 @@ def run_case(args, case, repeat, output, interactive=None):
         cli_exit = interactive(command, env, case, root, database_dir / f"session-{session_id}.sqlite3")
     else:
         cli_exit = subprocess.run(command, env=env).returncode
-    history = context(database_dir / f"session-{session_id}.sqlite3")
+    return score_case(case, repeat, root, database_dir / f"session-{session_id}.sqlite3", before, cli_exit,
+                      rendered_answer if "location" in case else "", rendered_citations if "location" in case else ())
+
+
+def score_case(case, repeat, root, database, before, cli_exit, rendered_answer="", rendered_citations=()):
+    history = context(database)
     after = snapshot(root)
     changes = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
     passed, checked = verdict(case, root, history, changes)

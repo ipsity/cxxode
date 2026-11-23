@@ -10,11 +10,13 @@ import select
 import shutil
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import time
 
 from winpty import Backend, PtyProcess
 
-from live_quality import CATALOG, context, run_case
+from live_quality import CATALOG, context, run_case, score_case, snapshot
+from quality import prepare
 
 
 def pending_action(database, tool):
@@ -73,7 +75,7 @@ def controlled_terminal(decisions):
         try:
             while process.isalive():
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"Live fixture {case['id']} timed out")
+                    return 124
                 if not select.select([process.fileobj], [], [], 0.10)[0]:
                     continue
                 try:
@@ -92,7 +94,7 @@ def controlled_terminal(decisions):
             while process.isalive() and time.monotonic() < deadline:
                 time.sleep(0.02)
             if process.exitstatus is None:
-                raise RuntimeError(f"Missing exit status for {case['id']}")
+                return 125
             return process.exitstatus
         finally:
             process.close(force=True)
@@ -108,31 +110,65 @@ def main():
     parser.add_argument("--provider", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--resume", action="store_true", help="Continue a batch with its original executable and catalog.")
     parser.add_argument("--case", action="append", choices=[case["id"] for case in catalog],
                         help="Repeat to select frozen cases for a focused run. By default, run the full catalog.")
     args = parser.parse_args()
     args.cli = args.cli.resolve(strict=True)
     args.provider_config = args.provider_config.resolve(strict=True)
     output = args.output.resolve()
-    output.mkdir()
+    output.mkdir(exist_ok=args.resume)
     config = json.loads(args.provider_config.read_text(encoding="utf-8-sig"))
     profile = config["providers"][args.provider]
     cases = [case for case in catalog if not args.case or case["id"] in args.case]
     expected = 3 * len(cases)
     passing_target = 30 if len(cases) == len(catalog) else expected
+    executable = hashlib.sha256(args.cli.read_bytes()).hexdigest()
+    manifest = args.cli.parent / "manifest.json"
+    source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    if manifest.is_file():
+        package = json.loads(manifest.read_text(encoding="utf-8"))
+        if package["binaries"][args.cli.name]["sha256"] != executable:
+            raise ValueError("Candidate executable differs from its package manifest")
+        source = package["build"]
     report = {
         "model": args.model, "provider": args.provider, "protocol": profile["protocol"],
-        "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-        "executable_sha256": hashlib.sha256(args.cli.read_bytes()).hexdigest(),
+        "source_commit": source,
+        "executable_sha256": executable,
         "catalog_sha256": hashlib.sha256(CATALOG.read_bytes()).hexdigest(),
         "target": {"passing": passing_target, "attempts": expected},
         "approval_policy": "Approve reference-equivalent Python AST edits, the reviewed strip-once variant, and the exact missing-script Python invocation.",
         "attempts": [],
     }
+    if args.resume:
+        previous = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+        if any(previous.get(key) != value for key, value in report.items() if key != "attempts"):
+            raise ValueError("Resume requires exactly the original candidate, model, catalog and approval policy")
+        report = previous
+    completed = {(row["case"], row["repeat"]) for row in report["attempts"]}
     for repeat in (1, 2, 3):
         for case in cases:
+            if (case["id"], repeat) in completed:
+                continue
             decisions = []
-            attempt = run_case(args, case, repeat, output, controlled_terminal(decisions))
+            session = f"{case['id']}-{repeat}"
+            workspace = output / session
+            if args.resume and workspace.is_dir():
+                with TemporaryDirectory(prefix="lay-quality-original-") as directory:
+                    original = Path(directory) / "workspace"
+                    prepare(case, original)
+                    database = output / "private" / "LayCode" / "sessions" / f"session-{session}.sqlite3"
+                    attempt = score_case(case, repeat, workspace, database, snapshot(original), 124)
+                    attempt["harness_status"] = "interrupted sample recovered from saved session"
+                for round_ in context(database).get("rounds", []):
+                    for record in round_["tools"]:
+                        edit = record.get("edit") or {}
+                        if "approved" in edit:
+                            decisions.append({"action": "edit", "approved": edit["approved"]})
+            else:
+                attempt = run_case(args, case, repeat, output, controlled_terminal(decisions))
+                if attempt["cli_exit"] in (124, 125):
+                    attempt["harness_status"] = "terminal timeout or missing exit status"
             attempt["approval_decisions"] = decisions
             report["attempts"].append(attempt)
             report["passing"] = sum(row["passed"] for row in report["attempts"])
