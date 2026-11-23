@@ -1,0 +1,61 @@
+{
+  "milestone": "P16",
+  "source_commit": "88cab5b902a7a5eb6082f82aeff897406507159d",
+  "artifacts": {
+    "windows_executable_sha256": "12aa4cf50e091ae93e3bb3e7340a9fd6e4979b12ed33dd59fda4e3a89fd5a6ce",
+    "wsl_executable_sha256": "2668ca5827d028033b561b404f31b577c578b888d50b90718452e436bb8b8de7",
+    "windows_package": "lay-code-0.1.0-rc11-windows-x64.zip",
+    "windows_package_sha256": "cdbbbbc30dd1b17472775d3ccc36e4c9e5acc41ac21a4d23c3e6b9f8481157e5",
+    "package_smoke": "The staged and extracted x64 executables recorded an NTFS file read with a System32-only toolchain PATH.",
+    "packaged_executable_dual_file_demo": "Passed in ConPTY against the loopback Responses relay using the production executable."
+  },
+  "contracts": {
+    "windows_conpty": {"passed": 13, "total": 13},
+    "ubuntu_24_04_wsl_pty": {"passed": 13, "total": 13},
+    "migration_and_input_persistence": "bench/p16-input-persistence.json",
+    "workspace_replay": "tests/e2e/supplement_live.py",
+    "compacted_history": "tests/contract/context_contract.cpp"
+  },
+  "traces": {
+    "cases_per_platform": 17,
+    "contents": "User draft and task ID, supplement ID and inclusion position, checkpoint revisions, call IDs and results, dispatch counters, and exact final file bytes in hexadecimal.",
+    "reproduction": "python -B tests/e2e/supplement_live.py CLI FAULT_DRIVER --trace OUTPUT",
+    "windows": {
+      "path": "out/p16-trajectories-windows.json",
+      "sha256": "4334ddaab86521e2ef735546eeccf0eca8e01b4cedd1f40ee9e4ee1a0509f12f"
+    },
+    "wsl": {
+      "path": "out/p16-trajectories-wsl.json",
+      "sha256": "548044525d9f15d2c19a4f861585edc9c168dd0b95b231b66ff964923d2764b1"
+    }
+  },
+  "model_boundaries": {
+    "protocols": ["Responses", "Chat Completions", "Anthropic Messages"],
+    "boundaries_per_protocol": ["before first response byte", "incomplete tool block", "completed tool round"],
+    "after_first_read_dispatch": "The first observed read survives; the undispatched sibling is superseded.",
+    "outbound_429_retry": "The two attempts send identical request bodies. Each contains one copy of the same supplementary input after the recorded tool results.",
+    "stream_preview_dispatches": 0,
+    "budget": "Request, dispatch, and active time remain on the original task, including aborted provider attempts."
+  },
+  "approval_demo": {
+    "first_source_edit": "Applied and byte-verified",
+    "second_file": "Original bytes preserved",
+    "superseded_call": "edit-test",
+    "dispatches_of_superseded_call": 0,
+    "replacement_call": "verify-existing",
+    "replacement_exit_code": 0,
+    "verification_edit_revision": 1,
+    "late_approval_or_paste_dispatches": 0,
+    "resize_approval_view": "48 columns by 16 rows"
+  },
+  "ordering_and_recovery": {
+    "approval_and_dispatch_first": "One previously approved command completed and was recorded before inclusion. Two remaining old reads were superseded. The next-task draft stayed local.",
+    "supplement_first_then_stop": "One durable pending input. No further POST after Ctrl+C. Killing after the inclusion checkpoint and reopening preserves the same input ID and sends it once on explicit resume.",
+    "stop_first": "The task closed and the correction stayed in the draft. Zero saved inputs and zero dispatches.",
+    "terminal_first": "The saved final answer closed the task. The unaccepted correction returned to the draft.",
+    "sqlite_full_before_supplement_save": "Zero saved or displayed acceptance receipts. The correction returned to the draft.",
+    "kill_before_command_result": "One command invocation. Reopening recorded unknown effects and performed no automatic redispatch.",
+    "extra_posts_from_offline_inspection": 0,
+    "unauthorized_writes": 0
+  }
+}
