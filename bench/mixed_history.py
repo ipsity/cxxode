@@ -119,10 +119,12 @@ def sample(app, args, env, database, metrics, task, request_sizes, repeats):
     answer = saved["rounds"][-1]["text"]
     assert answer.startswith(f"Task {task} done.")
     attempts = saved["model_attempts"][saved["tasks"][-1]["first_request"]:]
-    projections = trace(metrics, task, "projection")
-    assert [size for size, _ in projections] == request_sizes == [entry["uploaded_body_bytes"] for entry in attempts]
+    projections = trace(metrics, task, "projection") if metrics else []
+    assert request_sizes == [entry["uploaded_body_bytes"] for entry in attempts]
     assert all(size == entry["body_bytes"] for size, entry in zip(request_sizes, attempts))
-    check_ms = [duration for _, duration in trace(metrics, task, "checkpoint")]
+    if metrics:
+        assert [size for size, _ in projections] == request_sizes
+    check_ms = [duration for _, duration in trace(metrics, task, "checkpoint")] if metrics else []
     line = subprocess.run([app, *args, "--resume"], capture_output=True, env=env, timeout=10, check=True)
     line = line.stdout.decode("utf-8")
     early_version = f"Earliest version: {first['version']}." in answer
@@ -139,9 +141,10 @@ def sample(app, args, env, database, metrics, task, request_sizes, repeats):
                          for row in saved["rounds"] for entry in row["tools"])
     assert context(database) == saved
     return {"database_bytes": database.stat().st_size, "rounds": len(saved["rounds"]),
-            "projection_bytes": request_sizes, "projection": measurements([ms for _, ms in projections]),
+            "projection_bytes": request_sizes, "projection": measurements([ms for _, ms in projections]) if metrics else None,
             "compacted_first_rounds": [entry["first_round"] for entry in attempts],
-            "checkpoint_save": measurements(check_ms), "tui_reopen_to_draft_echo": measurements(reopen_ms),
+            "checkpoint_save": measurements(check_ms) if metrics else None,
+            "tui_reopen_to_draft_echo": measurements(reopen_ms),
             "earliest_denial_correct": "Earliest edit: denied." in answer,
             "earliest_version_correct": early_version and f"Original reference: `{REFERENCE}`." in answer,
             "archived_citation_preserved": expected in line if task > 1 else None,
@@ -149,7 +152,7 @@ def sample(app, args, env, database, metrics, task, request_sizes, repeats):
             "edits_denied": operations["edit", True], "verifications": operations["run", False]}
 
 
-def run(app, ctest, repeats, base, server):
+def run(app, ctest, repeats, base, server, packaged):
     root = base / "workspace"
     root.mkdir()
     seed, config = root / SEED, root / CONFIG
@@ -159,8 +162,10 @@ def run(app, ctest, repeats, base, server):
     (root / "CTestTestfile.cmake").write_text(
         f'add_test("empty config" [==[{sys.executable.replace(os.sep, "/")}]==] "-c" "print(42)")\n',
         encoding="utf-8")
-    metrics = base / "trace.tsv"
-    env = {**os.environ, "LAY_BENCHMARK_TRACE": str(metrics)}
+    metrics = None if packaged else base / "trace.tsv"
+    env = os.environ.copy()
+    if metrics:
+        env["LAY_BENCHMARK_TRACE"] = str(metrics)
     if os.name == "nt":
         env["LOCALAPPDATA"] = str(base / "state")
         state = base / "state/LayCode"
@@ -205,6 +210,7 @@ def main():
     parser.add_argument("executable", type=Path)
     parser.add_argument("ctest", type=Path)
     parser.add_argument("--reopens", type=int, default=10)
+    parser.add_argument("--packaged", action="store_true", help="Measure a release build without internal timers.")
     options = parser.parse_args()
     app, ctest = options.executable.resolve(strict=True), options.ctest.resolve(strict=True)
     if options.reopens < 1:
@@ -212,11 +218,12 @@ def main():
     with TemporaryDirectory(prefix="lay-p11-mixed-") as directory, ThreadingHTTPServer(("127.0.0.1", 0), Relay) as server:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
-            samples = run(app, ctest, options.reopens, Path(directory), server)
+            samples = run(app, ctest, options.reopens, Path(directory), server, options.packaged)
         finally:
             server.shutdown()
     print(json.dumps({"executable_sha256": hashlib.sha256(app.read_bytes()).hexdigest(),
-                      "terminal": "Windows PyWinPTY / ConPTY", "samples": samples}, indent=2))
+                      "terminal": "Windows PyWinPTY / ConPTY", "internal_timing": not options.packaged,
+                      "samples": samples}, indent=2))
 
 
 if __name__ == "__main__":

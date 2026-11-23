@@ -1,4 +1,12 @@
-# Lay Code 0.1.0-rc8
+# Lay Code 0.1.0-rc9
+
+Windows x64 便携候选包。一个持久会话可用两次 `--write FILE` 明确授权源码和测试文件。每份差异单独审批。CLI 和 TUI 重开时显示逐文件进度、原始差异、批准记录和历史验证版本。
+
+适用环境为 Windows 11 x64 本地 NTFS。Windows Terminal 用 F2 提交任务、Ctrl+C 停止、Esc 退出。命令执行需启用 `--allow-run` 并逐次批准。效果未知时先核对文件，再决定是否继续。旧版单文件会话可用原授权路径直接重开。
+
+发行评测使用 Passion Responses 的 `gpt-6.1-sol`、Windows 原生 ConPTY 和 PyWinPTY、Windows Terminal 与微软拼音。来源提交和二进制摘要在 `manifest.json`，ZIP 摘要位于旁附的 SHA-256 文件。发行状态和各项实测见源码仓库的 `bench/p13-rc9-validation.json`。
+
+## Lay Code 0.1.0-rc8
 
 Windows x64 便携候选包用于中文终端验收。TUI 重开会话时保留 Ctrl+C 的取消状态。CLI 和 TUI 同时显示历史引用、读取版本以及验证命令覆盖的编辑版本。
 
