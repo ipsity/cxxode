@@ -28,13 +28,38 @@
     }
   },
   "manual_windows_terminal": {
-    "result": "pending",
+    "result": "pass",
     "procedure": "bench/P10_MANUAL_WINDOWS.md",
     "checks_in_order": [
       "With Microsoft Pinyin active, test Enter while the candidate window is open, then select a Chinese candidate with Space or a number key. Verify zero requests after Enter and one submission after F2.",
       "At 48 by 16, page through a long diff and a command argument containing spaces. Resize and confirm the same call ID.",
       "Paste native multiline clipboard text before approval and again with the decision input focused. Neither paste nor queued keypresses may approve a tool.",
       "Cancel an approved running command with Ctrl+C, reopen the same session and submit a follow-up. Verify the original cancellation result and zero repeat dispatches."
-    ]
+    ],
+    "evidence": {
+      "initial_manual_attempt": {
+        "fixture": "out/p10-manual-01",
+        "observer": "User operating Windows Terminal",
+        "confirmed": [
+          "Microsoft Pinyin candidate window and draft focus behaved as expected.",
+          "The narrow window exposed the entire diff and command arguments. Resize preserved the call ID.",
+          "Native multiline paste before and during approval did not approve the tool."
+        ],
+        "verified_from_session": {"first_task_contains_chinese": true, "first_task_requests": 1}
+      },
+      "cancel_and_resume_manual_retry": {
+        "fixture": "out/p10-manual-03",
+        "setup": "The packaged RC8 was used to prepare the pending run approval. The user approved, cancelled, reopened and submitted the follow-up in Windows Terminal.",
+        "requests": 5,
+        "tasks": 3,
+        "task_states": ["end_turn", "cancelled", "end_turn"],
+        "run_dispatches": 1,
+        "process_starts": 1,
+        "process_finished": false,
+        "run_result": "command cancelled",
+        "repeat_dispatches": 0,
+        "follow_up_observed_cancellation": true
+      }
+    }
   }
 }
