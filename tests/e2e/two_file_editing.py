@@ -125,6 +125,8 @@ def assert_reopen(fixture, server, second_state, status=0, reason=""):
         terminal.expect(first)
         terminal.expect(second)
         if reason:
+            terminal.send(ESC + "[A")
+            terminal.quiet()
             terminal.key("\x0f", reason)
         if second_state == "applied":
             terminal.send(ESC + "[H")

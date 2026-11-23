@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -26,12 +27,14 @@ struct ToolCall {
 };
 
 enum class ToolStatus { pending, ok, failed, skipped, unknown };
+enum class FileFailure { unsupported_text = 1, fragment_missing, fragment_ambiguous };
 
 struct ToolResult {
     ToolStatus status = ToolStatus::pending;
     std::string text;
     std::string version{};
     std::string observed_utc{};
+    std::optional<FileFailure> file_failure{};
     bool operator==(const ToolResult&) const = default;
 };
 
@@ -60,6 +63,8 @@ inline constexpr Parameter read_parameters[] = {
     {"line_count", "Maximum lines or directory entries. Defaults to 120.",
      false, Parameter::Kind::integer, 1, 400},
 };
+inline constexpr std::size_t read_start_line = 1;
+inline constexpr std::size_t read_line_count = 120;
 inline constexpr Parameter search_parameters[] = {
     read_parameters[0],
     {"query", "Literal case-sensitive text on one line.", true, Parameter::Kind::text, 1, 256},

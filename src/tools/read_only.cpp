@@ -188,8 +188,8 @@ ToolResult ReadOnlyWorkspace::execute(const ToolCall& call, const StopRequested&
 
 ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& call) const {
     const auto path = text_arg(call, "path");
-    const auto start = number_arg(call, "start_line", 1);
-    const auto limit = number_arg(call, "line_count", 120);
+    const auto start = number_arg(call, "start_line", read_start_line);
+    const auto limit = number_arg(call, "line_count", read_line_count);
     std::string output = std::string(path) + (node.directory() ? " (directory)\n" : "\n");
     std::size_t next = 0;
     std::string version;
@@ -237,7 +237,9 @@ ToolResult ReadOnlyWorkspace::read(const platform::Node& node, const ToolCall& c
         const auto bytes = editing_ ? editable_bytes : file_limit;
         auto text = read_text(node, bytes, editing_ || persistent_);
         if (!text.supported) {
-            return {ToolStatus::failed, "file is binary or its encoding is not UTF-8"};
+            const auto failure = text.version.empty() ? std::nullopt : std::optional{FileFailure::unsupported_text};
+            return {ToolStatus::failed, "file is binary or its encoding is not UTF-8", std::move(text.version),
+                    failure && persistent_ ? utc_now() : std::string{}, failure};
         }
         for_lines(text.bytes, add);
         version = std::move(text.version);

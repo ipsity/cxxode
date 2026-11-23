@@ -70,6 +70,7 @@ struct Options {
     std::optional<std::string> test_supplement;
 #endif
     bool resume = false;
+    bool inspect = false;
     bool accept_unknown = false;
     bool close_task = false;
     bool no_write = false;
@@ -90,6 +91,7 @@ void usage(std::ostream& stream) {
            << "       Use --session ID to keep a workspace session. Use up to two --write FILE options.\n"
            << "       Use --allow-run to propose commands for approval.\n"
            << "       Use --question TEXT to supply the first question. Reopen with --resume.\n"
+           << "       Use --resume --inspect to view saved results without contacting the model.\n"
            << "       Use --follow-up TEXT [--no-write] to append to a closed session task.\n"
            << "       Use --resume --close-task to close a paused task offline and keep saved results.\n"
            << "       After reviewing an unknown effect, use --resume --accept-unknown to continue.\n"
@@ -118,6 +120,10 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         }
         if (option == "--resume" && !result.resume) {
             result.resume = true;
+            continue;
+        }
+        if (!tui && option == "--inspect" && !result.inspect) {
+            result.inspect = true;
             continue;
         }
         if (option == "--accept-unknown" && !result.accept_unknown) {
@@ -175,7 +181,7 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         }
     }
 #ifdef LAY_TEST_HOOKS
-    if (result.test_supplement && (tui || !result.resume || result.accept_unknown || result.close_task ||
+    if (result.test_supplement && (tui || !result.resume || result.inspect || result.accept_unknown || result.close_task ||
         result.list_models || result.set_provider_key || result.id.empty())) {
         throw std::invalid_argument("The supplement fixture requires the line CLI with --resume.");
     }
@@ -184,7 +190,7 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         if ((result.list_models && result.set_provider_key) || !result.workspace.empty() || !result.model.empty() ||
             !result.excluded.empty() || !result.id.empty() || !result.writable.empty() || result.question ||
             result.resume || result.accept_unknown || result.allow_run || result.follow_up ||
-            result.no_write || result.close_task) {
+            result.no_write || result.close_task || result.inspect) {
             throw std::invalid_argument("Model listing and key setup accept only provider selection options.");
         }
         return result;
@@ -196,6 +202,7 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
         (result.follow_up && (result.resume || result.question)) ||
         (result.no_write && !result.follow_up) || (result.close_task && !result.resume) ||
         (result.accept_unknown && !result.resume) || (result.question && result.resume) ||
+        (result.inspect && (!result.resume || result.close_task || result.accept_unknown)) ||
         (result.model == "fixture-edit" && result.writable.empty()) ||
         (result.model == "fixture-verify" && (!result.allow_run || result.writable.empty()))) {
         throw std::invalid_argument("Use --session ID for persistent tasks. Choose one of --question, --resume or --follow-up.");
@@ -399,7 +406,7 @@ void show_verification(const lay::RunEvidence& run, const lay::Verification& ver
 #endif
 
 int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_workspace = nullptr,
-           bool show_edit_history = false) {
+           bool show_edit_history = false, lay::Limits limits = {}) {
     const bool workspace = source_workspace != nullptr;
 #ifdef LAY_WITH_ANTHROPIC
     const auto revision = lay::edit_revision(session);
@@ -503,6 +510,11 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
         terminal_text(session.diagnostic);
     }
     std::cout << '\n';
+    if (!session.tasks.empty()) {
+        const auto receipt = lay::task_receipt(session, limits);
+        terminal_text(receipt.title + '\n' + receipt.detail);
+        std::cout << '\n';
+    }
     if (session.stop == lay::SessionStop::cancelled) {
         return 130;
     }
@@ -683,12 +695,14 @@ lay::StoreCheckpoint test_checkpoint() {
 #ifdef LAY_TEST_HOOKS
     return [](std::string_view stage, std::string_view point, const lay::Session& snapshot) {
         const bool has_tool = !snapshot.rounds.empty() && !snapshot.rounds.back().tools.empty();
-        const bool standalone = point == "follow_up" || point == "supplement" || point == "supplement_resume";
+        const bool attempt = point == "request" || point == "request_result";
+        const bool standalone = attempt || point == "follow_up" || point == "supplement" || point == "supplement_resume";
         if (!standalone && !(point == "reply" && snapshot.finished) && !has_tool) {
             return false;
         }
         const auto name = std::string(stage) + "_" + (standalone || !has_tool ? "" :
-            snapshot.rounds.back().tools.back().call.name + "_") + std::string(point);
+            snapshot.rounds.back().tools.back().call.name + "_") + std::string(point) +
+            (attempt ? "_" + std::to_string(snapshot.requests) : "");
         if (const auto* full = std::getenv("LAY_TEST_FULL"); full && name == full) {
             return true;
         }
@@ -769,9 +783,16 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     const auto progress = [&](const lay::Session& snapshot) {
         return editors.size() == 2 ? lay::edit_progress(snapshot, settings.writable) : std::vector<std::string>{};
     };
+    lay::Limits limits;
+#ifdef LAY_TEST_HOOKS
+    if (const auto* limit = std::getenv("LAY_TEST_REQUEST_LIMIT"); limit && std::string_view(limit) == "2") {
+        limits.requests = 2;
+    }
+#endif
     const auto publish = [&](const lay::Session& snapshot, std::string_view point, lay::tui::CheckpointView checkpoint) {
         if (!port) return;
-        const auto edits = point == "request" ? std::vector<std::string>{} : progress(snapshot);
+        checkpoint.limits = limits;
+        const auto edits = point == "request" || point == "request_result" ? std::vector<std::string>{} : progress(snapshot);
         if (point == "loaded" || point == "finished") {
             port->checkpoint(snapshot, point, [&](std::size_t round) {
                 return lay::source_evidence(snapshot, round, workspace);
@@ -807,7 +828,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             terminal_text(note);
             std::cout << '\n';
         }
-        return render(session, &workspace, editors.size() == 2);
+        return render(session, &workspace, editors.size() == 2, limits);
     };
     if (port) {
         port->scope(fixture ? std::string(label("本地离线夹具", "Local fixture")) :
@@ -886,11 +907,17 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         store.save(session, "accept_unknown");
     }
     activate(session.tasks.back().active_ms);
+    auto approval_wait = Clock::duration(std::chrono::milliseconds(session.tasks.back().approval_wait_ms.value_or(0)));
+    const auto account_wait = [&](Clock::time_point started) {
+        const auto elapsed = Clock::now() - started;
+        approval_wait += elapsed;
+        deadline += elapsed;
+    };
     const auto review_ui = [&](const lay::ToolCall& call, const lay::Session& snapshot,
                                std::string title, std::string details) {
         const auto waiting = Clock::now();
         const auto answer = port->review(snapshot.tasks.size(), call, std::move(title), std::move(details));
-        deadline += Clock::now() - waiting;
+        account_wait(waiting);
         if (!answer || interrupted_now()) return lay::Approval::unavailable;
         return *answer ? lay::Approval::approved : lay::Approval::denied;
     };
@@ -898,7 +925,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         std::cout << question << std::flush;
         const auto waiting = Clock::now();
         auto answer = read_approval();
-        deadline += Clock::now() - waiting;
+        account_wait(waiting);
         if (!answer || stopping()) {
             return lay::Approval::unavailable;
         }
@@ -930,9 +957,11 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     };
     std::string unsaved_reply;
     lay::SessionJournal journal{};
+    journal.persist_model_attempts = !fixture;
     journal.save = [&](auto& snapshot, auto point) {
         const auto activity = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - deadline);
         snapshot.tasks.back().active_ms = std::clamp(task_time + activity, std::chrono::milliseconds{0}, task_time).count();
+        snapshot.tasks.back().approval_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(approval_wait).count();
         if (point == "stop" && snapshot.stop == lay::SessionStop::cancelled) {
             if (!interrupted_now()) {
                 snapshot.stop = lay::SessionStop::time_limit;
@@ -990,9 +1019,10 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             }, cancel);
         };
     }
-    if (action == lay::tui::WorkspaceAction::inspect) {
+    if (settings.inspect || action == lay::tui::WorkspaceAction::inspect) {
         if (!session.finished) lay::recover_session(session, journal);
-        return finish(std::move(session), {store.revision()});
+        finish(std::move(session), {store.revision()});
+        return 0;
     }
     if (settings.close_task) {
         if (!session.finished) lay::recover_session(session, journal);
@@ -1026,7 +1056,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             return generate(request, emit);
         };
     }
-    auto result = lay::continue_session(std::move(session), model, read, cancel, {}, authorize, journal);
+    auto result = lay::continue_session(std::move(session), model, read, cancel, limits, authorize, journal);
     if (result.stop != lay::SessionStop::storage_error) {
         return finish(std::move(result), {store.revision()});
     }

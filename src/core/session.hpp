@@ -22,6 +22,7 @@ enum class SessionStop {
     http_error, transport_error, response_limit, refused, time_limit, storage_error, effect_unknown,
     approval_required,
     context_limit,
+    repeated_file_failure,
 };
 
 struct TextDelta { std::string text; };
@@ -72,6 +73,8 @@ struct Round {
 
 using UsageFields = std::map<std::string, std::optional<std::size_t>, std::less<>>;
 
+enum class AttemptState { reserved, no_receipt, response };
+
 struct ModelAttempt {
     std::size_t first_round = 0;
     std::size_t retained_rounds = 0;
@@ -84,6 +87,8 @@ struct ModelAttempt {
     std::optional<std::size_t> request_number{};
     std::optional<std::size_t> uploaded_body_bytes{};
     std::optional<UsageFields> provider_usage{};
+    std::optional<AttemptState> state{};
+    std::optional<std::size_t> http_status{};
     bool operator==(const ModelAttempt&) const = default;
 };
 
@@ -105,6 +110,7 @@ struct Task {
     std::optional<SessionStop> ended{};
     std::size_t active_ms = 0;
     std::optional<TaskSupplement> supplement{};
+    std::optional<std::size_t> approval_wait_ms{};
     bool operator==(const Task&) const = default;
 };
 
@@ -128,6 +134,7 @@ struct Request {
     bool edit_enabled = false;
     bool run_enabled = false;
     std::span<const Task> tasks{};
+    std::function<void(const ModelAttempt&)> checkpoint_attempt{};
 };
 
 struct GenerationFailure {
@@ -146,6 +153,11 @@ struct Limits {
     std::size_t tool_calls = 64;
 };
 
+struct TaskReceipt {
+    std::string title;
+    std::string detail;
+};
+
 // The model stops emitting when the sink returns false. Returning without a
 // valid FinishReply leaves the draft uncommitted.
 using EventSink = std::function<bool(const ModelEvent&)>;
@@ -159,6 +171,8 @@ struct EditPreparation {
     std::string rejection;
     std::function<ToolResult()> apply;
     bool needs_approval = false;
+    std::string verified_version{};
+    std::optional<FileFailure> file_failure{};
 };
 
 struct RunPreparation {
@@ -174,6 +188,7 @@ struct SessionJournal {
     std::function<ToolResult(const EditEvidence&)> recover_edit;
     std::function<void(const EditEvidence&)> cleanup_edit;
     std::function<RunPreparation(const ToolCall&, const Session&)> prepare_run{};
+    bool persist_model_attempts = false;
 };
 
 struct TaskActions {
@@ -198,5 +213,6 @@ void recover_session(Session& session, const SessionJournal& journal);
 bool task_closed(const Session& session);
 std::string_view name(SessionStop stop);
 std::size_t edit_revision(const Session& session);
+TaskReceipt task_receipt(const Session& session, Limits limits = {});
 
 } // namespace lay

@@ -130,8 +130,9 @@ bool denied_before(const Session& session, const EditEvidence& evidence) {
     return false;
 }
 
-EditPreparation reject(std::string message) {
-    return {{}, std::move(message), {}};
+EditPreparation reject(std::string message, std::string_view version = {},
+                       std::optional<FileFailure> failure = {}) {
+    return {{}, std::move(message), {}, false, std::string(version), failure};
 }
 
 } // namespace
@@ -257,10 +258,10 @@ EditPreparation EditWorkspace::prepare(const ToolCall& call, const Session& sess
         }
         const auto position = create ? 0 : normalized->text.find(old_text);
         if (position == std::string::npos) {
-            return reject("old_text was not found");
+            return reject("old_text was not found", version, FileFailure::fragment_missing);
         }
         if (!create && normalized->text.find(old_text, position + 1) != std::string::npos) {
-            return reject("old_text is ambiguous");
+            return reject("old_text is ambiguous", version, FileFailure::fragment_ambiguous);
         }
         auto preview = diff(path_, normalized->text, position, old_text, new_text, create);
         if (preview.empty()) {

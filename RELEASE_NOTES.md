@@ -1,4 +1,10 @@
-# Lay Code 0.1.0-rc9
+# Lay Code 0.1.0-rc10
+
+P17 Windows x64 便携验收包。持久会话在每次模型 POST 前保存本任务的预算预留，包括自动重试。恢复保留已用额度及未知回执。相邻两次可核实的相同文件错误会暂停，任务收据会列出调用、已保存文件、验证记录和剩余额度。
+
+行式 CLI 增加 `--resume --inspect`。TUI 用 Ctrl+O 打开收据。通过 Windows ConPTY、Ubuntu 24.04 WSL PTY 和本地回环提供方验证，结果记录于源码仓库的 `bench/p17-validation.json`。
+
+## Lay Code 0.1.0-rc9
 
 Windows x64 便携候选包。一个持久会话可用两次 `--write FILE` 明确授权源码和测试文件。每份差异单独审批。CLI 和 TUI 重开时显示逐文件进度、原始差异、批准记录和历史验证版本。
 

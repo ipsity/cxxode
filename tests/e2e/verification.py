@@ -126,18 +126,18 @@ def verification_contract(base, cli, driver, cmake, ctest):
 
     missing = new("missing")
     output = missing.command(data=b"verify with missing program\ny\n")
-    assert output.count("command could not be started") == 2 and missing.count() == 0, output
+    assert output.count("[verification] command could not be started") == 2 and missing.count() == 0, output
     assert "passing test" not in output and not any(run["dispatched"] for run in results(missing))
 
     failed = new("still-fails", fails=True)
     output = failed.command(data=approvers)
-    assert output.count("CTest reported 1 failed") == 2 and failed.count() == 2, output
+    assert output.split("[session]", 1)[0].count("CTest reported 1 failed") == 2 and failed.count() == 2, output
     assert failed.file.read_bytes() == b"empty_config = allow\n"
     assert "passing test" not in output
 
     no_tests = new("no-tests", no_tests=True)
     output = no_tests.command(data=approvers)
-    assert output.count("CTest reported no tests.") == 2 and "passing test" not in output, output
+    assert output.split("[session]", 1)[0].count("CTest reported no tests.") == 2 and "passing test" not in output, output
 
     stale = new("edited-again")
     output = stale.command(data=b"verify and edit again\ny\ny\ny\ny\n")
@@ -146,10 +146,10 @@ def verification_contract(base, cli, driver, cmake, ctest):
 
     denied = new("run-denied")
     output = denied.command(data=b"fix and verify\nn\ny\nn\n")
-    assert output.count("command denied by user") == 2 and denied.count() == 0, output
+    assert output.split("[session]", 1)[0].count("command denied by user") == 2 and denied.count() == 0, output
     assert not any(run["dispatched"] for run in results(denied))
     output = denied.command(extra=("--follow-up", "仅重复同一个测试", "--no-write"), data=b"")
-    assert "Run this command?" not in output and output.count("command denied by user") == 3
+    assert "Run this command?" not in output and output.split("[session]", 1)[0].count("command denied by user") == 3
     assert denied.count() == 0 and not any(run["dispatched"] for run in results(denied))
     noninteractive = new("run-piped")
     assert "approval_required" in noninteractive.command(1, driver=False, data=approvers)
@@ -166,6 +166,7 @@ def verification_contract(base, cli, driver, cmake, ctest):
         output = fixture.command(1, resume=True, data=b"y\n")
         assert "effect_unknown" in output and "Its effects and cleanup are unknown." in output, output
         assert "Run this command?" not in output and fixture.count() == run_count
+        assert "unknown tool receipts 1" in output and "Task 1 receipt · effect_unknown" in output
         assert fixture.saved()[1].count("dispatch") == 1
         assert results(fixture)[0]["verification"]["test_summary"] == ""
 

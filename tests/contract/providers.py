@@ -65,8 +65,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         if status == 307:
             self.send_header("Location", "/redirect-target")
-        self.end_headers()
         try:
+            self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
             pass
@@ -333,6 +333,192 @@ def tests(executable, driver, base, server):
         0, 0, int(os.name != "nt")]
     replayed, _ = cli([*flags, "--resume"], [])
     assert "end_turn requests=4" in replayed
+
+    cap_env = {**env, "LAY_TEST_REQUEST_LIMIT": "2"}
+    http_429 = ("POST", "/relay/v1/responses", lambda _: (b"", 429, "text/plain"))
+
+    def budget_snapshot(session_id):
+        with closing(sqlite3.connect(database_dir / f"session-{session_id}.sqlite3")) as database:
+            result, = database.execute("SELECT snapshot FROM session").fetchone()
+            phases = [row[0] for row in database.execute("SELECT phase FROM checkpoints ORDER BY revision")]
+        return json.loads(result), phases
+
+    # Kill after the second retry reached the relay but before it could reply.
+    second_post = threading.Event()
+    release = threading.Event()
+
+    def wait_for_crash(_):
+        second_post.set()
+        release.wait(8)
+        return b"", 200, "text/event-stream"
+
+    cap_flags = ["--workspace", root, "--session", "retry-crash"]
+    server.steps = [http_429, ("POST", "/relay/v1/responses", wait_for_crash)]
+    server.errors = []
+    process = subprocess.Popen([driver, "--provider-config", config, *cap_flags, "--question", "Retry"],
+                               env=cap_env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert second_post.wait(6), server.errors
+        saved, phases = budget_snapshot("retry-crash")
+        assert saved["requests"] == 2 and saved["dispatches"] == 0
+        assert phases == ["input", "request", "request_result", "request"]
+        first, unconfirmed = saved["model_attempts"]
+        assert (first["request_number"], first["attempt_state"], first["http_status"]) == (1, 2, 429)
+        assert (unconfirmed["request_number"], unconfirmed["attempt_state"]) == (2, 0)
+        assert unconfirmed["input_tokens"] is None and unconfirmed["output_tokens"] is None
+        assert "uploaded_body_bytes" not in unconfirmed and "http_status" not in unconfirmed
+        assert not server.steps and not server.errors
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
+        release.set()
+    shown, _ = cli([*cap_flags, "--resume"], [], 1, cap_env, driver)
+    assert "request_limit requests=2 dispatches=0" in shown
+    assert "Unknown request receipts 1 · reserved, possibly unsent 1" in shown
+    assert "Unknown input or output usage 2" in shown and "Remaining budget · requests 0" in shown
+    assert budget_snapshot("retry-crash")[0]["model_attempts"] == saved["model_attempts"]
+    report = json.loads(subprocess.check_output([sys.executable, "-B", script,
+                                                 database_dir / "session-retry-crash.sqlite3"]))
+    assert [attempt["attempt_state"] for attempt in report["tasks"][0]["attempts"]] == ["response", "reserved"]
+    assert report["tasks"][0]["totals"]["input_tokens"] == {"known_total": None, "requests_without_count": 2}
+
+    # A committed reservation can predate the transfer itself.
+    cap_flags = ["--workspace", root, "--session", "retry-before-send"]
+    server.steps, server.errors = [], []
+    process = subprocess.Popen([driver, "--provider-config", config, *cap_flags, "--question", "Reserve"],
+                               env={**cap_env, "LAY_TEST_PAUSE": "after_request_1"}, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    marker = threading.Event()
+    def watch_reservation():
+        for line in process.stdout:
+            if b"[checkpoint] after_request_1" in line:
+                marker.set()
+                return
+
+    monitor = threading.Thread(target=watch_reservation)
+    monitor.start()
+    try:
+        assert marker.wait(6), "request reservation checkpoint was not reached"
+        saved, phases = budget_snapshot("retry-before-send")
+        assert saved["requests"] == 1 and phases == ["input", "request"]
+        assert saved["model_attempts"][0]["attempt_state"] == 0 and not server.errors
+    finally:
+        if process.poll() is None:
+            process.kill()
+        monitor.join(5)
+        process.communicate(timeout=5)
+    shown, _ = cli([*cap_flags, "--resume"], [("POST", "/relay/v1/responses", stream(completed([message("Recovered")])))],
+                   environment=cap_env, program=driver)
+    assert "end_turn requests=2 dispatches=0" in shown
+    assert "Unknown request receipts 1 · reserved, possibly unsent 1" in shown
+
+    # A write failure on reservation 2 stops issuance and leaves only the first receipt.
+    cap_flags = ["--workspace", root, "--session", "retry-save-failure"]
+    shown, _ = cli([*cap_flags, "--question", "Retry"], [http_429], 1,
+                   {**cap_env, "LAY_TEST_FULL": "before_request_2"}, driver)
+    assert "storage_error" in shown and "disk is full" in shown
+    saved, phases = budget_snapshot("retry-save-failure")
+    assert saved["requests"] == 1 and phases == ["input", "request", "request_result"]
+    assert saved["model_attempts"][0]["http_status"] == 429
+
+    print("Verified a two-POST crash cap, an unsent reservation, and save failure before retry.")
+
+    def proposal(identifier, name, **arguments):
+        return {"type": "function_call", "id": "fc_" + identifier, "call_id": identifier, "name": name,
+                "arguments": json.dumps(arguments)}
+
+    def repeated_session(name, steps, *, pause=False, extra=(), environment=env, data=b""):
+        flags = ["--workspace", root, "--session", name, *extra]
+        shown, _ = cli([*flags, "--question", "Compare host observations"],
+                       [("POST", "/relay/v1/responses", step) for step in steps],
+                       int(pause), environment, driver, data)
+        saved, phases = budget_snapshot(name)
+        tools = [tool for round in saved["rounds"] for tool in round["tools"]]
+        assert ("[session] repeated_file_failure" in shown) == pause, shown
+        assert saved["requests"] == len(steps) == phases.count("request") == phases.count("request_result")
+        assert saved["dispatches"] == phases.count("dispatch") == sum(tool["dispatched"] for tool in tools)
+        return flags, shown, tools
+
+    def read_step(identifier, path="binary.txt", **arguments):
+        return stream(completed([proposal(identifier, "read", path=path, **arguments)]))
+
+    answer = stream(completed([message("Finished")]))
+    (root / "binary.txt").write_bytes(b"\x00v1")
+    (root / "other.txt").write_bytes(b"\x00v2")
+    first = read_step("first")
+    valid = read_step("new-fact", SOURCE)
+    explicit_defaults = proposal("second", "read", line_count=120, path="binary.txt", start_line=1)
+    remainder = proposal("unreached", "read", path=SOURCE)
+    flags, shown, tools = repeated_session("same-file-failure",
+        [first, stream(completed([explicit_defaults, remainder]))], pause=True)
+    assert "Calls first and second repeated read on binary.txt" in shown and "same verified file version" in shown
+    assert tools[0]["version"] == tools[1]["version"] and tools[0]["file_failure"] == tools[1]["file_failure"]
+    assert tools[2]["status"] == 3 and not tools[2]["dispatched"]
+    no_key = {name: value for name, value in env.items() if name != KEY_VARIABLE}
+    inspected, _ = cli([*flags, "--resume", "--inspect"], [], environment=no_key)
+    assert "Task 1 receipt · repeated_file_failure" in inspected and "Calls first and second" in inspected
+    assert budget_snapshot("same-file-failure")[0]["dispatches"] == 2
+    # An explicit resume can check a file that the user has changed.
+    (root / "binary.txt").write_text("readable now", encoding="utf-8")
+    shown, _ = cli([*flags, "--resume"], [("POST", "/relay/v1/responses", read_step("recheck")),
+                                         ("POST", "/relay/v1/responses", answer)])
+    assert "end_turn requests=4 dispatches=3" in shown
+    (root / "binary.txt").write_bytes(b"\x00v1")
+
+    def change_version(payload):
+        (root / "binary.txt").write_bytes(b"\x00v2")
+        return read_step("second")(payload)
+
+    for name, steps in (
+        ("different-version", [first, change_version, answer]),
+        ("different-parameters", [first, read_step("second", line_count=119), answer]),
+        ("different-file", [first, read_step("second", "other.txt"), answer]),
+        ("between-observations", [first, valid, read_step("second"), answer]),
+        ("unknown-file-version", [read_step("first", "missing.txt"), read_step("second", "missing.txt"), answer]),
+        ("excluded-file", [read_step("first", "other.txt"), read_step("second", "other.txt"), answer]),
+    ):
+        extra = ("--exclude", "other.txt") if name == "excluded-file" else ()
+        _, shown, tools = repeated_session(name, steps, extra=extra)
+        if name in ("different-version", "different-file"):
+            assert tools[0]["version"] and tools[1]["version"] and tools[0]["version"] != tools[1]["version"]
+        if name in ("unknown-file-version", "excluded-file"):
+            assert all("file_failure" not in tool for tool in tools)
+
+    original = (root / SOURCE).read_bytes()
+    def edit_error(identifier):
+        def reply(payload):
+            if identifier == "first":
+                reply.version = payload["input"][-1]["output"].split("version=")[-1].strip()
+            tool = proposal(identifier, "edit", path=SOURCE, version=reply.version,
+                            old_text="missing fragment", new_text="replacement")
+            return stream(completed([tool]))(payload)
+        return reply
+
+    edit_first = edit_error("first")
+    def edit_second(payload):
+        reply = edit_error("second")
+        reply.version = edit_first.version
+        return reply(payload)
+
+    _, shown, tools = repeated_session("same-edit-failure", [valid, edit_first, edit_second], pause=True,
+                                      extra=("--write", SOURCE))
+    assert "Calls first and second repeated edit" in shown
+    assert tools[1]["file_failure"] == tools[2]["file_failure"] and not tools[1]["dispatched"] and not tools[2]["dispatched"]
+    assert (root / SOURCE).read_bytes() == original
+
+    def command_step(identifier):
+        return stream(completed([proposal(identifier, "run", program=sys.executable,
+            args=["-c", "import sys; sys.stderr.write('same stderr'); sys.exit(7)"])]))
+
+    run_env = {**env, "LAY_TEST_INTERACTIVE": "1"}
+    _, _, tools = repeated_session("identical-stderr", [command_step("first"), command_step("second"), answer],
+                                   extra=("--allow-run",), environment=run_env, data=b"y\ny\n")
+    assert all(tool["dispatched"] and tool["verification"]["stderr"]["head"] == "same stderr" for tool in tools)
+    _, shown, tools = repeated_session("denied-command", [command_step("first"), command_step("second"), answer],
+                                       extra=("--allow-run",), environment=run_env, data=b"n\n")
+    assert shown.count("Run this command? [y/N]") == 1 and all(not tool["dispatched"] for tool in tools)
+    print("Verified two attributable file pauses and eight counterexamples with no false pause.")
 
     incomplete = (response("response.output_text.delta", delta="未提交的预览")
                   + response("response.output_item.added", output_index=0, item={**item, "arguments": ""})

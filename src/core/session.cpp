@@ -98,6 +98,54 @@ void record_process(ToolRecord& record, Verification verification) {
     record.verification = std::move(verification);
 }
 
+bool same_file_input(const ToolCall& first, const ToolCall& second) {
+    if (first.name != second.name || text_arg(first, "path") != text_arg(second, "path")) return false;
+    if (first.name == "read") {
+        return number_arg(first, "start_line", read_start_line) == number_arg(second, "start_line", read_start_line) &&
+            number_arg(first, "line_count", read_line_count) == number_arg(second, "line_count", read_line_count);
+    }
+    return first.name == "edit" && text_arg(first, "version") == text_arg(second, "version") &&
+        text_arg(first, "old_text") == text_arg(second, "old_text") &&
+        text_arg(first, "new_text") == text_arg(second, "new_text");
+}
+
+const ToolRecord* preceding_observation(const Session& session, const ToolRecord& current) {
+    const auto* task = session.tasks.empty() ? nullptr : &session.tasks.back();
+    auto first = task ? task->first_round : 0;
+    if (task && task->supplement && task->supplement->before_round) {
+        first = std::max(first, *task->supplement->before_round);
+    }
+    const ToolRecord* previous = nullptr;
+    for (const auto& round : std::span(session.rounds).subspan(first)) {
+        for (const auto& record : round.tools) {
+            if (&record == &current) return previous;
+            if (record.result.status != ToolStatus::pending && record.result.status != ToolStatus::skipped) {
+                previous = &record;
+            }
+        }
+    }
+    return nullptr;
+}
+
+void pause_on_repeated_file_failure(Session& session, const ToolRecord& current) {
+    const auto& result = current.result;
+    if (result.status != ToolStatus::failed || !result.file_failure || result.version.empty()) return;
+    const auto* previous = preceding_observation(session, current);
+    if (!previous || previous->result.status != ToolStatus::failed ||
+        previous->result.file_failure != result.file_failure || previous->result.version != result.version ||
+        !same_file_input(previous->call, current.call)) return;
+
+    session.stop = SessionStop::repeated_file_failure;
+    session.diagnostic = "Calls " + previous->call.id + " and " + current.call.id + " repeated " +
+        current.call.name + " on " + std::string(text_arg(current.call, "path")) + " at the same verified file version (" +
+        result.version + ") with the same inputs and error: " + result.text;
+    for (auto& record : session.rounds.back().tools) {
+        if (record.result.status == ToolStatus::pending) {
+            record.result = {ToolStatus::skipped, "repeated_file_failure"};
+        }
+    }
+}
+
 void settle_tools(Session& session, const ExecuteTool& execute, const StopRequested& stop_requested,
                   std::size_t first_dispatch, std::size_t tool_limit,
                   const AuthorizeTool& authorize, const SessionJournal& journal) {
@@ -134,7 +182,9 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
                     session.diagnostic = std::move(edit.rejection);
                     break;
                 }
-                record.result = {ToolStatus::failed, std::move(edit.rejection)};
+                record.result = {ToolStatus::failed, std::move(edit.rejection), std::move(edit.verified_version),
+                                 {}, edit.file_failure};
+                pause_on_repeated_file_failure(session, record);
                 skip_reason = "prior_tool_failed";
                 save(journal, session, "result");
                 continue;
@@ -188,6 +238,7 @@ void settle_tools(Session& session, const ExecuteTool& execute, const StopReques
         } else if (record.result.status != ToolStatus::ok) {
             record.result.status = ToolStatus::failed;
             skip_reason = "prior_tool_failed";
+            pause_on_repeated_file_failure(session, record);
         }
         save(journal, session, "result");
         if (record.edit && record.result.status == ToolStatus::ok && journal.cleanup_edit) {
@@ -369,23 +420,49 @@ Session continue_session(Session session, const Generate& generate, const Execut
             ReplyDraft draft;
             bool interrupted = false;
             const auto remaining = limits.requests - (session.requests - first_request);
-            if (journal.save) {
+            if (journal.save && !journal.persist_model_attempts) {
                 ++session.requests;
                 save(journal, session, "request");
                 --session.requests;
             }
-            const auto result = generate({task ? task->question : session.question, session.rounds, remaining,
-                                          edit_enabled, run_enabled, session.tasks},
-                                         [&](const ModelEvent& event) {
+            Request request{task ? task->question : session.question, session.rounds, remaining,
+                            edit_enabled, run_enabled, session.tasks};
+            bool attempt_open = false;
+            if (journal.persist_model_attempts) {
+                request.checkpoint_attempt = [&](const ModelAttempt& observation) {
+                    auto attempt = observation;
+                    if (attempt.state == AttemptState::reserved) {
+                        if (attempt_open || session.requests - first_request >= limits.requests) {
+                            throw std::logic_error("cannot reserve another model attempt");
+                        }
+                        attempt.request_number = ++session.requests;
+                        session.model_attempts.push_back(std::move(attempt));
+                        save(journal, session, "request");
+                        attempt_open = true;
+                    } else {
+                        if (!attempt_open || !attempt.state) {
+                            throw std::logic_error("model attempt receipt has no reservation");
+                        }
+                        auto& reserved = session.model_attempts.back();
+                        attempt.request_number = reserved.request_number;
+                        reserved = std::move(attempt);
+                        save(journal, session, "request_result");
+                        attempt_open = false;
+                    }
+                };
+            }
+            const auto result = generate(request, [&](const ModelEvent& event) {
                 interrupted = interrupted || stop_requested();
                 return !interrupted && draft.receive(event);
             });
-            for (std::size_t i = 0; i < result.observations.size(); ++i) {
-                auto attempt = result.observations[i];
-                attempt.request_number = session.requests + i + 1;
-                session.model_attempts.push_back(std::move(attempt));
+            if (!journal.persist_model_attempts) {
+                for (std::size_t i = 0; i < result.observations.size(); ++i) {
+                    auto attempt = result.observations[i];
+                    attempt.request_number = session.requests + i + 1;
+                    session.model_attempts.push_back(std::move(attempt));
+                }
+                session.requests += result.attempts;
             }
-            session.requests += result.attempts;
             if (interrupted || stop_requested()) {
                 session.stop = SessionStop::cancelled;
                 break;
@@ -440,6 +517,59 @@ std::size_t edit_revision(const Session& session) {
     return revision;
 }
 
+TaskReceipt task_receipt(const Session& session, Limits limits) {
+    const auto& task = session.tasks.back();
+    const auto requests = session.requests - task.first_request;
+    const auto dispatches = session.dispatches - task.first_dispatch;
+    const auto current_revision = edit_revision(session);
+    std::size_t confirmed = 0, reserved = 0, known_usage = 0, tool_results = 0;
+    for (const auto& attempt : session.model_attempts) {
+        if (!attempt.request_number || *attempt.request_number <= task.first_request) continue;
+        confirmed += attempt.state == AttemptState::response && attempt.http_status.has_value();
+        reserved += attempt.state == AttemptState::reserved;
+        known_usage += attempt.input_tokens.has_value() && attempt.output_tokens.has_value();
+    }
+    std::map<std::string, std::string> edits;
+    std::string verification;
+    for (const auto& round : std::span(session.rounds).subspan(task.first_round)) {
+        for (const auto& record : round.tools) {
+            tool_results += record.dispatched && (record.result.status == ToolStatus::ok ||
+                                                  record.result.status == ToolStatus::failed);
+            if (record.dispatched && record.edit && record.result.status == ToolStatus::ok) {
+                edits[record.edit->path] = record.result.version;
+            }
+            if (!record.verification || !record.run) continue;
+            const auto& result = *record.verification;
+            verification += "\n  " + record.call.id + " · " + verification_reference(result, *record.run, current_revision);
+            if (!result.process.diagnostic.empty()) verification += " · " + result.process.diagnostic;
+            if (!result.test_summary.empty()) verification += "\n    " + result.test_summary;
+        }
+    }
+    const auto reason = task.supplement && !task_closed(session) && session.stop == SessionStop::end_turn ?
+        std::string_view("supplement_pending") : name(session.stop);
+    auto title = "Task " + std::to_string(session.tasks.size()) + " receipt · " + std::string(reason);
+    std::string detail = "Saved files";
+    if (edits.empty()) detail += " · none";
+    for (const auto& [path, version] : edits) {
+        detail += "\n  " + path;
+        if (!version.empty()) detail += " · version " + version;
+    }
+    detail += "\nVerification observed";
+    detail += verification.empty() ? " · none" : verification;
+    detail += "\nRequest slots used " + std::to_string(requests) + " · HTTP responses confirmed " +
+        std::to_string(confirmed) + "\nUnknown request receipts " + std::to_string(requests - confirmed) +
+        " · reserved, possibly unsent " + std::to_string(reserved) +
+        "\nUnknown input or output usage " + std::to_string(requests - known_usage);
+    detail += "\nTool dispatches saved " + std::to_string(dispatches) + " · results confirmed " +
+        std::to_string(tool_results) + " · unknown tool receipts " + std::to_string(dispatches - tool_results);
+    detail += "\nRemaining budget · requests " + std::to_string(limits.requests - std::min(limits.requests, requests)) +
+        " · tools " + std::to_string(limits.tool_calls - std::min(limits.tool_calls, dispatches));
+    detail += "\nActive time checkpointed " + std::to_string(task.active_ms) + " ms · approval wait recorded ";
+    detail += task.approval_wait_ms ? std::to_string(*task.approval_wait_ms) + " ms" : "unknown";
+    if (!session.diagnostic.empty()) detail += "\n" + session.diagnostic;
+    return {std::move(title), std::move(detail)};
+}
+
 std::string_view name(SessionStop stop) {
     switch (stop) {
         case SessionStop::end_turn: return "end_turn";
@@ -456,6 +586,7 @@ std::string_view name(SessionStop stop) {
         case SessionStop::effect_unknown: return "effect_unknown";
         case SessionStop::approval_required: return "approval_required";
         case SessionStop::context_limit: return "context_limit";
+        case SessionStop::repeated_file_failure: return "repeated_file_failure";
     }
     return "unknown";
 }

@@ -120,7 +120,7 @@ def compare(base, cli, driver, cmake, ctest):
         approve(terminal)
         terminal.expect("已完成")
         assert tui.count() == 2
-        terminal.send(ESC + "[A")
+        terminal.send((ESC + "[A") * 2)
         terminal.quiet()
         terminal.key("\x0f", "executable ")
         terminal.send(ESC + "[6~")
@@ -140,6 +140,7 @@ def compare(base, cli, driver, cmake, ctest):
     snapshot, phases = tui.saved()
     assert facts(snapshot) == facts(line.saved()[0])
     assert phases == line.saved()[1]
+    assert snapshot["tasks"][0]["approval_wait_ms"] >= 180
     with open_tui(tui, "--resume") as terminal:
         terminal.expect("已完成")
         terminal.expect("#2 你  " + FOLLOW_UP)
@@ -383,15 +384,13 @@ class EvidenceFixture(BaseHTTPRequestHandler):
         self.rfile.read(int(self.headers["Content-Length"]))
         index = self.server.requests
         self.server.requests += 1
-        path = self.server.filename
-        if index < 2:
-            action, args = ("run", {"program": "ctest", "args": ["-R", "^empty_config$|no match"]}) if index == 0 else (
-                "read", {"path": path})
+        if index < len(self.server.actions):
+            action, args = self.server.actions[index]
             item = {"type": "function_call", "id": f"fc_evidence_{index}", "call_id": f"call_evidence_{index}",
                     "name": action, "arguments": json.dumps(args, ensure_ascii=False)}
         else:
             item = {"type": "message", "id": "msg_evidence", "role": "assistant",
-                    "content": [{"type": "output_text", "text": f"配置依据是 `{path}:1`。"}]}
+                    "content": [{"type": "output_text", "text": self.server.answer}]}
         payload = {"type": "response.completed", "response": {"status": "completed", "output": [item]}}
         encoded = f"data: {json.dumps(payload)}\n\n".encode()
         self.send_response(200)
@@ -472,7 +471,9 @@ def shared_evidence(base, cli, driver, cmake, ctest):
     config = base / "evidence-provider.json"
     with ThreadingHTTPServer(("127.0.0.1", 0), EvidenceFixture) as server:
         server.requests = 0
-        server.filename = fixture.file.name
+        server.actions = [("run", {"program": "ctest", "args": ["-R", "^empty_config$|no match"]}),
+                          ("read", {"path": fixture.file.name})]
+        server.answer = f"配置依据是 `{fixture.file.name}:1`。"
         config.write_text(json.dumps({"default_provider": "relay", "providers": {"relay": {
             "model": "fixture-evidence", "protocol": "responses", "api_key_env": None,
             "base_url": f"http://127.0.0.1:{server.server_port}/v1",
@@ -519,6 +520,81 @@ def shared_evidence(base, cli, driver, cmake, ctest):
             server.shutdown()
 
 
+def receipt_replay(base, cli, driver, cmake, ctest):
+    def check(fixture, markers, status="已完成"):
+        saved = fixture.saved()
+        output = fixture.command(resume=True, driver=False, data=b"", extra=("--inspect",))
+        receipt = output.split("Task 1 receipt", 1)[1]
+        for marker in markers:
+            assert marker in receipt, receipt
+        assert "Active time checkpointed" in receipt and "approval wait recorded" in receipt
+        with console(cli, ["--tui", *fixture.args, "--resume", "--mono"], 32, 150, fixture.env) as terminal:
+            terminal.expect(status)
+            terminal.expect("Task 1 receipt")
+            assert "Remaining budget" not in terminal.text
+            terminal.key("\x0f", "Verification observed")
+            for marker in markers:
+                terminal.expect(marker)
+            terminal.expect("Remaining budget")
+        assert fixture.saved() == saved
+
+    def new(name):
+        return VerificationFixture(base, "receipt-" + name, cli, driver, cmake, ctest)
+
+    denied = new("denied")
+    denied.command(data=b"fix and verify\nn\ny\nn\n")
+    assert denied.count() == 0
+    check(denied, ("command denied by user", "Tool dispatches saved 2", "unknown tool receipts 0"))
+
+    stale = new("stale")
+    stale.command(data=b"verify and edit again\ny\ny\ny\ny\n")
+    assert stale.file.read_bytes() == b"empty_config = review\n"
+    check(stale, ("Saved files", stale.file.name, "command exited 0 at edit revision 1 (earlier workspace revision)"))
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), EvidenceFixture) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        config = base / "receipt-providers.json"
+        config.write_text(json.dumps({"default_provider": "relay", "providers": {"relay": {
+            "model": "fixture-receipt", "protocol": "responses", "api_key_env": "LAY_TEST_RECEIPT_KEY",
+            "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+        }}}))
+        # EvidenceFixture uses no credentials server-side; the client still requires its configured key.
+        try:
+            for mode, answer, actions, markers in (
+                ("qa", "Only an answer.", [], ("Saved files · none", "Verification observed · none",
+                                             "HTTP responses confirmed 1", "Tool dispatches saved 0")),
+                ("optimistic", "All tests passed.", [("run", {"program": "ctest", "args": ["-R", "^empty_config$"]})],
+                 ("Saved files · none", "command exited 8 at edit revision 0",
+                  "CTest reported 1 failed", "HTTP responses confirmed 2")),
+            ):
+                fixture = new(mode)
+                fixture.args[fixture.args.index("fixture-verify")] = "fixture-receipt"
+                fixture.args += ["--provider-config", str(config)]
+                fixture.env["LAY_TEST_RECEIPT_KEY"] = "local-only"
+                server.requests, server.actions, server.answer = 0, actions, answer
+                output = fixture.command(data=b"check\ny\n")
+                assert answer in output and server.requests == len(actions) + 1
+                del fixture.env["LAY_TEST_RECEIPT_KEY"]
+                check(fixture, markers)
+                assert fixture.count() == len(actions) and server.requests == len(actions) + 1
+
+            paused = new("repeated")
+            paused.args[paused.args.index("fixture-verify")] = "fixture-receipt"
+            paused.args += ["--provider-config", str(config)]
+            paused.env["LAY_TEST_RECEIPT_KEY"] = "local-only"
+            (paused.root / "binary.txt").write_bytes(b"\x00")
+            server.requests, server.actions = 0, [("read", {"path": "binary.txt"})] * 2
+            paused.command(1, data=b"check twice\n")
+            del paused.env["LAY_TEST_RECEIPT_KEY"]
+            check(paused, ("Calls call_evidence_0 and call_evidence_1 repeated read on binary.txt",
+                           "Tool dispatches saved 2", "HTTP responses confirmed 2"),
+                  status="任务暂停 · repeated_file_failure")
+            assert server.requests == 2
+        finally:
+            server.shutdown()
+
+
 def draft_input(base, cli, driver):
     from editing import Fixture
 
@@ -561,4 +637,5 @@ if __name__ == "__main__":
         draft_input(base, program, driver)
         previews(base, program)
         shared_evidence(base, program, driver, cmake, ctest)
+        receipt_replay(base, program, driver, cmake, ctest)
     print("Verified TUI/CLI facts, fresh approval, cancellation, crash recovery and retry preview isolation.")

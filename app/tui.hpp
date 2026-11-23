@@ -23,6 +23,7 @@ struct CheckpointView {
     std::int64_t revision = -1;
     std::string_view storage_error{};
     std::string_view observed_reply{};
+    Limits limits{};
 };
 
 struct WorkspacePort {

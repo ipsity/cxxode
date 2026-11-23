@@ -198,6 +198,7 @@ struct Attempt {
     std::optional<std::size_t> first_byte_us{};
     std::optional<std::size_t> uploaded_body_bytes{};
     std::optional<UsageFields> provider_usage{};
+    std::optional<std::size_t> http_status{};
 };
 
 class Transport {
@@ -231,6 +232,9 @@ public:
             }
         };
         common_http_options(easy.get(), provider_, provider_.endpoint);
+        // Keep each model POST behind the host's durable retry budget.
+        set(CURLOPT_FRESH_CONNECT, 1L);
+        set(CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1));
         set(CURLOPT_TIMEOUT_MS, 90000L);
         set(CURLOPT_HTTPHEADER, headers.value);
         set(CURLOPT_POSTFIELDS, request.data());
@@ -245,6 +249,10 @@ public:
         }
         const ActiveEasy active{multi_.get(), easy.get()};
         const auto observed = [&](Attempt result) {
+            long status = 0;
+            if (curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &status) == CURLE_OK && status >= 200) {
+                result.http_status = static_cast<std::size_t>(status);
+            }
             curl_off_t bytes = 0;
             if (curl_easy_getinfo(easy.get(), CURLINFO_SIZE_UPLOAD_T, &bytes) == CURLE_OK && bytes >= 0) {
                 result.uploaded_body_bytes = static_cast<std::size_t>(bytes);
@@ -446,8 +454,8 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
             attempt_started = std::move(attempt_started),
             stop_requested = std::move(stop_requested)](const Request& request, const EventSink& emit) {
         Generation generation{0, {}};
-        try {
-            const auto project = [&](messages::ContextLimits limits = {}) {
+        const auto project = [&](messages::ContextLimits limits = {}) {
+            try {
 #ifdef LAY_BENCHMARK_METRICS
                 const BenchmarkTimer timer;
 #endif
@@ -456,57 +464,69 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
                 timer.record("projection", request.tasks.size(), result.body.size());
 #endif
                 return result;
-            };
-            auto projection = project();
-            if (projection.body.empty()) {
-                generation.failure = GenerationFailure{SessionStop::context_limit, std::move(projection.diagnostic)};
-                return generation;
+            } catch (const std::exception&) {
+                return messages::Projection{};
             }
-            const auto limit = std::min<std::size_t>(3, request.attempts_left);
-            bool repaired = false;
-            for (std::size_t attempt = 0; attempt < limit; ++attempt) {
-                if (attempt_started) {
-                    try { attempt_started(); } catch (...) {}
-                }
-                ++generation.attempts;
-                auto& layout = generation.observations.emplace_back(projection.layout);
-                auto result = transport->post(projection.body, emit, stop_requested, preview);
-                layout.input_tokens = result.input_tokens;
-                layout.output_tokens = result.output_tokens;
-                layout.first_byte_us = result.first_byte_us;
-                layout.uploaded_body_bytes = result.uploaded_body_bytes;
-                layout.provider_usage = std::move(result.provider_usage);
-                generation.failure = std::move(result.failure);
-                if (!repaired && generation.failure && generation.failure->reason == SessionStop::context_limit &&
-                    attempt + 1 < limit && request.history.size() > 1) {
-                    messages::ContextLimits smaller;
-                    smaller.body_bytes = projection.body.size() / 2;
-                    auto candidate = project(smaller);
-                    if (!candidate.body.empty()) {
-                        repaired = true;
-                        projection = std::move(candidate);
-                        continue;
-                    }
-                    generation.failure->diagnostic += ". " + candidate.diagnostic;
-                }
-                if (!result.retry_after || attempt + 1 == limit || *result.retry_after > 60s) {
-                    return generation;
-                }
-                std::uniform_int_distribution<int> jitter(0, 75);
-                static thread_local std::mt19937 random(std::random_device{}());
-                const auto delay = std::max(*result.retry_after,
-                    std::chrono::milliseconds(150 * (1 << attempt) + jitter(random)));
-                const auto until = Clock::now() + delay;
-                while (Clock::now() < until && !stop_requested()) {
-                    std::this_thread::sleep_until(std::min(until, Clock::now() + 25ms));
-                }
-                if (stop_requested()) {
-                    generation.failure = GenerationFailure{SessionStop::cancelled, {}};
-                    return generation;
-                }
+        };
+        auto projection = project();
+        if (projection.body.empty()) {
+            generation.failure = projection.diagnostic.empty()
+                ? GenerationFailure{SessionStop::transport_error, "could not build model request"}
+                : GenerationFailure{SessionStop::context_limit, std::move(projection.diagnostic)};
+            return generation;
+        }
+        const auto limit = std::min<std::size_t>(3, request.attempts_left);
+        bool repaired = false;
+        for (std::size_t attempt = 0; attempt < limit; ++attempt) {
+            if (stop_requested()) {
+                generation.failure = GenerationFailure{SessionStop::cancelled, {}};
+                break;
             }
-        } catch (const std::exception&) {
-            generation.failure = GenerationFailure{SessionStop::transport_error, "could not build or issue model request"};
+            auto& layout = generation.observations.emplace_back(projection.layout);
+            layout.state = AttemptState::reserved;
+            if (request.checkpoint_attempt) request.checkpoint_attempt(layout);
+            if (attempt_started) {
+                try { attempt_started(); } catch (...) {}
+            }
+            ++generation.attempts;
+            Attempt result;
+            try {
+                result = transport->post(projection.body, emit, stop_requested, preview);
+            } catch (const std::exception&) {
+                result.failure = GenerationFailure{SessionStop::transport_error, "could not issue model request"};
+            }
+            layout.input_tokens = result.input_tokens;
+            layout.output_tokens = result.output_tokens;
+            layout.first_byte_us = result.first_byte_us;
+            layout.uploaded_body_bytes = result.uploaded_body_bytes;
+            layout.provider_usage = std::move(result.provider_usage);
+            layout.http_status = result.http_status;
+            layout.state = layout.http_status ? AttemptState::response : AttemptState::no_receipt;
+            if (request.checkpoint_attempt) request.checkpoint_attempt(layout);
+            generation.failure = std::move(result.failure);
+            if (!repaired && generation.failure && generation.failure->reason == SessionStop::context_limit &&
+                attempt + 1 < limit && request.history.size() > 1) {
+                messages::ContextLimits smaller;
+                smaller.body_bytes = projection.body.size() / 2;
+                auto candidate = project(smaller);
+                if (!candidate.body.empty()) {
+                    repaired = true;
+                    projection = std::move(candidate);
+                    continue;
+                }
+                if (!candidate.diagnostic.empty()) generation.failure->diagnostic += ". " + candidate.diagnostic;
+            }
+            if (!result.retry_after || attempt + 1 == limit || *result.retry_after > 60s) {
+                break;
+            }
+            std::uniform_int_distribution<int> jitter(0, 75);
+            static thread_local std::mt19937 random(std::random_device{}());
+            const auto delay = std::max(*result.retry_after,
+                std::chrono::milliseconds(150 * (1 << attempt) + jitter(random)));
+            const auto until = Clock::now() + delay;
+            while (Clock::now() < until && !stop_requested()) {
+                std::this_thread::sleep_until(std::min(until, Clock::now() + 25ms));
+            }
         }
         return generation;
     };

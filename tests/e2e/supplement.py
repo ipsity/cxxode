@@ -129,6 +129,8 @@ def run(base, cli, driver):
         with tui(fixture, "--resume") as terminal:
             terminal.expect("任务暂停 · 补充待处理")
             terminal.expect("补充已保存 · 等待处理 " + INPUT_ID)
+            terminal.send("\x1b[A")
+            terminal.quiet()
             terminal.key("\x0f", SUPPLEMENT)
             terminal.key("\x1bOQ", "补充等待处理 · F3 可结束任务")
             accepted()

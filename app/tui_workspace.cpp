@@ -35,7 +35,7 @@ void captured(std::string& detail, std::string_view name, const CapturedOutput& 
 }
 
 Transcript project(const Session& snapshot, bool ascii, const std::vector<std::vector<std::string>>& source_notes,
-                   std::span<const std::string> edits, CheckpointView checkpoint) {
+                   std::span<const std::string> edits, CheckpointView checkpoint, bool settled) {
     Transcript output{{}, snapshot.tasks.size(), task_closed(snapshot), snapshot.stop,
                       safe_text(snapshot.diagnostic, ascii), task_actions(snapshot), checkpoint.revision,
                       !checkpoint.storage_error.empty()};
@@ -117,6 +117,10 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
             }
             add(std::move(title), receipt + '\n' + input->text);
         }
+    }
+    if (settled && !snapshot.tasks.empty()) {
+        auto receipt = task_receipt(snapshot, checkpoint.limits);
+        add(std::move(receipt.title), receipt.detail);
     }
     if (!checkpoint.observed_reply.empty()) {
         const auto label = ascii ? "Unsaved reply / " : "回复尚未保存 · ";
@@ -215,11 +219,12 @@ void WorkspaceWorker::publish(const Session& snapshot, std::string_view point,
         source_notes_ = std::move(notes);
     }
     // A request changes the preview and counters only. Keep the committed cards.
-    auto transcript = point == "request" ? nullptr :
-        std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_, edits, checkpoint));
+    const bool attempting = point == "request" || point == "request_result";
+    auto transcript = attempting ? nullptr :
+        std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_, edits, checkpoint, point == "finished"));
     const std::lock_guard lock(mutex_);
     view_.preview.clear();
-    view_.requesting = point == "request";
+    view_.requesting = attempting;
     if (transcript) view_.transcript = std::move(transcript);
 }
 

@@ -23,6 +23,9 @@ def audit(snapshot):
         number = attempt.get("request_number", i if complete_legacy_sequence else None)
         row = {key: attempt.get(key) for key in ("body_bytes", "uploaded_body_bytes",
                "input_tokens", "output_tokens", "provider_usage", "first_byte_us")}
+        if "attempt_state" in attempt:
+            row["attempt_state"] = ("reserved", "no_receipt", "response")[attempt["attempt_state"]]
+            row["http_status"] = attempt.get("http_status")
         if number is None:
             unattributed.append(row)
         elif not 1 <= number <= requests or number in by_request:

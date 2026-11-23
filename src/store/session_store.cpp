@@ -281,6 +281,8 @@ Json encode_attempt(const ModelAttempt& attempt) {
     };
     if (attempt.request_number) encoded["request_number"] = *attempt.request_number;
     if (attempt.uploaded_body_bytes) encoded["uploaded_body_bytes"] = *attempt.uploaded_body_bytes;
+    if (attempt.state) encoded["attempt_state"] = static_cast<int>(*attempt.state);
+    if (attempt.http_status) encoded["http_status"] = *attempt.http_status;
     if (attempt.provider_usage) {
         auto reported = Json::object();
         for (const auto& [field, count] : *attempt.provider_usage) {
@@ -301,6 +303,14 @@ ModelAttempt decode_attempt(const Json& value) {
             value.contains("first_byte_us") ? count("first_byte_us") : std::nullopt};
     if (value.contains("request_number")) attempt.request_number = count("request_number");
     if (value.contains("uploaded_body_bytes")) attempt.uploaded_body_bytes = count("uploaded_body_bytes");
+    if (value.contains("attempt_state")) {
+        const auto state = value.at("attempt_state").get<int>();
+        if (state < 0 || state > static_cast<int>(AttemptState::response)) {
+            throw std::runtime_error("invalid stored model attempt state");
+        }
+        attempt.state = static_cast<AttemptState>(state);
+    }
+    if (value.contains("http_status")) attempt.http_status = count("http_status");
     if (const auto reported = value.find("provider_usage"); reported != value.end()) {
         if (!reported->is_object()) throw std::runtime_error("invalid stored provider usage");
         attempt.provider_usage.emplace();
@@ -333,6 +343,9 @@ std::string encode_session(const Session& session) {
             if (!record.result.observed_utc.empty()) {
                 tools.back()["observed_utc"] = record.result.observed_utc;
             }
+            if (record.result.file_failure) {
+                tools.back()["file_failure"] = static_cast<int>(*record.result.file_failure);
+            }
             if (record.verification) {
                 tools.back()["verification"] = encode_verification(*record.verification);
             }
@@ -363,6 +376,9 @@ std::string encode_session(const Session& session) {
             {"closed", !current || task_closed(session)}});
         if (task.active_ms) {
             tasks.back()["active_ms"] = task.active_ms;
+        }
+        if (task.approval_wait_ms) {
+            tasks.back()["approval_wait_ms"] = *task.approval_wait_ms;
         }
         if (task.supplement) {
             const auto& input = *task.supplement;
@@ -398,7 +414,7 @@ Session decode_session(std::string_view payload, std::int64_t version = current_
     session.requests = json.at("requests");
     session.dispatches = json.at("dispatches");
     const auto stop = json.at("stop").get<int>();
-    if (stop < 0 || stop > static_cast<int>(SessionStop::context_limit)) {
+    if (stop < 0 || stop > static_cast<int>(SessionStop::repeated_file_failure)) {
         throw std::runtime_error("invalid stored session stop reason");
     }
     session.stop = static_cast<SessionStop>(stop);
@@ -425,6 +441,15 @@ Session decode_session(std::string_view payload, std::int64_t version = current_
             }
             record.result = {static_cast<ToolStatus>(status), item.at("result"), item.at("version"),
                              item.value("observed_utc", std::string{})};
+            if (item.contains("file_failure")) {
+                const auto failure = item.at("file_failure").get<int>();
+                if (failure < static_cast<int>(FileFailure::unsupported_text) ||
+                    failure > static_cast<int>(FileFailure::fragment_ambiguous) ||
+                    record.result.status != ToolStatus::failed || record.result.version.empty()) {
+                    throw std::runtime_error("invalid stored file failure");
+                }
+                record.result.file_failure = static_cast<FileFailure>(failure);
+            }
             for (const auto& arg : item.at("arguments")) {
                 record.call.arguments.push_back({arg.at(0), decode_argument(arg)});
             }
@@ -468,12 +493,15 @@ Session decode_session(std::string_view payload, std::int64_t version = current_
         Task task{item.at("question"), item.at("first_round"), item.at("first_request"),
                   item.at("first_dispatch"), item.at("allow_edit")};
         task.active_ms = item.value("active_ms", std::size_t{0});
+        if (item.contains("approval_wait_ms")) {
+            task.approval_wait_ms = item.at("approval_wait_ms").get<std::size_t>();
+        }
         const auto code = item.at("stop").get<int>();
         const bool closed = item.at("closed");
         if (item.at("id") != i + 1 || task.question.empty() || item.at("end_round") != end ||
             task.first_round > end || end > session.rounds.size() ||
             task.first_request > session.requests || task.first_dispatch > session.dispatches ||
-            code < 0 || code > static_cast<int>(SessionStop::context_limit) ||
+            code < 0 || code > static_cast<int>(SessionStop::repeated_file_failure) ||
             (i == 0 && (task.first_round || task.first_request || task.first_dispatch || task.question != session.question)) ||
             (i != 0 && (task.first_request < session.tasks.back().first_request ||
                         task.first_dispatch < session.tasks.back().first_dispatch)) ||
