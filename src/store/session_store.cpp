@@ -1,4 +1,5 @@
 #include "store/session_store.hpp"
+#include "core/utf8.hpp"
 #include "platform/crypto.hpp"
 #include "platform/workspace.hpp"
 #ifdef LAY_BENCHMARK_METRICS
@@ -29,7 +30,12 @@ namespace {
 
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
-constexpr std::int64_t current_format = 3;
+constexpr auto current_format = SessionStore::format_version;
+
+bool valid_supplement(std::string_view text) {
+    return text.size() <= TaskSupplement::max_bytes && text.find_first_not_of(" \t\r\n") != text.npos &&
+        text.find('\0') == text.npos && valid_utf8(text);
+}
 
 std::string utf8(const fs::path& path) {
     const auto bytes = path.u8string();
@@ -358,6 +364,12 @@ std::string encode_session(const Session& session) {
         if (task.active_ms) {
             tasks.back()["active_ms"] = task.active_ms;
         }
+        if (task.supplement) {
+            const auto& input = *task.supplement;
+            tasks.back()["supplement"] = {{"id", supplement_id(i + 1)}, {"task_id", i + 1},
+                {"sequence", TaskSupplement::sequence}, {"text", input.text}, {"saved_revision", input.saved_revision},
+                {"before_round", input.before_round ? Json(*input.before_round) : Json(nullptr)}};
+        }
     }
     return Json{{"question", session.question}, {"rounds", std::move(rounds)}, {"requests", session.requests},
                 {"dispatches", session.dispatches}, {"stop", static_cast<int>(session.stop)},
@@ -379,7 +391,7 @@ ArgumentValue decode_argument(const Json& item) {
     }
 }
 
-Session decode_session(std::string_view payload, bool legacy = false) {
+Session decode_session(std::string_view payload, std::int64_t version = current_format) {
     const auto json = Json::parse(payload);
     Session session;
     session.question = json.at("question");
@@ -441,7 +453,7 @@ Session decode_session(std::string_view payload, bool legacy = false) {
         }
         session.rounds.push_back(std::move(round));
     }
-    if (legacy) {
+    if (version <= 2) {
         session.tasks.push_back({session.question});
         return session;
     }
@@ -471,6 +483,18 @@ Session decode_session(std::string_view payload, bool legacy = false) {
         }
         if (!current) {
             task.ended = static_cast<SessionStop>(code);
+        }
+        if (item.contains("supplement")) {
+            const auto& saved = item.at("supplement");
+            TaskSupplement input{saved.at("text"), saved.at("saved_revision")};
+            if (!saved.at("before_round").is_null()) input.before_round = saved.at("before_round").get<std::size_t>();
+            if (version < current_format || saved.at("id") != supplement_id(i + 1) || saved.at("task_id") != i + 1 ||
+                saved.at("sequence") != TaskSupplement::sequence || !valid_supplement(input.text) ||
+                input.saved_revision <= 0 ||
+                (input.before_round && (*input.before_round < task.first_round || *input.before_round > end))) {
+                throw std::runtime_error("invalid stored task supplement");
+            }
+            task.supplement = std::move(input);
         }
         session.tasks.push_back(std::move(task));
     }
@@ -502,6 +526,11 @@ std::int64_t format(sqlite3* db) {
     Statement query(db, "PRAGMA user_version");
     query.step(SQLITE_ROW);
     return query.integer(0);
+}
+
+void set_current_format(sqlite3* db) {
+    const auto query = "PRAGMA user_version=" + std::to_string(current_format);
+    sql(db, query.c_str());
 }
 
 void verify_database(sqlite3* db) {
@@ -555,7 +584,7 @@ struct SessionStore::Impl {
         db = connect(path, question.has_value());
         auto* connection = db.get();
         const auto version = format(connection);
-        if (!question && (version == 1 || version == 2)) {
+        if (!question && version >= 1 && version < current_format) {
             throw std::runtime_error("This session requires offline migration with --migrate-session ID.");
         }
         if (version != (question ? 0 : current_format)) {
@@ -567,7 +596,7 @@ struct SessionStore::Impl {
             sql(connection, "CREATE TABLE session(id INTEGER PRIMARY KEY CHECK(id=1), scope TEXT NOT NULL,"
                             " revision INTEGER NOT NULL, snapshot TEXT NOT NULL) STRICT");
             sql(connection, "CREATE TABLE checkpoints(revision INTEGER PRIMARY KEY, phase TEXT NOT NULL) STRICT");
-            sql(connection, "PRAGMA user_version=3");
+            set_current_format(connection);
             Session initial;
             initial.question = *question;
             initial.tasks.push_back({initial.question});
@@ -602,7 +631,42 @@ SessionStore::~SessionStore() = default;
 Session SessionStore::load() const {
     Statement session(state_->db.get(), "SELECT snapshot FROM session WHERE id=1");
     session.step(SQLITE_ROW);
-    return decode_session(session.text(0));
+    auto snapshot = decode_session(session.text(0));
+    std::int64_t previous = 0;
+    for (const auto& task : snapshot.tasks) {
+        if (!task.supplement) continue;
+        const auto saved_revision = task.supplement->saved_revision;
+        if (saved_revision <= previous || saved_revision > revision()) {
+            throw std::runtime_error("invalid saved supplement revision");
+        }
+        previous = saved_revision;
+    }
+    return snapshot;
+}
+
+void SessionStore::save_supplement(Session& session, std::size_t task_id, std::string text) {
+    if (task_id == 0 || task_id != session.tasks.size()) {
+        throw std::invalid_argument("A supplement must identify the current task.");
+    }
+    if (!valid_supplement(text)) {
+        throw std::invalid_argument("A supplement requires nonblank UTF-8 text of at most 4096 bytes.");
+    }
+    auto& input = session.tasks.back().supplement;
+    if (input) {
+        if (input->text == text) return;
+        throw std::invalid_argument("The current task already has a saved supplement.");
+    }
+    if (!task_actions(session).resume) {
+        throw std::invalid_argument("This task cannot accept a supplement. Review its saved state.");
+    }
+    const auto before = revision();
+    input.emplace(TaskSupplement{std::move(text), before + 1});
+    try {
+        save(session, "supplement");
+    } catch (...) {
+        if (revision() == before) input.reset();
+        throw;
+    }
 }
 
 std::string SessionStore::migrate(std::string_view id) {
@@ -618,7 +682,7 @@ std::string SessionStore::migrate(std::string_view id) {
     if (version == current_format) {
         return {};
     }
-    if (version != 1 && version != 2) {
+    if (version < 1 || version >= current_format) {
         throw std::runtime_error("unsupported session database format");
     }
     sql(db.get(), "PRAGMA trusted_schema=OFF");
@@ -633,7 +697,7 @@ std::string SessionStore::migrate(std::string_view id) {
         scope = input.text(1);
         revision = input.integer(2);
     }
-    const auto snapshot = decode_session(original, true);
+    const auto snapshot = decode_session(original, version);
     const auto source_version = std::to_string(version);
     const auto backup_path = directory / (name + ".v" + source_version + "-" + platform::random_suffix() + ".sqlite3");
     reserve_backup(backup_path);
@@ -671,9 +735,9 @@ std::string SessionStore::migrate(std::string_view id) {
     }
     Statement checkpoint(db.get(), "INSERT INTO checkpoints VALUES(?, ?)");
     checkpoint.bind(1, revision + 1);
-    checkpoint.bind(2, "migrated_v" + source_version + "_to_v3");
+    checkpoint.bind(2, "migrated_v" + source_version + "_to_v" + std::to_string(current_format));
     checkpoint.step(SQLITE_DONE);
-    sql(db.get(), "PRAGMA user_version=3");
+    set_current_format(db.get());
     verify_database(db.get());
     transaction.commit();
     return utf8(backup_path);

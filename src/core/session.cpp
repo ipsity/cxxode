@@ -253,6 +253,18 @@ bool task_closed(const Session& session) {
         session.stop == SessionStop::time_limit;
 }
 
+std::string supplement_id(std::size_t task_id) {
+    return "task-" + std::to_string(task_id) + "-input-" + std::to_string(TaskSupplement::sequence);
+}
+
+std::string supplement_receipt(const TaskSupplement& supplement, std::size_t task_id, bool closed) {
+    auto receipt = "[supplement " + supplement_id(task_id) + "] saved at revision " +
+        std::to_string(supplement.saved_revision);
+    if (supplement.before_round) return receipt + " / included before round " +
+        std::to_string(*supplement.before_round + 1);
+    return receipt + (closed ? " / task closed before inclusion" : " / pending");
+}
+
 TaskActions task_actions(const Session& session) {
     if (session.tasks.empty() || session.stop == SessionStop::storage_error) return {};
     const auto active = std::span(session.rounds).subspan(session.tasks.back().first_round);
@@ -266,7 +278,7 @@ TaskActions task_actions(const Session& session) {
     }
     if (task_closed(session)) return {.follow_up = !pending};
     if (session.stop == SessionStop::effect_unknown) return {.acknowledge_unknown = true};
-    return {.resume = true, .close = true};
+    return {.resume = !session.tasks.back().supplement, .close = true};
 }
 
 void close_task(Session& session) {
@@ -330,6 +342,8 @@ Session continue_session(Session session, const Generate& generate, const Execut
         if (session.finished || session.stop == SessionStop::effect_unknown || session.stop == SessionStop::time_limit) {
             return session;
         }
+        // A saved supplement needs an explicit request boundary before this task can resume.
+        if (task && task->supplement) return session;
         session.stop = SessionStop::end_turn;
         session.diagnostic.clear();
         while (true) {

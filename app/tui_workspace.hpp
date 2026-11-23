@@ -25,6 +25,7 @@ struct Transcript {
     std::int64_t revision;
     bool storage_failed;
     std::string saved_edit{};
+    bool supplement_pending = false;
 };
 
 struct Review {

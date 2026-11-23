@@ -39,6 +39,7 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
     Transcript output{{}, snapshot.tasks.size(), task_closed(snapshot), snapshot.stop,
                       safe_text(snapshot.diagnostic, ascii), task_actions(snapshot), checkpoint.revision,
                       !checkpoint.storage_error.empty()};
+    output.supplement_pending = !snapshot.tasks.empty() && snapshot.tasks.back().supplement && !output.closed;
     const auto current_revision = edit_revision(snapshot);
     const auto add = [&](std::string title, std::string_view detail) {
         output.cards.push_back({safe_text(title, ascii), safe_text(detail, ascii, true)});
@@ -106,6 +107,17 @@ Transcript project(const Session& snapshot, bool ascii, const std::vector<std::v
     }
     tasks_at(snapshot.rounds.size());
     for (const auto& note : edits) add(short_line(note), note);
+    for (std::size_t i = 0; i < snapshot.tasks.size(); ++i) {
+        if (const auto& input = snapshot.tasks[i].supplement) {
+            const bool closed = i + 1 < snapshot.tasks.size() || output.closed;
+            const auto receipt = supplement_receipt(*input, i + 1, closed);
+            auto title = receipt;
+            if (!ascii && !input->before_round) {
+                title = std::string(closed ? "补充已保存 · 任务已结清 " : "补充已保存 · 等待处理 ") + supplement_id(i + 1);
+            }
+            add(std::move(title), receipt + '\n' + input->text);
+        }
+    }
     if (!checkpoint.observed_reply.empty()) {
         const auto label = ascii ? "Unsaved reply / " : "回复尚未保存 · ";
         add(std::string(label) + short_line(checkpoint.observed_reply), checkpoint.observed_reply);

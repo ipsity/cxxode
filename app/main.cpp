@@ -66,6 +66,9 @@ struct Options {
     std::vector<std::string> writable;
     std::optional<std::string> question;
     std::optional<std::string> follow_up;
+#ifdef LAY_TEST_HOOKS
+    std::optional<std::string> test_supplement;
+#endif
     bool resume = false;
     bool accept_unknown = false;
     bool close_task = false;
@@ -163,10 +166,20 @@ Options options(std::span<const std::string> arguments, bool tui = false) {
             result.question = value;
         } else if (option == "--follow-up" && !result.follow_up) {
             result.follow_up = value;
+#ifdef LAY_TEST_HOOKS
+        } else if (option == "--test-supplement" && !result.test_supplement) {
+            result.test_supplement = value;
+#endif
         } else {
             throw std::invalid_argument("Invalid, duplicate or excessive workspace option.");
         }
     }
+#ifdef LAY_TEST_HOOKS
+    if (result.test_supplement && (tui || !result.resume || result.accept_unknown || result.close_task ||
+        result.list_models || result.set_provider_key || result.id.empty())) {
+        throw std::invalid_argument("The supplement fixture requires the line CLI with --resume.");
+    }
+#endif
     if (result.list_models || result.set_provider_key) {
         if ((result.list_models && result.set_provider_key) || !result.workspace.empty() || !result.model.empty() ||
             !result.excluded.empty() || !result.id.empty() || !result.writable.empty() || result.question ||
@@ -465,6 +478,14 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
 #endif
     }
     show_tasks(session.rounds.size());
+    for (std::size_t i = 0; i < session.tasks.size(); ++i) {
+        if (const auto& input = session.tasks[i].supplement) {
+            terminal_text(lay::supplement_receipt(*input, i + 1, i + 1 < session.tasks.size() || lay::task_closed(session)));
+            std::cout << '\n';
+            terminal_text(input->text);
+            std::cout << '\n';
+        }
+    }
     for (const auto& attempt : session.model_attempts) {
         if (attempt.first_round > 0) {
             std::cout << "[context] " << attempt.first_round << " older rounds projected as host facts. "
@@ -472,7 +493,10 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
                       << attempt.body_bytes << '/' << attempt.budget_bytes << " bytes)\n";
         }
     }
-    std::cout << "[session] " << lay::name(session.stop) << " requests=" << session.requests
+    const bool pending_supplement = !session.tasks.empty() && session.tasks.back().supplement && !lay::task_closed(session);
+    const auto reason = pending_supplement && session.stop == lay::SessionStop::end_turn
+        ? "supplement_pending" : lay::name(session.stop);
+    std::cout << "[session] " << reason << " requests=" << session.requests
               << " dispatches=" << session.dispatches;
     if (!session.diagnostic.empty()) {
         std::cout << " ";
@@ -482,7 +506,7 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
     if (session.stop == lay::SessionStop::cancelled) {
         return 130;
     }
-    return session.stop == lay::SessionStop::end_turn ? 0 : 1;
+    return session.stop == lay::SessionStop::end_turn && !pending_supplement ? 0 : 1;
 }
 
 #ifdef LAY_WITH_ANTHROPIC
@@ -659,10 +683,11 @@ lay::StoreCheckpoint test_checkpoint() {
 #ifdef LAY_TEST_HOOKS
     return [](std::string_view stage, std::string_view point, const lay::Session& snapshot) {
         const bool has_tool = !snapshot.rounds.empty() && !snapshot.rounds.back().tools.empty();
-        if (point != "follow_up" && !(point == "reply" && snapshot.finished) && !has_tool) {
+        const bool standalone = point == "follow_up" || point == "supplement" || point == "supplement_resume";
+        if (!standalone && !(point == "reply" && snapshot.finished) && !has_tool) {
             return false;
         }
-        const auto name = std::string(stage) + "_" + (point == "follow_up" || !has_tool ? "" :
+        const auto name = std::string(stage) + "_" + (standalone || !has_tool ? "" :
             snapshot.rounds.back().tools.back().call.name + "_") + std::string(point);
         if (const auto* full = std::getenv("LAY_TEST_FULL"); full && name == full) {
             return true;
@@ -834,6 +859,13 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     }
     lay::SessionStore store(settings.id, scope, std::move(question), test_checkpoint());
     auto session = store.load();
+#ifdef LAY_TEST_HOOKS
+    if (settings.test_supplement) {
+        store.save_supplement(session, session.tasks.size(), *settings.test_supplement);
+        finish(std::move(session), {store.revision()});
+        return 0;
+    }
+#endif
     if (settings.follow_up) {
         lay::append_task(session, question_input(*settings.follow_up), !settings.no_write);
         store.save(session, "follow_up");
@@ -970,6 +1002,11 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         finish(std::move(session), {store.revision()});
         return 0;
     }
+#ifdef LAY_TEST_HOOKS
+    if (session.tasks.back().supplement && !lay::task_closed(session)) {
+        test_checkpoint()("before", "supplement_resume", session);
+    }
+#endif
     lay::Generate model;
     if (settings.model == "fixture-verify") {
         model = fixture_verify_model(settings.writable.front());
@@ -1102,9 +1139,9 @@ int run(std::span<const std::string> arguments) {
         if (arguments.size() == 2 && arguments[0] == "--migrate-session") {
             const auto backup = lay::SessionStore::migrate(arguments[1]);
             if (backup.empty()) {
-                std::cout << "Session format 3 is already current.\n";
+                std::cout << "Session format " << lay::SessionStore::format_version << " is already current.\n";
             } else {
-                std::cout << "Migrated session to format 3. Backup ";
+                std::cout << "Migrated session to format " << lay::SessionStore::format_version << ". Backup ";
                 terminal_text(backup);
                 std::cout << '\n';
             }

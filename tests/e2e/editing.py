@@ -282,11 +282,11 @@ def cases(base, cli, driver):
     future = new("future")
     future.command(data=b"fix fixture\nn\n")
     with closing(sqlite3.connect(future.db)) as db:
-        db.execute("PRAGMA user_version=4")
+        db.execute("PRAGMA user_version=5")
         db.commit()
     assert "unsupported session database format" in future.command(2, resume=True, data=b"")
     with closing(sqlite3.connect(future.db)) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
 
     migration = new("migration")
     process = migration.paused("after_edit_dispatch")
@@ -308,7 +308,7 @@ def cases(base, cli, driver):
     assert "--migrate-session" in migration.command(2, resume=True, data=b"", driver=False)
     migrated = subprocess.run([cli, "--migrate-session", "migration"], env=migration.env,
                               capture_output=True, timeout=5)
-    assert migrated.returncode == 0 and b"Migrated session to format 3" in migrated.stdout, migrated
+    assert migrated.returncode == 0 and b"Migrated session to format 4" in migrated.stdout, migrated
     backup, = migration.db.parent.glob("session-migration.v1-*.sqlite3")
     with closing(sqlite3.connect(backup)) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 1
@@ -318,7 +318,7 @@ def cases(base, cli, driver):
     tasks = updated.pop("tasks")
     assert tasks[0]["id"] == 1 and tasks[0]["question"] == old["question"] and not tasks[0]["closed"]
     assert updated.pop("model_attempts") == [] and updated == old
-    assert phases == checkpoints + ["migrated_v1_to_v3"]
+    assert phases == checkpoints + ["migrated_v1_to_v4"]
     assert "effect_unknown" in migration.command(1, resume=True, data=b"", driver=False)
     assert migration.file.read_bytes() == OLD and migration.saved()[1].count("dispatch") == 2
     assert "effect_unknown" in migration.command(2, extra=("--follow-up", "Inspect recovered file"), data=b"")

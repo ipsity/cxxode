@@ -23,6 +23,7 @@ using StoreCheckpoint = std::function<bool(std::string_view stage, std::string_v
 
 class SessionStore {
 public:
+    static constexpr std::int64_t format_version = 4;
     SessionStore(std::string_view id, const SessionScope& scope, std::optional<std::string> question,
                  StoreCheckpoint checkpoint = {});
     ~SessionStore();
@@ -30,6 +31,7 @@ public:
     Session load() const;
     std::int64_t revision() const;
     void save(const Session& session, std::string_view point);
+    void save_supplement(Session& session, std::size_t task_id, std::string text);
     static std::string migrate(std::string_view id);
 
 private:

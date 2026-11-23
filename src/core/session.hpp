@@ -4,6 +4,7 @@
 #include "core/process.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -86,6 +87,15 @@ struct ModelAttempt {
     bool operator==(const ModelAttempt&) const = default;
 };
 
+struct TaskSupplement {
+    static constexpr std::size_t sequence = 2;
+    static constexpr std::size_t max_bytes = 4096;
+    std::string text;
+    std::int64_t saved_revision;
+    std::optional<std::size_t> before_round{};
+    bool operator==(const TaskSupplement&) const = default;
+};
+
 struct Task {
     std::string question;
     std::size_t first_round = 0;
@@ -94,6 +104,7 @@ struct Task {
     bool allow_edit = true;
     std::optional<SessionStop> ended{};
     std::size_t active_ms = 0;
+    std::optional<TaskSupplement> supplement{};
     bool operator==(const Task&) const = default;
 };
 
@@ -180,6 +191,8 @@ Session continue_session(Session session, const Generate& generate, const Execut
                          const AuthorizeTool& authorize, const SessionJournal& journal);
 void append_task(Session& session, std::string question, bool allow_edit);
 TaskActions task_actions(const Session& session);
+std::string supplement_id(std::size_t task_id);
+std::string supplement_receipt(const TaskSupplement& supplement, std::size_t task_id, bool closed);
 void close_task(Session& session);
 void recover_session(Session& session, const SessionJournal& journal);
 bool task_closed(const Session& session);

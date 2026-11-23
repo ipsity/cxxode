@@ -628,6 +628,8 @@ private:
             notice_ = label("草稿未发送 · 先核对未知效果", "Draft unsent / Check unknown effects");
         } else if (view_.transcript && view_.transcript->actions.resume) {
             notice_ = label("草稿未发送 · F5 继续原任务", "Draft unsent / F5 continues the task");
+        } else if (view_.transcript && view_.transcript->actions.close) {
+            notice_ = label("补充等待处理 · F3 可结束任务", "Supplement pending / F3 ends the task");
         } else if (view_.transcript && !view_.transcript->actions.follow_up) {
             notice_ = label("草稿未发送，请重开会话。", "Draft unsent. Reopen the session.");
         } else if (draft_.text.find_first_not_of(' ') == draft_.text.npos) {
@@ -688,6 +690,9 @@ private:
             return std::string(view_.transcript->closed ? label("效果未知 · 已结清", "Effect unknown / Closed") :
                                                         label("效果未知 · 等待核对", "Effect unknown / Check result"));
         }
+        if (view_.transcript->supplement_pending) {
+            return std::string(label("任务暂停 · 补充待处理", "Task paused / Supplement pending"));
+        }
         if (view_.transcript->stop == SessionStop::cancelled) return std::string(label("已停止", "Stopped"));
         if (view_.transcript->closed && view_.transcript->stop == SessionStop::end_turn) {
             return std::string(label("已完成 · 已保存版本 ", "Complete / Saved revision ")) +
@@ -709,6 +714,9 @@ private:
         }
         if (view_.transcript && view_.transcript->actions.resume) {
             return label("F5 继续原任务 · F3 结束任务", "F5 continue task / F3 end task");
+        }
+        if (view_.transcript && view_.transcript->actions.close) {
+            return label("F3 结束任务并保留已保存结果", "F3 ends the task and keeps saved results");
         }
         return label("F2 提交草稿 · Enter 保留草稿", "F2 submits draft. Enter keeps editing.");
     }
