@@ -4,6 +4,8 @@
 
 namespace lay {
 
+class ReadOnlyWorkspace;
+
 struct SourceCitation {
     std::string path;
     std::string line;
@@ -16,5 +18,7 @@ struct SourceCitation {
 };
 
 std::vector<SourceCitation> source_citations(const Session& session, std::size_t answer_round);
+std::vector<std::string> source_evidence(const Session& session, std::size_t answer_round,
+                                         const ReadOnlyWorkspace& workspace);
 
 } // namespace lay

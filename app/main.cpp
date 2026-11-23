@@ -344,18 +344,14 @@ void show_command(const lay::RunEvidence& run) {
 void show_verification(const lay::RunEvidence& run, const lay::Verification& verification,
                        std::size_t current_revision) {
     const auto& process = verification.process;
-    std::cout << "[verification] " << lay::describe(process.status, process.code)
-              << " at edit revision " << run.edit_revision;
-    if (run.edit_revision < current_revision) {
-        std::cout << " (earlier workspace revision)";
-    }
-    std::cout << '\n';
+    std::cout << "[verification] " << lay::verification_reference(verification, run, current_revision) << '\n';
     show_command(run);
     std::cout << "  elapsed " << process.elapsed_ms << " ms";
     if (!verification.observed_utc.empty()) {
         std::cout << "  observed " << verification.observed_utc;
     }
     std::cout << '\n';
+    std::cout << "  " << lay::verification_scope << '\n';
     for (const auto& [name, stream] : {std::pair{"stdout", &process.stdout_text},
                                         std::pair{"stderr", &process.stderr_text}}) {
         std::cout << "  " << name << ' ' << stream->total_bytes << " bytes, "
@@ -381,26 +377,6 @@ void show_verification(const lay::RunEvidence& run, const lay::Verification& ver
     }
 }
 
-void show_citations(const lay::Session& session, std::size_t round, const lay::ReadOnlyWorkspace& workspace) {
-    for (const auto& source : lay::source_citations(session, round)) {
-        const bool historical = source.historical ||
-            (!session.tasks.empty() && !workspace.matches_file_version(source.path, source.version));
-        if (!historical && !source.inline_form) {
-            std::cout << "[citation] ";
-            terminal_text(source.path);
-            std::cout << ':' << source.line << '\n';
-        }
-        if (session.tasks.size() > 1 || (historical && !session.tasks.empty())) {
-            std::cout << (historical ? "[historical citation] " : "[citation source] ");
-            terminal_text(source.path);
-            std::cout << ':' << source.line << " task=" << source.task << " round=" << source.round << " version=";
-            terminal_text(source.version.empty() ? "unknown" : source.version);
-            std::cout << " observed=";
-            terminal_text(source.observed_utc.empty() ? "unknown" : source.observed_utc);
-            std::cout << '\n';
-        }
-    }
-}
 #endif
 
 int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_workspace = nullptr) {
@@ -466,12 +442,11 @@ int render(const lay::Session& session, const lay::ReadOnlyWorkspace* source_wor
             }
         }
 #ifdef LAY_WITH_ANTHROPIC
-        const bool archived = task > 0 && task < session.tasks.size();
-        const auto end = archived ? session.tasks[task].first_round : session.rounds.size();
-        const bool answered = archived ? session.tasks[task - 1].ended == lay::SessionStop::end_turn :
-            session.finished && session.stop == lay::SessionStop::end_turn;
-        if (source_workspace && answered && i + 1 == end && !round.text.empty() && round.tools.empty()) {
-            show_citations(session, i, *source_workspace);
+        if (source_workspace) {
+            for (const auto& note : lay::source_evidence(session, i, *source_workspace)) {
+                terminal_text(note);
+                std::cout << '\n';
+            }
         }
 #endif
     }
@@ -740,6 +715,16 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
     }
     const auto root = lay::platform::path_from_utf8(settings.workspace);
     const lay::ReadOnlyWorkspace workspace(root, settings.excluded, editing, persistent);
+    const auto publish = [&](const lay::Session& snapshot, std::string_view point) {
+        if (!port) return;
+        if (point == "loaded" || point == "finished") {
+            port->checkpoint(snapshot, point, [&](std::size_t round) {
+                return lay::source_evidence(snapshot, round, workspace);
+            });
+        } else {
+            port->checkpoint(snapshot, point, {});
+        }
+    };
     const auto read = [&](const lay::ToolCall& call) { return workspace.execute(call, cancel); };
     const auto authorize = [&](const lay::ToolCall& call) { return workspace.authorize(call); };
     const auto activate = [&](std::size_t used_ms = 0) {
@@ -760,7 +745,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             session.stop = lay::SessionStop::time_limit;
         }
         if (port) {
-            port->checkpoint(session, "finished");
+            publish(session, "finished");
             return 0;
         }
         return render(session, &workspace);
@@ -824,7 +809,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
         store.save(session, "follow_up");
         show_scope();
     }
-    if (port) port->checkpoint(session, "loaded");
+    publish(session, "loaded");
     if (settings.accept_unknown) {
         if (session.stop != lay::SessionStop::effect_unknown || session.finished) {
             throw std::invalid_argument("Resume and review the unknown effect before accepting it.");
@@ -893,7 +878,7 @@ int run_workspace(const Options& settings, const lay::tui::WorkspacePort* port =
             }
         }
         store.save(snapshot, point);
-        if (port) port->checkpoint(snapshot, point);
+        publish(snapshot, point);
     };
     if (editor) {
         journal.prepare_edit = [&](const auto& call, const auto& snapshot) {

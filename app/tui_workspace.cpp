@@ -34,7 +34,7 @@ void captured(std::string& detail, std::string_view name, const CapturedOutput& 
     detail += output.tail;
 }
 
-Transcript project(const Session& snapshot, bool ascii) {
+Transcript project(const Session& snapshot, bool ascii, const std::vector<std::vector<std::string>>& source_notes) {
     Transcript output{{}, snapshot.tasks.size(), task_closed(snapshot), snapshot.stop,
                       safe_text(snapshot.diagnostic, ascii)};
     const auto current_revision = edit_revision(snapshot);
@@ -67,15 +67,15 @@ Transcript project(const Session& snapshot, bool ascii) {
             if (tool.verification && tool.run) {
                 const auto& result = *tool.verification;
                 title += "  " + describe(result.process.status, result.process.code);
-                detail += "\n" + describe(result.process.status, result.process.code) +
-                    " · edit revision " + std::to_string(tool.run->edit_revision);
-                if (tool.run->edit_revision < current_revision) detail += " (earlier workspace revision)";
+                detail += "\n" + verification_reference(result, *tool.run, current_revision);
                 if (!result.test_summary.empty()) {
                     title += " · " + result.test_summary;
                     detail += "\n" + result.test_summary;
                 }
                 if (!result.process.diagnostic.empty()) detail += "\n" + result.process.diagnostic;
-                if (!result.observed_utc.empty()) detail += "\n" + result.observed_utc;
+                if (!result.observed_utc.empty()) detail += "\nobserved " + result.observed_utc;
+                detail += "\n";
+                detail += verification_scope;
                 captured(detail, "stdout", result.process.stdout_text);
                 captured(detail, "stderr", result.process.stderr_text);
             } else {
@@ -90,6 +90,9 @@ Transcript project(const Session& snapshot, bool ascii) {
             auto detail = std::string(text);
             if (text.size() < item.text.size()) detail += "\n[full reply in saved session]";
             add((ascii ? "Assistant  " : "助手  ") + short_line(text), detail);
+            if (round < source_notes.size()) {
+                for (const auto& note : source_notes[round]) add(short_line(note), note);
+            }
         }
     }
     tasks_at(snapshot.rounds.size());
@@ -176,9 +179,15 @@ void WorkspaceWorker::decide(std::size_t ticket, bool approved) {
     ready_.notify_one();
 }
 
-void WorkspaceWorker::publish(const Session& snapshot, std::string_view point) {
+void WorkspaceWorker::publish(const Session& snapshot, std::string_view point,
+                              const std::function<std::vector<std::string>(std::size_t)>& citations) {
+    if (citations) {
+        std::vector<std::vector<std::string>> notes;
+        for (std::size_t i = 0; i < snapshot.rounds.size(); ++i) notes.push_back(citations(i));
+        source_notes_ = std::move(notes);
+    }
     // A request changes the preview and counters only. Keep the committed cards.
-    auto transcript = point == "request" ? nullptr : std::make_shared<Transcript>(project(snapshot, ascii_));
+    auto transcript = point == "request" ? nullptr : std::make_shared<Transcript>(project(snapshot, ascii_, source_notes_));
     const std::lock_guard lock(mutex_);
     view_.preview.clear();
     view_.requesting = point == "request";
@@ -201,8 +210,8 @@ std::optional<bool> WorkspaceWorker::review(std::size_t task, const ToolCall& ca
 void WorkspaceWorker::execute(const WorkspaceCommand& command) {
     const WorkspacePort port{
         [&] { return cancelled_.load(std::memory_order_relaxed); },
-        [&](const Session& session, std::string_view point) {
-            try { publish(session, point); } catch (...) {}
+        [&](const Session& session, std::string_view point, const auto& citations) {
+            try { publish(session, point, citations); } catch (...) {}
         },
         [&](std::string_view text) {
             auto scope = safe_text(text, ascii_);

@@ -1,4 +1,5 @@
 #include "tools/citations.hpp"
+#include "tools/read_only.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -188,6 +189,32 @@ std::vector<SourceCitation> source_citations(const Session& session, std::size_t
         }
     }
     return citations;
+}
+
+std::vector<std::string> source_evidence(const Session& session, std::size_t answer_round,
+                                         const ReadOnlyWorkspace& workspace) {
+    const auto& round = session.rounds[answer_round];
+    const auto next = std::ranges::upper_bound(session.tasks, answer_round, {}, &Task::first_round);
+    const bool archived = next != session.tasks.end() && next != session.tasks.begin();
+    const auto end = archived ? next->first_round : session.rounds.size();
+    const bool answered = archived ? (next - 1)->ended == SessionStop::end_turn :
+        session.finished && session.stop == SessionStop::end_turn;
+    if (!answered || answer_round + 1 != end || round.text.empty() || !round.tools.empty()) return {};
+
+    std::vector<std::string> output;
+    for (const auto& source : source_citations(session, answer_round)) {
+        const bool historical = source.historical ||
+            (!session.tasks.empty() && !workspace.matches_file_version(source.path, source.version));
+        const auto reference = source.path + ':' + source.line;
+        if (!historical && !source.inline_form) output.push_back("[citation] " + reference);
+        if (session.tasks.size() > 1 || (historical && !session.tasks.empty())) {
+            output.push_back(std::string(historical ? "[historical citation] " : "[citation source] ") +
+                reference + " task=" + std::to_string(source.task) + " round=" + std::to_string(source.round) +
+                " version=" + std::string(source.version.empty() ? "unknown" : source.version) +
+                " observed=" + std::string(source.observed_utc.empty() ? "unknown" : source.observed_utc));
+        }
+    }
+    return output;
 }
 
 } // namespace lay

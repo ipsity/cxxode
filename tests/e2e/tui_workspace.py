@@ -327,6 +327,77 @@ def previews(base, cli):
             server.shutdown()
 
 
+class EvidenceFixture(BaseHTTPRequestHandler):
+    def log_message(self, *_):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        index = self.server.requests
+        self.server.requests += 1
+        path = self.server.filename
+        if index < 2:
+            action, args = ("run", {"program": "ctest", "args": ["-R", "^empty_config$"]}) if index == 0 else (
+                "read", {"path": path})
+            item = {"type": "function_call", "id": f"fc_evidence_{index}", "call_id": f"call_evidence_{index}",
+                    "name": action, "arguments": json.dumps(args, ensure_ascii=False)}
+        else:
+            item = {"type": "message", "id": "msg_evidence", "role": "assistant",
+                    "content": [{"type": "output_text", "text": f"配置依据是 `{path}:1`。"}]}
+        payload = {"type": "response.completed", "response": {"status": "completed", "output": [item]}}
+        encoded = f"data: {json.dumps(payload)}\n\n".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+
+def shared_evidence(base, cli, driver, cmake, ctest):
+    fixture = VerificationFixture(base, "evidence", cli, driver, cmake, ctest)
+    fixture.file.write_bytes(b"empty_config = allow\n")
+    fixture.args[fixture.args.index("fixture-verify")] = "fixture-evidence"
+    config = base / "evidence-provider.json"
+    with ThreadingHTTPServer(("127.0.0.1", 0), EvidenceFixture) as server:
+        server.requests = 0
+        server.filename = fixture.file.name
+        config.write_text(json.dumps({"default_provider": "relay", "providers": {"relay": {
+            "model": "fixture-evidence", "protocol": "responses", "api_key_env": None,
+            "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+        }}}))
+        fixture.args += ["--provider-config", str(config)]
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            fixture.command(data=b"Check this configuration and cite the source.\ny\n")
+            saved = fixture.saved()
+            run, read = [row["tools"][0] for row in saved[0]["rounds"][:2]]
+            observed = run["verification"]["observed_utc"]
+            fixture.file.write_bytes(b"empty_config = reject\n# externally changed\n")
+            line = fixture.command(resume=True, driver=False, data=b"")
+            reference = f"[historical citation] {fixture.file.name}:1 task=1 round=2"
+            version = read["version"]
+            summary = "CTest reported 1 passing test(s)."
+            assert reference + f" version={version}" in line
+            assert "command exited 0 at edit revision 0" in line and observed in line and summary in line
+            assert "Current workspace verification: unknown." in line
+            with console(cli, ["--tui", *fixture.args, "--resume", "--mono"], 32, 155, fixture.env) as terminal:
+                terminal.expect("已完成")
+                terminal.expect(reference + f" version={version[:24]}")
+                terminal.expect(read["observed_utc"])
+                terminal.send(ESC + "[H")
+                terminal.quiet()
+                terminal.send(ESC + "[B")
+                terminal.quiet()
+                terminal.key("\x0f", "command exited 0 at edit revision 0")
+                terminal.expect("observed " + observed)
+                terminal.expect(summary)
+                terminal.expect("Current workspace verification: unknown.")
+            assert fixture.saved() == saved and fixture.count() == 1 and server.requests == 3
+        finally:
+            server.shutdown()
+
+
 if __name__ == "__main__":
     if os.name == "nt":
         from tui import PtyProcess
@@ -340,4 +411,5 @@ if __name__ == "__main__":
         recovery(base, program, driver, cmake, ctest)
         cancel_running(base, program, driver, cmake, ctest)
         previews(base, program)
+        shared_evidence(base, program, driver, cmake, ctest)
     print("Verified TUI/CLI facts, fresh approval, cancellation, crash recovery and retry preview isolation.")

@@ -73,4 +73,9 @@ std::string verification_text(const Verification& result) {
     return text;
 }
 
+std::string verification_reference(const Verification& result, const RunEvidence& run, std::size_t current_revision) {
+    return describe(result.process.status, result.process.code) + " at edit revision " +
+        std::to_string(run.edit_revision) + (run.edit_revision < current_revision ? " (earlier workspace revision)" : "");
+}
+
 } // namespace lay

@@ -47,6 +47,8 @@ struct Verification {
 
 std::string describe(ProcessStatus status, std::int64_t code);
 std::string verification_text(const Verification& result);
+std::string verification_reference(const Verification& result, const RunEvidence& run, std::size_t current_revision);
+inline constexpr std::string_view verification_scope = "Current workspace verification: unknown.";
 std::string quoted_argument(std::string_view value);
 
 } // namespace lay

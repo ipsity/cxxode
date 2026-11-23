@@ -53,7 +53,8 @@ public:
     void decide(std::size_t ticket, bool approved);
 
 private:
-    void publish(const Session& snapshot, std::string_view point);
+    void publish(const Session& snapshot, std::string_view point,
+                 const std::function<std::vector<std::string>(std::size_t)>& citations);
     std::optional<bool> review(std::size_t task, const ToolCall& call, std::string title, std::string detail);
     void execute(const WorkspaceCommand& command);
 
@@ -65,6 +66,7 @@ private:
     std::atomic_bool cancelled_ = false;
     std::size_t tickets_ = 0;
     std::optional<bool> decision_;
+    std::vector<std::vector<std::string>> source_notes_;
     std::jthread thread_;
 };
 

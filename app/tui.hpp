@@ -21,7 +21,8 @@ struct WorkspaceCommand {
 
 struct WorkspacePort {
     StopRequested stopping;
-    std::function<void(const Session&, std::string_view)> checkpoint;
+    std::function<void(const Session&, std::string_view,
+                       const std::function<std::vector<std::string>(std::size_t)>&)> checkpoint;
     std::function<void(std::string_view)> scope;
     std::function<void(std::string_view)> preview;
     std::function<std::optional<bool>(std::size_t, const ToolCall&, std::string, std::string)> review;
