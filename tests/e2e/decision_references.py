@@ -22,7 +22,7 @@ QUESTION = "Which importer decision is current?"
 FOLLOW = ("--follow-up", QUESTION, "--no-write", "--quote-task", "1", "--current-decision-task", "2")
 HEADER = "[Host selected decision references]\n"
 RESPONSE = "Task 2 contains the current decision."
-F11, F12 = ESC + "[23~", ESC + "[24~"
+QUOTE, MARK_CURRENT = "\x11", "\x07"
 PROTOCOL = "responses"
 
 
@@ -78,14 +78,14 @@ def terminal_selection(base, cli, driver, legacy):
             screen.expect("已完成")
             screen.key(ESC + "[H", "> #1")
             screen.key(ESC + "[B", "> 助手  Model observation 1.")
-            screen.key(F11, "请先选中一条已保存的用户原文")
+            screen.key(QUOTE, "请先选中一条已保存的用户原文")
             screen.key(ESC + "[A", "> #1")
-            screen.key(F11, "引用任务 1")
-            screen.key(F11, "已移除草稿引用")
-            screen.key(F11, "引用任务 1")
+            screen.key(QUOTE, "引用任务 1")
+            screen.key(QUOTE, "已移除草稿引用")
+            screen.key(QUOTE, "引用任务 1")
             screen.key(ESC + "[B", "> 助手  Model observation 1.")
             screen.key(ESC + "[B", "> #2")
-            screen.key(F12, "引用任务 1 · 现行任务 2")
+            screen.key(MARK_CURRENT, "引用任务 1 · 现行任务 2")
             assert len(server.requests) == 2 and format_of(fixture) == 4
             submit(screen, QUESTION)
             screen.expect(RESPONSE)

@@ -46,7 +46,9 @@ public:
                         case '\r': case '\n': events.push_back({Key::enter}); break;
                         case '\t': events.push_back({Key::tab}); break;
                         case '\x03': events.push_back({Key::stop}); break;
+                        case '\x07': events.push_back({Key::current_decision}); break;
                         case '\x0f': events.push_back({Key::details}); break;
+                        case '\x11': events.push_back({Key::quote_task}); break;
                         case '\b': case 0x7f: events.push_back({Key::backspace}); break;
                         default: break;
                     }
@@ -109,7 +111,6 @@ private:
                 {"[17~", Key::supplement},
                 {"[18~", Key::current_review}, {"[19~", Key::failed_check},
                 {"[20~", Key::task_files}, {"[21~", Key::return_to_reading},
-                {"[23~", Key::quote_task}, {"[24~", Key::current_decision},
             };
             if (const auto match = std::ranges::find(keys, sequence, [](const auto& item) { return item.first; });
                 match != std::end(keys)) {
@@ -694,7 +695,8 @@ private:
         if (!task) {
             notice_ = label("请先选中一条已保存的用户原文。", "Select saved user input first.");
         } else if (current && (!draft_decision_ || *task <= draft_decision_->earlier)) {
-            notice_ = label("先用 F11 引用，再选较新的任务并按 F12。", "Quote with F11, then select a newer task and press F12.");
+            notice_ = label("先用 Ctrl+Q 引用，再选较新的任务并按 Ctrl+G。",
+                            "Quote with Ctrl+Q, then select a newer task and press Ctrl+G.");
         } else if (current) {
             if (draft_decision_->current == task) draft_decision_->current.reset();
             else draft_decision_->current = task;
@@ -833,7 +835,9 @@ private:
 
     std::string_view shortcuts() const {
         if (focused_) return label("Esc 返回审阅 · Ctrl+C 停止", "Esc returns to review / Ctrl+C stop");
-        if (selected_user_task()) return label("F11 引用原文 · F12 标记现行决定", "F11 quote / F12 mark current decision");
+        if (selected_user_task()) {
+            return label("Ctrl+Q 引用 · Ctrl+G 标记现行", "Ctrl+Q quote / Ctrl+G mark current");
+        }
         if (history_ && reviewing()) return label("F10 返回历史 · Ctrl+C 停止", "F10 returns to history / Ctrl+C stop");
         if (history_) return label("F7 审批 · F8 失败 · F9 文件", "F7 Review / F8 Failure / F9 Files");
         if (reviewing()) return label("Ctrl+C 停止 · F8 失败 · Esc 退出", "Ctrl+C stop / F8 failure / Esc quit");

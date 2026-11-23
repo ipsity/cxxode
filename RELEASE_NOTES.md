@@ -1,6 +1,6 @@
 # Lay Code 0.1.0-rc15
 
-P23 Windows x64 验收包。TUI 的 F11 可引用历史用户原文，F12 可选较新的现行决定。行式入口支持 `--quote-task` 和 `--current-decision-task`。来源任务、消息 ID 和正文 SHA-256 随提问保存，历史压缩时仍携带选中的原文。
+P23 Windows x64 验收包。TUI 的 Ctrl+Q 可引用历史用户原文，Ctrl+G 可选较新的现行决定。行式入口支持 `--quote-task` 和 `--current-decision-task`。来源任务、消息 ID 和正文 SHA-256 随提问保存，历史压缩时仍携带选中的原文。
 
 首次保存引用后该会话使用格式 5。原有格式 4 会话可直接打开。P22 的配对实验保留了串行只读调度。
 

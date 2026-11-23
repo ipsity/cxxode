@@ -45,8 +45,6 @@ std::string_view control(const KEY_EVENT_RECORD& key) {
         case VK_F8: return "\x1b[19~";
         case VK_F9: return "\x1b[20~";
         case VK_F10: return "\x1b[21~";
-        case VK_F11: return "\x1b[23~";
-        case VK_F12: return "\x1b[24~";
         case VK_UP: return "\x1b[A";
         case VK_DOWN: return "\x1b[B";
         case VK_RIGHT: return "\x1b[C";
