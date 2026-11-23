@@ -1,0 +1,311 @@
+{
+  "stage": "P8",
+  "source_commit": "a0865b85dd2ede736dfe8c4c1af015778e481b00",
+  "executable_sha256": "fd88348ee95e8375ca0ad20647211483c5b828275a844ab1a71eabcfac19e23e",
+  "provider": "passion",
+  "protocol": "responses",
+  "model": "gpt-6.1-sol",
+  "case": "fix-page-offset",
+  "approval": "One reference-equivalent edit approved in each isolated fixture.",
+  "legacy_reference": {
+    "rc7_successful_input_totals": [
+      2582,
+      2667
+    ],
+    "post_rc7_targeted_input_totals": [
+      59304,
+      59305,
+      59326
+    ],
+    "first_request_input_tokens": {
+      "rc7": 520,
+      "post_rc7_targeted": 14654
+    },
+    "original_provider_breakdown_available": false
+  },
+  "finding": "The repeated high totals match the gateway's own input_tokens fields. Actual upload counts match the reported local JSON request lengths.",
+  "first_request": "The gateway reported 14654 input tokens for 3250 uploaded JSON bytes. Its breakdown reported 14651 tokens as a 30-minute cache write in the first sample, and as cache reads in the next two.",
+  "unknown": [
+    "Why the earlier gateway totals varied",
+    "Provider-side preprocessing and billing basis"
+  ],
+  "verified_cost": null,
+  "samples": [
+    {
+      "task": 1,
+      "requests": 4,
+      "totals": {
+        "body_bytes": {
+          "known_total": 15496,
+          "requests_without_count": 0
+        },
+        "uploaded_body_bytes": {
+          "known_total": 15496,
+          "requests_without_count": 0
+        },
+        "input_tokens": {
+          "known_total": 59312,
+          "requests_without_count": 0
+        },
+        "output_tokens": {
+          "known_total": 208,
+          "requests_without_count": 0
+        }
+      },
+      "attempts": [
+        {
+          "request_number": 1,
+          "body_bytes": 3250,
+          "uploaded_body_bytes": 3250,
+          "input_tokens": 14654,
+          "output_tokens": 18,
+          "provider_usage": {
+            "input_tokens": 14654,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 14651,
+            "input_tokens_details.cached_tokens": 0,
+            "output_tokens": 18,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14672
+          },
+          "first_byte_us": 4685323
+        },
+        {
+          "request_number": 2,
+          "body_bytes": 3641,
+          "uploaded_body_bytes": 3641,
+          "input_tokens": 14755,
+          "output_tokens": 84,
+          "provider_usage": {
+            "input_tokens": 14755,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 101,
+            "input_tokens_details.cached_tokens": 14651,
+            "output_tokens": 84,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14839
+          },
+          "first_byte_us": 4637495
+        },
+        {
+          "request_number": 3,
+          "body_bytes": 4104,
+          "uploaded_body_bytes": 4104,
+          "input_tokens": 14898,
+          "output_tokens": 18,
+          "provider_usage": {
+            "input_tokens": 14898,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 143,
+            "input_tokens_details.cached_tokens": 14752,
+            "output_tokens": 18,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14916
+          },
+          "first_byte_us": 4038908
+        },
+        {
+          "request_number": 4,
+          "body_bytes": 4501,
+          "uploaded_body_bytes": 4501,
+          "input_tokens": 15005,
+          "output_tokens": 88,
+          "provider_usage": {
+            "input_tokens": 15005,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 107,
+            "input_tokens_details.cached_tokens": 14895,
+            "output_tokens": 88,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 15093
+          },
+          "first_byte_us": 3715154
+        }
+      ]
+    },
+    {
+      "task": 1,
+      "requests": 4,
+      "totals": {
+        "body_bytes": {
+          "known_total": 15496,
+          "requests_without_count": 0
+        },
+        "uploaded_body_bytes": {
+          "known_total": 15496,
+          "requests_without_count": 0
+        },
+        "input_tokens": {
+          "known_total": 59295,
+          "requests_without_count": 0
+        },
+        "output_tokens": {
+          "known_total": 204,
+          "requests_without_count": 0
+        }
+      },
+      "attempts": [
+        {
+          "request_number": 1,
+          "body_bytes": 3250,
+          "uploaded_body_bytes": 3250,
+          "input_tokens": 14654,
+          "output_tokens": 18,
+          "provider_usage": {
+            "input_tokens": 14654,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 0,
+            "input_tokens_details.cached_tokens": 14651,
+            "output_tokens": 18,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14672
+          },
+          "first_byte_us": 4912550
+        },
+        {
+          "request_number": 2,
+          "body_bytes": 3641,
+          "uploaded_body_bytes": 3641,
+          "input_tokens": 14752,
+          "output_tokens": 81,
+          "provider_usage": {
+            "input_tokens": 14752,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 98,
+            "input_tokens_details.cached_tokens": 14651,
+            "output_tokens": 81,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14833
+          },
+          "first_byte_us": 3091013
+        },
+        {
+          "request_number": 3,
+          "body_bytes": 4104,
+          "uploaded_body_bytes": 4104,
+          "input_tokens": 14892,
+          "output_tokens": 18,
+          "provider_usage": {
+            "input_tokens": 14892,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 140,
+            "input_tokens_details.cached_tokens": 14749,
+            "output_tokens": 18,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14910
+          },
+          "first_byte_us": 3622736
+        },
+        {
+          "request_number": 4,
+          "body_bytes": 4501,
+          "uploaded_body_bytes": 4501,
+          "input_tokens": 14997,
+          "output_tokens": 87,
+          "provider_usage": {
+            "input_tokens": 14997,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 105,
+            "input_tokens_details.cached_tokens": 14889,
+            "output_tokens": 87,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 15084
+          },
+          "first_byte_us": 4265999
+        }
+      ]
+    },
+    {
+      "task": 1,
+      "requests": 4,
+      "totals": {
+        "body_bytes": {
+          "known_total": 15496,
+          "requests_without_count": 0
+        },
+        "uploaded_body_bytes": {
+          "known_total": 15496,
+          "requests_without_count": 0
+        },
+        "input_tokens": {
+          "known_total": 59306,
+          "requests_without_count": 0
+        },
+        "output_tokens": {
+          "known_total": 199,
+          "requests_without_count": 0
+        }
+      },
+      "attempts": [
+        {
+          "request_number": 1,
+          "body_bytes": 3250,
+          "uploaded_body_bytes": 3250,
+          "input_tokens": 14654,
+          "output_tokens": 18,
+          "provider_usage": {
+            "input_tokens": 14654,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 0,
+            "input_tokens_details.cached_tokens": 14651,
+            "output_tokens": 18,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14672
+          },
+          "first_byte_us": 3770229
+        },
+        {
+          "request_number": 2,
+          "body_bytes": 3641,
+          "uploaded_body_bytes": 3641,
+          "input_tokens": 14754,
+          "output_tokens": 83,
+          "provider_usage": {
+            "input_tokens": 14754,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 100,
+            "input_tokens_details.cached_tokens": 14651,
+            "output_tokens": 83,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14837
+          },
+          "first_byte_us": 2223327
+        },
+        {
+          "request_number": 3,
+          "body_bytes": 4104,
+          "uploaded_body_bytes": 4104,
+          "input_tokens": 14896,
+          "output_tokens": 18,
+          "provider_usage": {
+            "input_tokens": 14896,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 142,
+            "input_tokens_details.cached_tokens": 14751,
+            "output_tokens": 18,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 14914
+          },
+          "first_byte_us": 2876829
+        },
+        {
+          "request_number": 4,
+          "body_bytes": 4501,
+          "uploaded_body_bytes": 4501,
+          "input_tokens": 15002,
+          "output_tokens": 80,
+          "provider_usage": {
+            "input_tokens": 15002,
+            "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens": 0,
+            "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens": 106,
+            "input_tokens_details.cached_tokens": 14893,
+            "output_tokens": 80,
+            "output_tokens_details.reasoning_tokens": 0,
+            "total_tokens": 15082
+          },
+          "first_byte_us": 3243131
+        }
+      ]
+    }
+  ]
+}

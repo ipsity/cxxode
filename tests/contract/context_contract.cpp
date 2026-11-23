@@ -97,7 +97,7 @@ int main() {
 
     messages::Stream anthropic;
     require(anthropic.push(
-        R"(data: {"type":"message_start","message":{"role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":100,"cache_read_input_tokens":900,"cache_creation_input_tokens":50,"output_tokens":1}})"
+        R"(data: {"type":"message_start","message":{"role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":100,"cache_read_input_tokens":900,"cache_creation_input_tokens":50,"output_tokens":1}}})"
         "\n\n"
         R"(data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}})"
         "\n\n"), "Claude stream usage frames are accepted");
