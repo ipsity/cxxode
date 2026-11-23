@@ -29,8 +29,9 @@
   },
   "manual_windows_terminal": {
     "result": "pending",
+    "procedure": "bench/P10_MANUAL_WINDOWS.md",
     "checks_in_order": [
-      "With Microsoft Pinyin active, compose a Chinese draft, press Enter to confirm a candidate, then press F2. Verify zero requests before F2 and one submission after it.",
+      "With Microsoft Pinyin active, test Enter while the candidate window is open, then select a Chinese candidate with Space or a number key. Verify zero requests after Enter and one submission after F2.",
       "At 48 by 16, page through a long diff and a command argument containing spaces. Resize and confirm the same call ID.",
       "Paste native multiline clipboard text before approval and again with the decision input focused. Neither paste nor queued keypresses may approve a tool.",
       "Cancel an approved running command with Ctrl+C, reopen the same session and submit a follow-up. Verify the original cancellation result and zero repeat dispatches."
