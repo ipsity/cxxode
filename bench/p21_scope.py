@@ -1,11 +1,13 @@
 """Replay three-file changes to frozen Lay Code source with independent build checks."""
 
 import argparse
+from contextlib import closing
 import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -168,6 +170,36 @@ def journey(base, label, case, fixture_bytes, args, previous=None):
                 "adjacent_file_unchanged": True}, {path: (fixture.root / path).read_bytes() for path in paths}
 
 
+def legacy_scopes(base, legacy, app):
+    report = {"executable_sha256": hashlib.sha256(legacy.read_bytes()).hexdigest(), "unchanged_scopes": []}
+    for width in (1, 2):
+        def plan(index, _):
+            assert index == 0
+            return send(answer(PROTOCOL, "Legacy scope fixture saved."))
+
+        with relay(base, f"legacy-{width}", str(legacy), str(legacy), PROTOCOL, plan, None) as (fixture, server):
+            paths = ("a.txt", "b.txt")[:width]
+            original_args = fixture.args[:]
+            fixture.args += [argument for path in paths for argument in ("--write", path)]
+            assert "Legacy scope fixture saved." in fixture.command(driver=False, data=b"",
+                                                                      extra=("--question", "Save a scope receipt."))
+            with closing(sqlite3.connect(fixture.db)) as store:
+                old_scope = store.execute("SELECT scope FROM session").fetchone()[0]
+            assert json.loads(old_scope)["write"] == (list(paths) if width > 1 else paths[0])
+            saved, _ = fixture.saved()
+            fixture.cli = str(app)
+            fixture.args = original_args + [argument for path in reversed(paths) for argument in ("--write", path)]
+            assert "Legacy scope fixture saved." in fixture.command(driver=False, resume=True, data=b"",
+                                                                     extra=("--inspect",))
+            assert "session scope changed" in fixture.command(2, driver=False, resume=True, data=b"",
+                                                               extra=("--write", "fresh.txt", "--inspect"))
+            with closing(sqlite3.connect(fixture.db)) as store:
+                assert store.execute("SELECT scope FROM session").fetchone()[0] == old_scope
+            assert fixture.saved()[0] == saved and len(server.requests) == 1
+            report["unchanged_scopes"].append(list(paths))
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
@@ -175,6 +207,7 @@ def main():
     parser.add_argument("--cmake", required=True)
     parser.add_argument("--ctest", required=True)
     parser.add_argument("--baseline", action="store_true")
+    parser.add_argument("--legacy-executable", type=Path)
     args = parser.parse_args()
     args.executable = args.executable.resolve(strict=True)
     paths = archive()
@@ -198,6 +231,8 @@ def main():
         report["single_session_success"] = sum(case["single_session"]["hidden_behavior_passed"]
                                                for case in report["cases"].values())
         report["case_count"] = len(report["cases"])
+        if args.legacy_executable:
+            report["legacy_reopen"] = legacy_scopes(base, args.legacy_executable.resolve(strict=True), args.executable)
         print(json.dumps(report, indent=2))
 
 

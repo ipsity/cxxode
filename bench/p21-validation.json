@@ -1,0 +1,142 @@
+{
+  "milestone": "P21",
+  "status": "pass",
+  "release": "lay-code-0.1.0-rc14-windows-x64",
+  "archive_sha256": "7be8121b58315529dde0cea1f61cb540702d5dde52fb6b5e0195f87805b0528c",
+  "manifest": {
+    "version": "0.1.0-rc14",
+    "platform": "Windows x64, MinGW UCRT",
+    "build": "ff2971ea0185d2c357fb464b11391c45da994926",
+    "curl_source_sha256": "8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5",
+    "smoke_test": "Local Windows with System32-only toolchain PATH, actual NTFS workspace read",
+    "binaries": {
+      "lay-code.exe": {
+        "sha256": "1b7d46c6b2602d0c9b3088e324a52b6b7f514fc1ebffdb7df0cc8fd332b5ba03",
+        "bytes": 2102664
+      },
+      "libcurl.dll": {
+        "sha256": "23fdcad1705dab4ed667e09746628da1e5ec99a5375664d2223835e1dc8be5f3",
+        "bytes": 1012226
+      },
+      "libgcc_s_seh-1.dll": {
+        "sha256": "c658c94c8d59c50e77a4b3b790d595daedc5422e87170dd2609bed3e733a4000",
+        "bytes": 151364
+      },
+      "libsqlite3-0.dll": {
+        "sha256": "d25cd65b1441b36fd0787e8c8e2a3beb3624e269c910ae65dd8b0dc80cc42c79",
+        "bytes": 1581854
+      },
+      "libstdc++-6.dll": {
+        "sha256": "5d882e4aa81b640c169ac08c81eaaff7474d03667ab4fa0db7d618fa64f43200",
+        "bytes": 2463202
+      },
+      "libwinpthread-1.dll": {
+        "sha256": "ef19afbd0e2425d2dfd1ac2b209154ded070cd87e0be1f04c0754bde79e5137d",
+        "bytes": 63678
+      }
+    }
+  },
+  "compiler": "MinGW UCRT GCC 15.2.0, Release",
+  "baseline": "bench/p21-rc13-baseline.json",
+  "baseline_sha256": "3d510d9482aaee9608f3a24e3560c8236304854daea884867c371b390066b1ef",
+  "packaged_journeys": {
+    "frozen_source": "266f438a6e8f24ba7988da86ce3d64c8d9bddff7",
+    "workspaces_sha256": "c5dfcc26d17786b88d774b236c28f3979f89fd64ce9e027779ecb9746fd28405",
+    "executable_sha256": "1b7d46c6b2602d0c9b3088e324a52b6b7f514fc1ebffdb7df0cc8fd332b5ba03",
+    "protocol": "responses",
+    "model": "scripted loopback",
+    "cases": {
+      "cpp-symbol-rename": {
+        "single_session": {
+          "edit_approvals": 3,
+          "observed_review_ms_per_file": [
+            3.097,
+            2.832,
+            2.693
+          ],
+          "posts": 4,
+          "three_path_launch_rejected": false,
+          "hidden_behavior_passed": true,
+          "adjacent_file_unchanged": true
+        }
+      },
+      "config-and-ctest": {
+        "single_session": {
+          "edit_approvals": 3,
+          "observed_review_ms_per_file": [
+            2.971,
+            3.2,
+            2.94
+          ],
+          "posts": 4,
+          "three_path_launch_rejected": false,
+          "hidden_behavior_passed": true,
+          "adjacent_file_unchanged": true
+        }
+      }
+    },
+    "single_session_success": 2,
+    "case_count": 2,
+    "legacy_reopen": {
+      "executable_sha256": "17d60d6c44e68d8925e6362e16b2759f4ec4d0c9903269aba6faa47a38a6ef70",
+      "unchanged_scopes": [
+        [
+          "a.txt"
+        ],
+        [
+          "a.txt",
+          "b.txt"
+        ]
+      ]
+    }
+  },
+  "clean_windows_regression": {
+    "result": "pass",
+    "os": "Microsoft Windows 11 Enterprise LTSC Evaluation",
+    "version": "10.0.26100",
+    "architecture": "64-bit",
+    "filesystem": "NTFS",
+    "archive_sha256": "7be8121b58315529dde0cea1f61cb540702d5dde52fb6b5e0195f87805b0528c",
+    "executable_sha256": "1b7d46c6b2602d0c9b3088e324a52b6b7f514fc1ebffdb7df0cc8fd332b5ba03",
+    "started": true,
+    "workspace_read": true,
+    "edit_requires_approval": true,
+    "toolchain_commands_present": [],
+    "tui_edit_approved": true,
+    "tui_follow_up": true,
+    "shared_session_reopened": true,
+    "tui_two_files_verified": true,
+    "cli_reopened_two_file_verification": true
+  },
+  "wsl_independent_executable_sha256": "6bde0193d852e2e94887aeba6024fa7f6576ddf5181921f5796a9f306390f54a",
+  "native_contracts": {
+    "windows": {
+      "passed": 15,
+      "total": 15,
+      "junit_sha256": "c7b84077bca5875efa15b49778b5b544c03b35fac0abe4ce11856c7ac1bf4539"
+    },
+    "wsl": {
+      "passed": 15,
+      "total": 15,
+      "junit_sha256": "7fe26aac23dd14edc166ef6f0aace20e2fc372755e1e7d85ccd5e0bf3e319595"
+    }
+  },
+  "three_file_contract": {
+    "script": "tests/e2e/three_file_editing.py",
+    "exact_targets": 3,
+    "explicit_creation_approved": true,
+    "separate_approvals": true,
+    "directory_glob": "not enabled",
+    "second_edit_recovery": {
+      "denial": "applied, not started, not started",
+      "version_conflict": "applied, not started, not started",
+      "missing_target": "applied, not started, not started",
+      "permissions_lost": "applied, not started, not started",
+      "unsupported_link": "applied, not started, not started",
+      "crash_after_second_dispatch": "applied, effect unknown, not started"
+    },
+    "unknown_write_redispatches": 0,
+    "changed_adjacent_files": 0,
+    "count_of_failed_regression_rows": 0
+  }
+}
