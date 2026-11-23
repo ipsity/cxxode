@@ -1,0 +1,39 @@
+{
+  "candidate": "0.1.0-rc8",
+  "source_commit": "7eed08aea0ff822060b8ce74a045a8708905cb59",
+  "archive": "lay-code-0.1.0-rc8-windows-x64.zip",
+  "archive_sha256": "573702860c2299c60bc26cb27d99d6041f75ff9e83db890bdee1e6c4f6070335",
+  "executable_sha256": "fd55d50da4de13aadf69831a4ff51b5716823c946535451237191e737b8a9cfc",
+  "reference_machine": {
+    "windows_build": "26100.4652",
+    "filesystem": "NTFS",
+    "installed_windows_terminal": "1.25.3131.0",
+    "installed_microsoft_pinyin_file_version": "10.0.26100.4484"
+  },
+  "automated": {
+    "native_conpty": {
+      "result": "pass",
+      "input": "extracted RC8 archive on the reference host using a system-only toolchain PATH",
+      "observed": ["workspace read", "approved edit", "TUI follow-up", "CLI reopened the same session"]
+    },
+    "pywinpty_conpty": {
+      "result": "pass",
+      "input": "RC8 packaged executable with the existing TUI workspace contract",
+      "observed": [
+        "Injected Chinese Unicode text and Enter did not create a task. F2 submitted the draft and produced one first review.",
+        "At 48 by 16 the edit could be paged to its last line and the command review displayed the quoted argument containing spaces. Resize preserved the edit call ID.",
+        "Queued Tab, y and Enter and a bracketed multiline paste produced no approval or process dispatch.",
+        "Ctrl+C cancelled an active CTest process. Reopening retained the stopped state and cancelled command. A follow-up left the process-dispatch count unchanged."
+      ]
+    }
+  },
+  "manual_windows_terminal": {
+    "result": "pending",
+    "checks_in_order": [
+      "With Microsoft Pinyin active, compose a Chinese draft, press Enter to confirm a candidate, then press F2. Verify zero requests before F2 and one submission after it.",
+      "At 48 by 16, page through a long diff and a command argument containing spaces. Resize and confirm the same call ID.",
+      "Paste native multiline clipboard text before approval and again with the decision input focused. Neither paste nor queued keypresses may approve a tool.",
+      "Cancel an approved running command with Ctrl+C, reopen the same session and submit a follow-up. Verify the original cancellation result and zero repeat dispatches."
+    ]
+  }
+}
