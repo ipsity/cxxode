@@ -94,5 +94,22 @@ int main() {
             items.back().at("type") == "function_call_output" &&
             items.at(items.size() - 2).at("call_id") == items.back().at("call_id"),
             "Cross-task trimming preserves both user inputs and the complete current Responses tool group");
+
+    messages::Stream anthropic;
+    require(anthropic.push(
+        R"(data: {"type":"message_start","message":{"role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":100,"cache_read_input_tokens":900,"cache_creation_input_tokens":50,"output_tokens":1}})"
+        "\n\n"
+        R"(data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}})"
+        "\n\n"), "Claude stream usage frames are accepted");
+    require(anthropic.input_tokens() == 1050 && anthropic.output_tokens() == 12,
+            "Claude input components are disjoint and streaming output counts are cumulative");
+
+    messages::Stream chat(Protocol::chat_completions);
+    require(chat.push(
+        R"(data: {"choices":[],"usage":{"prompt_tokens":850,"input_tokens":1200,"completion_tokens":0,"prompt_tokens_details":{"cached_tokens":800},"cache_read_input_tokens":800}})"
+        "\n\n"), "Chat usage-only frame is accepted");
+    require(chat.input_tokens() == 850 && chat.output_tokens() == 0 &&
+            chat.provider_usage()->at("prompt_tokens_details.cached_tokens") == 800,
+            "Chat prompt tokens already include cache hits and explicit zero stays known");
     std::cout << "Deterministic context projection preserved constraints and complete tool groups.\n";
 }

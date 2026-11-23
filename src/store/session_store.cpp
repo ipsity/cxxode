@@ -252,7 +252,7 @@ Verification decode_verification(const Json& value) {
 }
 
 Json encode_attempt(const ModelAttempt& attempt) {
-    return {
+    Json encoded{
         {"first_round", attempt.first_round}, {"retained_rounds", attempt.retained_rounds},
         {"body_bytes", attempt.body_bytes}, {"budget_bytes", attempt.budget_bytes},
         {"template_version", attempt.template_version},
@@ -260,6 +260,16 @@ Json encode_attempt(const ModelAttempt& attempt) {
         {"output_tokens", attempt.output_tokens ? Json(*attempt.output_tokens) : Json(nullptr)},
         {"first_byte_us", attempt.first_byte_us ? Json(*attempt.first_byte_us) : Json(nullptr)},
     };
+    if (attempt.request_number) encoded["request_number"] = *attempt.request_number;
+    if (attempt.uploaded_body_bytes) encoded["uploaded_body_bytes"] = *attempt.uploaded_body_bytes;
+    if (attempt.provider_usage) {
+        auto reported = Json::object();
+        for (const auto& [field, count] : *attempt.provider_usage) {
+            reported[field] = count ? Json(*count) : Json(nullptr);
+        }
+        encoded["provider_usage"] = std::move(reported);
+    }
+    return encoded;
 }
 
 ModelAttempt decode_attempt(const Json& value) {
@@ -267,9 +277,19 @@ ModelAttempt decode_attempt(const Json& value) {
         const auto& field = value.at(name);
         return field.is_null() ? std::nullopt : std::optional(field.get<std::size_t>());
     };
-    return {value.at("first_round"), value.at("retained_rounds"), value.at("body_bytes"),
+    ModelAttempt attempt{value.at("first_round"), value.at("retained_rounds"), value.at("body_bytes"),
             value.at("budget_bytes"), value.at("template_version"), count("input_tokens"), count("output_tokens"),
             value.contains("first_byte_us") ? count("first_byte_us") : std::nullopt};
+    if (value.contains("request_number")) attempt.request_number = count("request_number");
+    if (value.contains("uploaded_body_bytes")) attempt.uploaded_body_bytes = count("uploaded_body_bytes");
+    if (const auto reported = value.find("provider_usage"); reported != value.end()) {
+        if (!reported->is_object()) throw std::runtime_error("invalid stored provider usage");
+        attempt.provider_usage.emplace();
+        for (const auto& [field, tokens] : reported->items()) {
+            attempt.provider_usage->emplace(field, tokens.is_null() ? std::nullopt : std::optional(tokens.get<std::size_t>()));
+        }
+    }
+    return attempt;
 }
 
 std::string encode_session(const Session& session) {

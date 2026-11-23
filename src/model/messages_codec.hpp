@@ -28,8 +28,9 @@ public:
     bool push(std::string_view bytes);
     std::optional<GenerationFailure> finish(const EventSink& emit);
     const std::optional<GenerationFailure>& failure() const { return failure_; }
-    std::optional<std::size_t> input_tokens() const { return input_tokens_; }
-    std::optional<std::size_t> output_tokens() const { return output_tokens_; }
+    std::optional<std::size_t> input_tokens() const;
+    std::optional<std::size_t> output_tokens() const;
+    const std::optional<UsageFields>& provider_usage() const { return provider_usage_; }
 
 private:
     bool line();
@@ -75,8 +76,7 @@ private:
     std::optional<Block> block_;
     std::optional<ReplyStop> stop_;
     std::optional<GenerationFailure> failure_;
-    std::optional<std::size_t> input_tokens_;
-    std::optional<std::size_t> output_tokens_;
+    std::optional<UsageFields> provider_usage_;
     std::size_t next_index_ = 0;
     std::size_t wire_size_ = 0;
     bool first_line_ = true;

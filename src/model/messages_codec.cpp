@@ -245,30 +245,46 @@ std::vector<Fact> facts(const Request& request) {
     return output;
 }
 
-struct Usage {
-    std::optional<std::size_t> input;
-    std::optional<std::size_t> output;
-};
-
-Usage usage(const Json& event) {
+void observe_usage(std::optional<UsageFields>& fields, const Json& event) {
     const auto container = event.find("usage");
     if (container == event.end() || !container->is_object()) {
-        return {};
+        return;
     }
-    const auto tokens = [&](std::string_view name) -> std::optional<std::size_t> {
-        const auto field = container->find(name);
-        if (field != container->end() && field->is_number_unsigned() &&
-            field->get<std::uint64_t>() <= std::numeric_limits<std::uint32_t>::max()) {
-            return field->get<std::size_t>();
-        }
-        return std::nullopt;
+    if (!fields) fields.emplace();
+    constexpr std::string_view paths[]{
+        "input_tokens", "output_tokens", "prompt_tokens", "completion_tokens", "total_tokens",
+        "cache_creation_input_tokens", "cache_read_input_tokens",
+        "cache_creation.ephemeral_5m_input_tokens", "cache_creation.ephemeral_1h_input_tokens",
+        "input_tokens_details.cached_tokens", "input_tokens_details.cache_write_tokens",
+        "input_tokens_details.cache_write_tokens_details.ttl_12h_tokens",
+        "input_tokens_details.cache_write_tokens_details.ttl_30m_tokens",
+        "prompt_tokens_details.cached_tokens", "prompt_tokens_details.cache_write_tokens",
+        "output_tokens_details.reasoning_tokens", "completion_tokens_details.reasoning_tokens",
     };
-    auto input = tokens("input_tokens");
-    if (input) {
-        *input += tokens("cache_creation_input_tokens").value_or(0) + tokens("cache_read_input_tokens").value_or(0);
+    for (const auto path : paths) {
+        const auto* value = &*container;
+        auto remaining = path;
+        while (value) {
+            const auto dot = remaining.find('.');
+            const auto field = value->find(remaining.substr(0, dot));
+            value = field != value->end() ? &*field : nullptr;
+            if (dot == remaining.npos) break;
+            remaining.remove_prefix(dot + 1);
+            if (value && !value->is_object()) value = nullptr;
+        }
+        if (!value) continue;
+        std::optional<std::size_t> count;
+        if (value->is_number_unsigned() && value->get<std::uint64_t>() <= std::numeric_limits<std::uint32_t>::max()) {
+            count = value->get<std::size_t>();
+        }
+        fields->insert_or_assign(std::string(path), count);
     }
-    auto output = tokens("output_tokens");
-    return {input ? input : tokens("prompt_tokens"), output ? output : tokens("completion_tokens")};
+}
+
+std::optional<std::size_t> token_count(const std::optional<UsageFields>& fields, std::string_view name) {
+    if (!fields) return std::nullopt;
+    const auto reported = fields->find(name);
+    return reported == fields->end() ? std::nullopt : reported->second;
 }
 
 std::optional<ToolCall> parse_tool(std::string id, std::string name, std::string_view arguments) {
@@ -302,6 +318,26 @@ std::optional<ToolCall> parse_tool(std::string id, std::string name, std::string
 }
 
 } // namespace
+
+std::optional<std::size_t> Stream::input_tokens() const {
+    const auto input = token_count(provider_usage_, "input_tokens");
+    const auto prompt = token_count(provider_usage_, "prompt_tokens");
+    if (protocol_ == Protocol::chat_completions) return prompt ? prompt : input;
+    if (protocol_ == Protocol::responses || !input) return input ? input : prompt;
+    // Claude reports disjoint input components. Reported cache subfields remain
+    // optional in the audit, even when the observed components can be summed.
+    const auto total = static_cast<std::uint64_t>(*input) +
+        token_count(provider_usage_, "cache_creation_input_tokens").value_or(0) +
+        token_count(provider_usage_, "cache_read_input_tokens").value_or(0);
+    if (total > std::numeric_limits<std::size_t>::max()) return std::nullopt;
+    return static_cast<std::size_t>(total);
+}
+
+std::optional<std::size_t> Stream::output_tokens() const {
+    const auto output = token_count(provider_usage_, "output_tokens");
+    const auto completion = token_count(provider_usage_, "completion_tokens");
+    return protocol_ == Protocol::chat_completions ? (completion ? completion : output) : (output ? output : completion);
+}
 
 Projection project(const Request& request, std::string_view model, ContextLimits limits) {
     Provider provider;
@@ -569,9 +605,7 @@ bool Stream::event() {
             if (message.at("role") == "assistant" && message.at("content").is_array() &&
                 message.at("content").empty() && message.at("stop_reason").is_null()) {
                 started_ = true;
-                const auto tokens = usage(message);
-                input_tokens_ = tokens.input;
-                output_tokens_ = tokens.output;
+                observe_usage(provider_usage_, message);
                 return true;
             }
         }
@@ -641,10 +675,7 @@ bool Stream::event() {
             return true;
         }
         if (type == "message_delta" && !block_ && !stop_) {
-            const auto tokens = usage(payload);
-            if (tokens.output) {
-                output_tokens_ = tokens.output;
-            }
+            observe_usage(provider_usage_, payload);
             const auto& reason = payload.at("delta").at("stop_reason");
             if (reason == "end_turn" || reason == "tool_use") {
                 stop_ = reason == "end_turn" ? ReplyStop::end_turn : ReplyStop::tool_use;
@@ -705,9 +736,7 @@ bool Stream::chat_event() {
     if (!event_.empty() && event_ != "message") {
         return fail(SessionStop::protocol_error, "unexpected Chat Completions SSE event");
     }
-    const auto tokens = usage(payload);
-    if (tokens.input) input_tokens_ = tokens.input;
-    if (tokens.output) output_tokens_ = tokens.output;
+    observe_usage(provider_usage_, payload);
     const auto& choices = payload.at("choices");
     if (!choices.is_array() || choices.size() > 1) {
         return fail(SessionStop::protocol_error, "expected a single streamed choice");
@@ -806,10 +835,15 @@ bool Stream::responses_event() {
         return fail(SessionStop::protocol_error, "Responses SSE event type disagrees with its payload");
     }
     if (type == "error" || type == "response.failed") {
+        if (const auto response = payload.find("response"); response != payload.end()) {
+            observe_usage(provider_usage_, *response);
+        }
         return fail(SessionStop::transport_error, "provider returned an error inside the SSE stream");
     }
     if (type == "response.incomplete") {
-        const auto reason = payload.at("response").at("incomplete_details").value("reason", "");
+        const auto& response = payload.at("response");
+        observe_usage(provider_usage_, response);
+        const auto reason = response.at("incomplete_details").value("reason", "");
         return fail(reason == "content_filter" ? SessionStop::refused : SessionStop::response_limit,
                     "provider returned an incomplete Responses reply");
     }
@@ -860,6 +894,7 @@ bool Stream::responses_event() {
     }
 
     const auto& response = payload.at("response");
+    observe_usage(provider_usage_, response);
     if (!response_id_.empty()) {
         const auto id = response.at("id").get<std::string_view>();
         // Some gateways rewrite the response ID. In that case require the
@@ -878,9 +913,6 @@ bool Stream::responses_event() {
         }
         return fail(SessionStop::protocol_error, "Responses completion had an unexpected status");
     }
-    const auto tokens = usage(response);
-    input_tokens_ = tokens.input;
-    output_tokens_ = tokens.output;
     const auto& output = response.at("output");
     if (!output.is_array() || output.size() > 64 ||
         (!response_items_.empty() && response_items_.size() != output.size())) {

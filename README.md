@@ -187,3 +187,13 @@ lay-code.exe --tui --workspace . --session parser --write config.txt --allow-run
 用 F2 提交新任务。上一条任务结清后，可在同一窗口输入并提交后续任务。有写权限的会话可用 F4 禁用下一条任务的编辑工具。用 ↑↓ 选择记录，Ctrl+O 展开对应工具输出，PgUp/PgDn 翻页。忙时可以编辑下一条草稿。
 
 `--resume` 先展示已保存的记录，按 F2 才继续未结束的任务。Ctrl+C 停止当前任务，已提交的工具结果会保留。若记录显示效果未知，核对工作区后连续两次按 F3 可离线结清。也可以用同版本的行式 CLI 恢复同一会话。
+
+### 核对会话用量
+
+源码目录内可用 Python 读取已有会话的 SQLite 文件。报告按任务列出请求序号、请求体和实际上传字节、可复算的 token 小计及缺报次数。
+
+```powershell
+python -B bench/usage_audit.py "$env:LOCALAPPDATA/LayCode/sessions/session-parser.sqlite3"
+```
+
+`provider_usage` 保存供应方上报的已识别数值字段，字段缺失和回报零各自保留。Responses 与 Chat 的缓存细项已包含在主计数中。Claude 输入小计使用已报告的输入、缓存读和缓存写分项。报告的 `verified_cost` 留空，费用以服务商的可核对账单为准。

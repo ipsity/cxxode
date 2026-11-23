@@ -193,6 +193,8 @@ struct Attempt {
     std::optional<std::size_t> input_tokens{};
     std::optional<std::size_t> output_tokens{};
     std::optional<std::size_t> first_byte_us{};
+    std::optional<std::size_t> uploaded_body_bytes{};
+    std::optional<UsageFields> provider_usage{};
 };
 
 class Transport {
@@ -239,29 +241,43 @@ public:
             throw std::runtime_error("could not start model request");
         }
         const ActiveEasy active{multi_.get(), easy.get()};
+        const auto observed = [&](Attempt result) {
+            curl_off_t bytes = 0;
+            if (curl_easy_getinfo(easy.get(), CURLINFO_SIZE_UPLOAD_T, &bytes) == CURLE_OK && bytes >= 0) {
+                result.uploaded_body_bytes = static_cast<std::size_t>(bytes);
+            }
+            curl_off_t first_byte = 0;
+            if (curl_easy_getinfo(easy.get(), CURLINFO_STARTTRANSFER_TIME_T, &first_byte) == CURLE_OK && first_byte > 0) {
+                result.first_byte_us = static_cast<std::size_t>(first_byte);
+            }
+            result.input_tokens = transfer.stream.input_tokens();
+            result.output_tokens = transfer.stream.output_tokens();
+            result.provider_usage = transfer.stream.provider_usage();
+            return result;
+        };
         int running = 0;
         do {
             if (stop_requested()) {
-                return {GenerationFailure{SessionStop::cancelled, {}}, {}};
+                return observed({GenerationFailure{SessionStop::cancelled, {}}, {}});
             }
             if (curl_multi_perform(multi_.get(), &running) != CURLM_OK) {
-                return {GenerationFailure{SessionStop::transport_error, "HTTP transfer failed"}, {}};
+                return observed({GenerationFailure{SessionStop::transport_error, "HTTP transfer failed"}, {}});
             }
             if (running != 0 && Clock::now() - transfer.last_activity >= 30s) {
-                return {GenerationFailure{SessionStop::transport_error, "model response idle timeout"}, 1ms};
+                return observed({GenerationFailure{SessionStop::transport_error, "model response idle timeout"}, 1ms});
             }
             if (running != 0 && curl_multi_poll(multi_.get(), nullptr, 0, 50, nullptr) != CURLM_OK) {
-                return {GenerationFailure{SessionStop::transport_error, "HTTP poll failed"}, {}};
+                return observed({GenerationFailure{SessionStop::transport_error, "HTTP poll failed"}, {}});
             }
         } while (running != 0);
 
         if (stop_requested()) {
-            return {GenerationFailure{SessionStop::cancelled, {}}, {}};
+            return observed({GenerationFailure{SessionStop::cancelled, {}}, {}});
         }
         int queued = 0;
         const auto* done = curl_multi_info_read(multi_.get(), &queued);
         if (!done || done->msg != CURLMSG_DONE || done->easy_handle != easy.get()) {
-            return {GenerationFailure{SessionStop::transport_error, "HTTP transfer has no completion"}, {}};
+            return observed({GenerationFailure{SessionStop::transport_error, "HTTP transfer has no completion"}, {}});
         }
 
         const auto diagnostic = [&](std::string message) {
@@ -272,36 +288,31 @@ public:
         };
         long status = 0;
         curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &status);
-        curl_off_t transfer_start = 0;
-        curl_easy_getinfo(easy.get(), CURLINFO_STARTTRANSFER_TIME_T, &transfer_start);
-        const auto first_byte = transfer_start > 0
-            ? std::optional(static_cast<std::size_t>(transfer_start)) : std::nullopt;
         if (status != 0 && status != 200) {
             const auto reason = status == 400 && messages::rejected_context(transfer.error_body)
                 ? SessionStop::context_limit : SessionStop::http_error;
             Attempt result{GenerationFailure{reason, diagnostic("HTTP " + std::to_string(status))}, {}};
-            result.first_byte_us = first_byte;
             if (status == 429 || status == 500 || status == 502 || status == 503 || status == 504 || status == 529) {
                 result.retry_after = transfer.retry_after.value_or(0s);
             }
-            return result;
+            return observed(std::move(result));
         }
         if (transfer.stream.failure()) {
             auto failure = *transfer.stream.failure();
             failure.diagnostic = diagnostic(std::move(failure.diagnostic));
-            return {std::move(failure), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens(), first_byte};
+            return observed({std::move(failure), {}});
         }
         if (transfer.invalid_content_type || transfer.callback_error) {
-            return {GenerationFailure{SessionStop::protocol_error, diagnostic("invalid model response")}, {}};
+            return observed({GenerationFailure{SessionStop::protocol_error, diagnostic("invalid model response")}, {}});
         }
         if (done->data.result != CURLE_OK) {
             const auto code = done->data.result;
             const bool transient = code == CURLE_COULDNT_CONNECT || code == CURLE_COULDNT_RESOLVE_HOST ||
                 code == CURLE_OPERATION_TIMEDOUT || code == CURLE_RECV_ERROR || code == CURLE_SEND_ERROR;
-            return {GenerationFailure{SessionStop::transport_error, diagnostic(curl_easy_strerror(code))},
-                    transient ? std::optional(0ms) : std::nullopt};
+            return observed({GenerationFailure{SessionStop::transport_error, diagnostic(curl_easy_strerror(code))},
+                             transient ? std::optional(0ms) : std::nullopt});
         }
-        return {transfer.stream.finish(emit), {}, transfer.stream.input_tokens(), transfer.stream.output_tokens(), first_byte};
+        return observed({transfer.stream.finish(emit), {}});
     }
 
 private:
@@ -445,12 +456,13 @@ Generate provider_model(const Provider& provider, StopRequested stop_requested, 
                     try { attempt_started(); } catch (...) {}
                 }
                 ++generation.attempts;
+                auto& layout = generation.observations.emplace_back(projection.layout);
                 auto result = transport->post(projection.body, emit, stop_requested, preview);
-                auto layout = projection.layout;
                 layout.input_tokens = result.input_tokens;
                 layout.output_tokens = result.output_tokens;
                 layout.first_byte_us = result.first_byte_us;
-                generation.observations.push_back(layout);
+                layout.uploaded_body_bytes = result.uploaded_body_bytes;
+                layout.provider_usage = std::move(result.provider_usage);
                 generation.failure = std::move(result.failure);
                 if (!repaired && generation.failure && generation.failure->reason == SessionStop::context_limit &&
                     attempt + 1 < limit && request.history.size() > 1) {

@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -64,6 +65,8 @@ struct Round {
     bool operator==(const Round&) const = default;
 };
 
+using UsageFields = std::map<std::string, std::optional<std::size_t>, std::less<>>;
+
 struct ModelAttempt {
     std::size_t first_round = 0;
     std::size_t retained_rounds = 0;
@@ -73,6 +76,9 @@ struct ModelAttempt {
     std::optional<std::size_t> input_tokens;
     std::optional<std::size_t> output_tokens;
     std::optional<std::size_t> first_byte_us{};
+    std::optional<std::size_t> request_number{};
+    std::optional<std::size_t> uploaded_body_bytes{};
+    std::optional<UsageFields> provider_usage{};
     bool operator==(const ModelAttempt&) const = default;
 };
 

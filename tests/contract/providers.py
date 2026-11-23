@@ -76,6 +76,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
+        self.server.request_body_bytes = len(body)
         self.handle_request("POST", json.loads(body))
 
 
@@ -83,7 +84,7 @@ def stream(body):
     return lambda _: (body, 200, "text/event-stream")
 
 
-def tests(executable, base, server):
+def tests(executable, driver, base, server):
     root = base / "工作区"
     root.mkdir()
     (root / SOURCE).write_text("gateway evidence", encoding="utf-8")
@@ -98,11 +99,11 @@ def tests(executable, base, server):
     state = base / "state"
     env = {**os.environ, KEY_VARIABLE: "fixture-secret", "LOCALAPPDATA": str(state), "XDG_STATE_HOME": str(state)}
 
-    def cli(arguments, steps, code=0, environment=env):
+    def cli(arguments, steps, code=0, environment=env, program=executable, data=b""):
         server.steps = list(steps)
         server.errors = []
-        outcome = subprocess.run([executable, "--provider-config", config, *arguments], env=environment,
-                                 input=b"", capture_output=True, timeout=10)
+        outcome = subprocess.run([program, "--provider-config", config, *arguments], env=environment,
+                                 input=data, capture_output=True, timeout=10)
         stdout = outcome.stdout.decode("utf-8").replace("\r\n", "\n")
         stderr = outcome.stderr.decode("utf-8").replace("\r\n", "\n")
         assert not server.steps and not server.errors, (server.steps, server.errors, stdout, stderr)
@@ -278,6 +279,61 @@ def tests(executable, base, server):
         shown, _ = cli(options, [fresh, final])
     assert f"[citation] {SOURCE}:2\n" in shown and f"[citation source] {SOURCE}:2 task=3 round=4" in shown
 
+    page = root / "app.py"
+    page.write_bytes(b"def page(items, number, size):\n    start = number * size\n    return items[start:start + size]\n")
+    calls = []
+    counts = [
+        {"input_tokens": 59000, "output_tokens": 10, "total_tokens": 59010,
+         "input_tokens_details": {"cached_tokens": 58000, "provider_note": "omit this text"},
+         "cache_creation_input_tokens": 24, "cache_read_input_tokens": 58000},
+        {"input_tokens": 600, "output_tokens": 20, "input_tokens_details": {"cached_tokens": None}},
+        {"input_tokens": 800, "output_tokens": -1, "output_tokens_details": {"reasoning_tokens": 5}},
+        {"input_tokens": 900, "output_tokens": 25},
+    ]
+
+    def audit_round(index):
+        def reply(payload):
+            calls.append(server.request_body_bytes)
+            arguments = {"path": "app.py"}
+            if index == 1:
+                arguments.update(version=payload["input"][-1]["output"].split("version=")[-1].strip(),
+                                 old_text="number * size", new_text="(number - 1) * size")
+            output = [message("分页偏移已修复。")] if index == 3 else [{
+                "type": "function_call", "id": f"fc_audit_{index}", "call_id": f"call_audit_{index}",
+                "name": "edit" if index == 1 else "read", "arguments": json.dumps(arguments),
+            }]
+            return response("response.completed", response={"id": f"resp_audit_{index}", "status": "completed",
+                           "output": output, "usage": counts[index]}), 200, "text/event-stream"
+        return ("POST", "/relay/v1/responses", reply)
+
+    flags = ["--workspace", root, "--session", "usage-audit", "--write", "app.py"]
+    cli([*flags, "--question", "只改 app.py。修复从 1 开始编号的分页起点。"],
+        [audit_round(i) for i in range(4)], environment={**env, "LAY_TEST_INTERACTIVE": "1"}, program=driver, data=b"y\n")
+    assert b"(number - 1) * size" in page.read_bytes()
+    audit_db = database_dir / "session-usage-audit.sqlite3"
+    with closing(sqlite3.connect(audit_db)) as database:
+        attempts = json.loads(database.execute("SELECT snapshot FROM session").fetchone()[0])["model_attempts"]
+    assert [a["request_number"] for a in attempts] == [1, 2, 3, 4]
+    assert [a["body_bytes"] for a in attempts] == [a["uploaded_body_bytes"] for a in attempts] == calls
+    assert [a["input_tokens"] for a in attempts] == [59000, 600, 800, 900]
+    assert [a["output_tokens"] for a in attempts] == [10, 20, None, 25]
+    assert attempts[0]["provider_usage"]["cache_read_input_tokens"] == 58000
+    assert attempts[0]["provider_usage"]["input_tokens_details.cached_tokens"] == 58000
+    assert attempts[1]["provider_usage"]["input_tokens_details.cached_tokens"] is None
+    assert "input_tokens_details.cached_tokens" not in attempts[2]["provider_usage"]
+    script = Path(__file__).resolve().parents[2] / "bench" / "usage_audit.py"
+    report = json.loads(subprocess.check_output([sys.executable, "-B", script, audit_db]))
+    assert report["tasks"][0]["totals"]["input_tokens"] == {"known_total": 61300, "requests_without_count": 0}
+    assert report["tasks"][0]["totals"]["output_tokens"] == {"known_total": 55, "requests_without_count": 1}
+    assert report["verified_cost"] is None
+    followed = json.loads(subprocess.check_output([sys.executable, "-B", script, database_path]))
+    assert [row["task"] for row in followed["tasks"]] == [1, 2, 3]
+    assert [row["totals"]["input_tokens"]["known_total"] for row in followed["tasks"]] == [42, 21, 42]
+    assert [row["totals"]["input_tokens"]["requests_without_count"] for row in followed["tasks"]] == [
+        0, 0, int(os.name != "nt")]
+    replayed, _ = cli([*flags, "--resume"], [])
+    assert "end_turn requests=4" in replayed
+
     incomplete = (response("response.output_text.delta", delta="未提交的预览")
                   + response("response.output_item.added", output_index=0, item={**item, "arguments": ""})
                   + completed([item]))
@@ -303,7 +359,7 @@ if __name__ == "__main__":
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            tests(sys.argv[1], Path(storage), server)
+            tests(sys.argv[1], sys.argv[2], Path(storage), server)
         finally:
             server.shutdown()
     print("Verified Chat Completions, Responses, catalog authentication, crash boundaries and provider scope.")

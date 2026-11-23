@@ -332,9 +332,12 @@ Session continue_session(Session session, const Generate& generate, const Execut
                 interrupted = interrupted || stop_requested();
                 return !interrupted && draft.receive(event);
             });
+            for (std::size_t i = 0; i < result.observations.size(); ++i) {
+                auto attempt = result.observations[i];
+                attempt.request_number = session.requests + i + 1;
+                session.model_attempts.push_back(std::move(attempt));
+            }
             session.requests += result.attempts;
-            session.model_attempts.insert(session.model_attempts.end(), result.observations.begin(),
-                                          result.observations.end());
             if (interrupted || stop_requested()) {
                 session.stop = SessionStop::cancelled;
                 break;

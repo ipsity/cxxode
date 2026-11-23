@@ -84,7 +84,7 @@ if(BUILD_TESTING)
             $<TARGET_FILE:readonly_contract> $<TARGET_FILE:lay-code>)
         set_tests_properties(readonly.contract PROPERTIES TIMEOUT 45)
         add_test(NAME providers.contract COMMAND Python3::Interpreter
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/contract/providers.py $<TARGET_FILE:lay-code>)
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/contract/providers.py $<TARGET_FILE:lay-code> $<TARGET_FILE:edit_fault_driver>)
         set_tests_properties(providers.contract PROPERTIES TIMEOUT 45)
         add_executable(edit_fault_driver app/main.cpp)
         target_compile_definitions(edit_fault_driver PRIVATE LAY_WITH_ANTHROPIC LAY_TEST_HOOKS)
