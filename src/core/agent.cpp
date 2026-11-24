@@ -150,6 +150,17 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
 void agent::run_tools(const message& reply, agent_events& events, cancel_token& cancel, message& results,
                       turn_backup& backup) {
     const auto calls = reply.tool_uses();
+
+    // TODO: 未来可以启用智能调度器
+    // 当前保持原有逻辑以确保稳定性
+    // 可通过配置开关启用：USE_SMART_SCHEDULER
+
+    // if (use_smart_scheduler) {
+    //     run_tools_smart(reply, events, cancel, results, backup);
+    //     return;
+    // }
+
+    // 现有逻辑保持不变
     std::size_t i = 0;
     while (i < calls.size()) {
         if (cancel.cancelled()) {
