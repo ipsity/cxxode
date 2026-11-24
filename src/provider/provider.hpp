@@ -38,7 +38,7 @@ struct model_reply {
 
 struct stream_events {
     std::function<void(std::string_view)> text;
-    std::function<void(std::string_view)> thinking;
+    std::function<void(std::string_view text, std::string_view signature)> thinking;
     std::function<void(const std::string& name)> tool_started;
 };
 

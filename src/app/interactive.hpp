@@ -56,7 +56,7 @@ private:
     void start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact);
     void drain();
     void apply(ev_text&);
-    void apply(ev_thinking&) { thinking_ = true; }
+    void apply(ev_thinking& e);
     void apply(ev_request&) { thinking_ = true; }
     void apply(ev_tool_start&);
     void apply(ev_progress&);
