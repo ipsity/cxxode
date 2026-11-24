@@ -56,7 +56,7 @@ hook_result execute_hook(const hook_config& config, const hook_context& ctx, can
     return hr;
 }
 
-std::vector<hook_config> load_hooks(const settings& config) {
+std::vector<hook_config> load_hooks(const settings&) {
     std::vector<hook_config> hooks;
 
     // Parse hooks from config (not yet implemented in settings structure)
