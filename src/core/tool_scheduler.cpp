@@ -11,6 +11,15 @@ SmartToolScheduler::execute(const std::vector<ToolCall>& calls) {
 
     std::vector<ToolResult> results(calls.size());
 
+    // 检查 steering（用户实时引导）
+    if (steering_) {
+        auto messages = steering_();
+        if (!messages.empty()) {
+            // 用户有新指令，可能需要调整执行
+            // TODO: 处理 steering 消息
+        }
+    }
+
     switch (strategy_) {
         case Strategy::Sequential: {
             // 串行执行

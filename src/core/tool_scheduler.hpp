@@ -38,6 +38,7 @@ public:
     };
 
     using ExecutorFunc = std::function<ToolResult(const ToolCall&)>;
+    using SteeringFunc = std::function<std::vector<std::string>()>;  // 用户实时引导
 
     // 调度策略
     enum class Strategy {
@@ -48,6 +49,9 @@ public:
 
     SmartToolScheduler(ExecutorFunc executor, Strategy strategy = Strategy::Smart)
         : executor_(std::move(executor)), strategy_(strategy) {}
+
+    // 设置 steering 回调（用户实时引导）
+    void set_steering(SteeringFunc steering) { steering_ = std::move(steering); }
 
     // 执行工具调用列表
     std::vector<ToolResult> execute(const std::vector<ToolCall>& calls);
@@ -76,6 +80,7 @@ private:
     );
 
     ExecutorFunc executor_;
+    SteeringFunc steering_;  // 用户实时引导
     Strategy strategy_;
 };
 
