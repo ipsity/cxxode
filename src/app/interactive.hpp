@@ -91,6 +91,8 @@ private:
     bool busy_ = false;
     bool thinking_ = false;
     bool quit_ = false;
+    bool editing_fork_ = false;         // True when editing a forked message
+    steady::time_point last_escape_{};  // For double-escape detection
     steady::time_point ctrl_c_at_{};    // first Ctrl+C on an empty draft
     std::string hint_;                  // one-off line above the input box
     steady::time_point hint_at_{};

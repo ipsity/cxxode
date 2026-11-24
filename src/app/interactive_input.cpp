@@ -109,8 +109,53 @@ void interactive_ui::handle(const ui::key& k) {
             break;
         }
         case key_kind::escape:
-            if (busy_) cancel();
-            else editor_.clear();
+            if (busy_) {
+                cancel();
+            } else if (editing_fork_) {
+                // Cancel fork editing
+                editing_fork_ = false;
+                editor_.clear();
+                note("已取消编辑", ui::tone::dim);
+            } else {
+                // Check for double-escape to fork
+                const auto now = steady::now();
+                if (last_escape_ != steady::time_point{} && now - last_escape_ < 500ms) {
+                    // Double escape - fork the last user message
+                    if (app_.core->messages.empty()) {
+                        note("没有可编辑的消息", ui::tone::dim);
+                    } else {
+                        // Find the last user message
+                        std::size_t user_idx = std::string::npos;
+                        for (std::size_t i = app_.core->messages.size(); i-- > 0;) {
+                            if (app_.core->messages[i].from == message::role::user) {
+                                user_idx = i;
+                                break;
+                            }
+                        }
+                        if (user_idx == std::string::npos) {
+                            note("没有可编辑的用户消息", ui::tone::dim);
+                        } else {
+                            // Enter fork editing mode
+                            editing_fork_ = true;
+                            const auto& last_user = app_.core->messages[user_idx];
+                            // Extract text from blocks
+                            std::string text;
+                            for (const auto& block : last_user.blocks) {
+                                if (block.type == block::kind::text) {
+                                    text += block.text;
+                                }
+                            }
+                            editor_.set(text);
+                            hint_ = "编辑中 · Esc 取消 · Enter 创建分支";
+                            hint_at_ = steady::now();
+                        }
+                    }
+                    last_escape_ = {};
+                } else {
+                    if (!editor_.empty()) editor_.clear();
+                    last_escape_ = now;
+                }
+            }
             break;
         case key_kind::ctrl:
             switch (k.letter) {
