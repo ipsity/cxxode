@@ -23,6 +23,17 @@ public:
     std::size_t cursor() const { return cursor_; }
     bool empty() const { return text_.empty(); }
 
+    // Extracts the @ mention at the cursor: returns the text after @ up to the cursor.
+    // Returns nullopt if cursor is not inside a @mention pattern.
+    std::optional<std::string> at_mention() const {
+        if (cursor_ == 0) return std::nullopt;
+        // Find the last @ before the cursor
+        auto pos = cursor_;
+        while (pos > 0 && text_[pos - 1] != '@' && text_[pos - 1] != ' ' && text_[pos - 1] != '\n') --pos;
+        if (pos == 0 || text_[pos - 1] != '@') return std::nullopt;
+        return std::string(text_.substr(pos, cursor_ - pos));
+    }
+
     void set(std::string value) {
         text_ = std::move(value);
         cursor_ = text_.size();

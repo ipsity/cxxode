@@ -52,7 +52,8 @@ add_executable(lay src/main.cpp
     src/app/interactive.cpp
     src/app/interactive_events.cpp
     src/app/interactive_input.cpp
-    src/app/interactive_view.cpp)
+    src/app/interactive_view.cpp
+    src/app/interactive_files.cpp)
 target_link_libraries(lay PRIVATE lay_core)
 if(MINGW)
     target_link_options(lay PRIVATE -static)

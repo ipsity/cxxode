@@ -142,6 +142,18 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     if (!hint_.empty()) rows.push_back("  " + paint(tone::dim, hint_));
     for (auto& r : palette_rows(columns)) rows.push_back(std::move(r));
 
+    // File completion palette
+    const auto files = file_items();
+    if (!files.empty()) {
+        const std::size_t show = std::min<std::size_t>(files.size(), 8);
+        for (std::size_t i = 0; i < show; ++i) {
+            const bool on = i == palette_index_ % files.size();
+            auto name = files[i];
+            if (text::width(name) > columns - 6) name = text::keep_tail(name, columns - 6);
+            rows.push_back("  " + paint(on ? tone::accent : tone::dim, name));
+        }
+    }
+
     // Input box: ╭─╮ │ › text │ ╰─╯
     const int inner = std::max(4, columns - 6);
     std::string bar;

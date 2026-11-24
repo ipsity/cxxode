@@ -71,6 +71,7 @@ private:
     std::vector<std::string> live(int& cursor_row, int& cursor_col);
     std::vector<std::string> palette_rows(int columns);
     std::vector<std::string> palette_items();  // All available commands/skills/user commands
+    std::vector<std::string> file_items();     // File completion candidates
     std::string status_line(int columns) const;
     void push(ui_event e);
     agent_events make_events();

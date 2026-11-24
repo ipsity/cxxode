@@ -57,6 +57,7 @@ void interactive_ui::handle(const ui::key& k) {
     }
     const int inner = std::max(4, size_.columns - 7);
     const auto items = palette_items();
+    const auto files = file_items();
     switch (k.kind) {
         case key_kind::character: editor_.insert(k.text); palette_index_ = 0; break;
         case key_kind::newline: editor_.insert("\n"); break;
@@ -78,17 +79,28 @@ void interactive_ui::handle(const ui::key& k) {
         case key_kind::home: editor_.home(); break;
         case key_kind::end: editor_.end(); break;
         case key_kind::up:
-            if (!palette_items().empty()) palette_index_ = (palette_index_ + palette_items().size() - 1) % palette_items().size();
+            if (!items.empty()) palette_index_ = (palette_index_ + items.size() - 1) % items.size();
+            else if (!files.empty()) palette_index_ = (palette_index_ + files.size() - 1) % files.size();
             else if (!editor_.vertical(-1, inner)) editor_.history_prev();
             break;
         case key_kind::down:
-            if (!palette_items().empty()) palette_index_ = (palette_index_ + 1) % palette_items().size();
+            if (!items.empty()) palette_index_ = (palette_index_ + 1) % items.size();
+            else if (!files.empty()) palette_index_ = (palette_index_ + 1) % files.size();
             else if (!editor_.vertical(1, inner)) editor_.history_next();
             break;
         case key_kind::tab:
-            if (!palette_items().empty()) {
-                const auto items = palette_items();
+            if (!items.empty()) {
                 if (palette_index_ < items.size()) editor_.set(items[palette_index_] + " ");
+            } else if (!files.empty()) {
+                // Replace the @mention with the selected file
+                const auto mention = editor_.at_mention();
+                if (mention && palette_index_ < files.size()) {
+                    const auto& selected = files[palette_index_];
+                    // Delete backwards to the @, then insert @selected
+                    for (std::size_t i = 0; i < mention->size(); ++i) editor_.backspace();
+                    editor_.backspace();  // Remove the @
+                    editor_.insert("@" + selected);
+                }
             }
             break;
         case key_kind::shift_tab: {
