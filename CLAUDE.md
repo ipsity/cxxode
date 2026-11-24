@@ -1,4 +1,4 @@
-# Lay Code V2
+# cxxode V2
 
 原生 C++20 终端 coding agent。设计依据：`docs/BLUEPRINT_V2.md`。有冲突可以提出修改，蓝图不是不可讨论的。
 

@@ -1,4 +1,4 @@
-# Lay Code V2 蓝图
+# cxxode V2 蓝图
 
 2026-11-24 · 取代 `docs/00_MASTER.md` 及 `docs/modules/` 的方向性内容（旧文档保留在原处，未改动）
 

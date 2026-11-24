@@ -1,6 +1,6 @@
-# Lay Code
+# cxxode
 
-用 C++20 写的终端 coding agent。目标：启动 < 20 ms，空闲内存 < 15 MB，单个 exe，兼容 Claude Code 的 skills、命令、MCP、hooks 和插件格式。
+用 C++20 写的终端 coding agent。cxx (C++) + ode (颂诗) = code。
 
 **当前状态：V2 M2** — Skills、用户命令、@文件补全、Esc Esc 分叉已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
 
