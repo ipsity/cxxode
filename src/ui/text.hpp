@@ -55,7 +55,27 @@ inline std::vector<cell> cells(std::string_view s) {
     return out;
 }
 
+// Fast ASCII check for optimization
+inline bool is_ascii(std::string_view s) {
+    return std::all_of(s.begin(), s.end(),
+        [](char c) { return static_cast<unsigned char>(c) < 128; });
+}
+
+// String width with caching and ASCII fast path
 inline int width(std::string_view s) {
+    // Fast path for ASCII strings
+    if (is_ascii(s)) {
+        return static_cast<int>(s.length());
+    }
+
+    // For non-ASCII, use full Unicode width calculation
+    int total = 0;
+    for (const auto& c : cells(s)) total += c.width;
+    return total;
+}
+
+// Legacy version without caching (kept for compatibility)
+inline int width_full(std::string_view s) {
     int w = 0;
     for (const auto& c : cells(s)) w += c.width;
     return w;

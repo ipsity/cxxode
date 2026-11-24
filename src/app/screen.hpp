@@ -25,21 +25,54 @@ public:
         erase(out);
         for (const auto& line : pending_) out += line + "\x1b[0m\x1b[K\r\n";
         pending_.clear();
-        for (std::size_t i = 0; i < live.size(); ++i) {
-            out += live[i] + "\x1b[0m\x1b[K";
-            if (i + 1 < live.size()) out += "\r\n";
-        }
-        const int last = static_cast<int>(live.size()) - 1;
-        if (cursor_row >= 0 && cursor_row <= last) {
-            if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
+
+        // Differential rendering: only update changed lines
+        bool use_differential = !last_live_.empty() && last_live_.size() == live.size();
+
+        if (use_differential) {
+            // Position cursor at start of live area
             out += "\r";
-            if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
-            out += "\x1b[?25h";
-            up_ = cursor_row;
+            for (std::size_t i = 0; i < live.size(); ++i) {
+                if (i < last_live_.size() && live[i] == last_live_[i]) {
+                    // Line unchanged, skip to next
+                    if (i + 1 < live.size()) out += "\x1b[B\r";  // Down + CR
+                } else {
+                    // Line changed, redraw it
+                    out += live[i] + "\x1b[0m\x1b[K";
+                    if (i + 1 < live.size()) out += "\r\n";
+                }
+            }
+            // Move back up to cursor position
+            const int last = static_cast<int>(live.size()) - 1;
+            if (cursor_row >= 0 && cursor_row <= last) {
+                if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
+                out += "\r";
+                if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
+                out += "\x1b[?25h";
+                up_ = cursor_row;
+            } else {
+                up_ = last < 0 ? 0 : last;
+            }
         } else {
-            up_ = last < 0 ? 0 : last;
+            // Full redraw
+            for (std::size_t i = 0; i < live.size(); ++i) {
+                out += live[i] + "\x1b[0m\x1b[K";
+                if (i + 1 < live.size()) out += "\r\n";
+            }
+            const int last = static_cast<int>(live.size()) - 1;
+            if (cursor_row >= 0 && cursor_row <= last) {
+                if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
+                out += "\r";
+                if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
+                out += "\x1b[?25h";
+                up_ = cursor_row;
+            } else {
+                up_ = last < 0 ? 0 : last;
+            }
         }
+
         drawn_ = !live.empty();
+        last_live_ = live;  // Cache for next differential update
         out += "\x1b[?2026l";
         term_.write(out);
     }
@@ -82,6 +115,7 @@ private:
 
     ui::terminal& term_;
     std::vector<std::string> pending_;
+    std::vector<std::string> last_live_;  // Cache for differential rendering
     int up_ = 0;
     bool drawn_ = false;
 };
