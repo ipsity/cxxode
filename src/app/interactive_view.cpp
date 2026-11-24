@@ -7,6 +7,14 @@ using ui::tone;
 
 namespace {
 
+enum class command_kind { builtin, skill, user_command };
+
+struct palette_item {
+    std::string name;
+    std::string description;
+    command_kind kind;
+};
+
 const std::pair<const char*, const char*> builtin_commands[] = {
     {"/help", "快捷键与命令"},       {"/compact", "压缩上下文"},   {"/model", "查看或切换模型"},
     {"/mode", "切换权限档 plan/default/yolo"}, {"/resume", "恢复本目录的会话"}, {"/undo", "撤销上一轮的文件改动"},
@@ -26,27 +34,61 @@ std::string seconds(steady::time_point since) {
 
 } // namespace
 
-std::vector<std::pair<std::string, std::string>> interactive_ui::palette_matches() const {
-    std::vector<std::pair<std::string, std::string>> out;
+std::vector<std::string> interactive_ui::palette_items() {
+    std::vector<palette_item> items;
     const auto& t = editor_.text();
-    if (t.empty() || t.front() != '/' || t.find_first_of(" \n") != std::string::npos) return out;
+
+    // Only show palette if input starts with / and has no spaces or newlines
+    if (t.empty() || t.front() != '/' || t.find_first_of(" \n") != std::string::npos) return {};
+
+    // Add builtin commands
     for (const auto& [name, about] : builtin_commands) {
-        if (std::string_view(name).starts_with(t)) out.emplace_back(name, about);
+        if (std::string_view(name).starts_with(t)) {
+            items.push_back({name, about, command_kind::builtin});
+        }
     }
-    return out;
+
+    // Add skills
+    for (const auto& skill : app_.skills) {
+        const auto name = "/" + skill.name;
+        if (name.starts_with(t)) {
+            items.push_back({name, skill.description + " (skill)", command_kind::skill});
+        }
+    }
+
+    // Add user commands
+    for (const auto& cmd : app_.commands) {
+        const auto name = "/" + cmd.name;
+        if (name.starts_with(t)) {
+            items.push_back({name, cmd.description, command_kind::user_command});
+        }
+    }
+
+    // Convert to string pairs (name, description)
+    std::vector<std::string> result;
+    for (const auto& item : items) {
+        result.push_back(item.name + "\t" + item.description);
+    }
+    return result;
 }
 
 std::vector<std::string> interactive_ui::palette_rows(int columns) {
     std::vector<std::string> rows;
-    const auto matches = palette_matches();
-    if (matches.empty()) return rows;
-    if (palette_index_ >= matches.size()) palette_index_ = 0;
-    for (std::size_t i = 0; i < matches.size() && i < 8; ++i) {
+    const auto items = palette_items();
+    if (items.empty()) return rows;
+    if (palette_index_ >= items.size()) palette_index_ = 0;
+
+    for (std::size_t i = 0; i < items.size() && i < 8; ++i) {
         const bool on = i == palette_index_;
-        auto name = matches[i].first;
-        name.resize(std::max<std::size_t>(name.size(), 10), ' ');
-        auto row = "  " + paint(on ? tone::accent_bold : tone::normal, name) + "  " + paint(tone::dim, matches[i].second);
-        rows.push_back(text::width(name) + 4 > columns ? text::keep_head(row, columns) : row);
+        // Split by tab
+        const auto tab = items[i].find('\t');
+        const auto name = items[i].substr(0, tab);
+        const auto desc = tab != std::string::npos ? items[i].substr(tab + 1) : std::string{};
+
+        auto padded_name = name;
+        padded_name.resize(std::max<std::size_t>(padded_name.size(), 10), ' ');
+        auto row = "  " + paint(on ? tone::accent_bold : tone::normal, padded_name) + "  " + paint(tone::dim, desc);
+        rows.push_back(text::width(padded_name) + 4 > columns ? text::keep_head(row, columns) : row);
     }
     return rows;
 }

@@ -14,10 +14,14 @@ void interactive_ui::submit() {
     auto text = editor_.text();
     while (!text.empty() && (text.back() == '\n' || text.back() == ' ')) text.pop_back();
     if (text.empty()) return;
+    const auto items = palette_items();
     // A command chosen in the palette runs as typed in full.
-    const auto matches = palette_matches();
-    if (!matches.empty() && text != matches[palette_index_ % matches.size()].first)
-        text = matches[palette_index_ % matches.size()].first;
+    if (!items.empty() && text != items[palette_index_ % items.size()]) {
+        // Extract just the command name (before space if present)
+        const auto chosen = items[palette_index_ % items.size()];
+        const auto space = chosen.find(' ');
+        text = space == std::string::npos ? chosen : chosen.substr(0, space);
+    }
     editor_.remember(text);
     editor_.clear();
     palette_index_ = 0;
@@ -52,7 +56,7 @@ void interactive_ui::handle(const ui::key& k) {
         return;
     }
     const int inner = std::max(4, size_.columns - 7);
-    const auto matches = palette_matches();
+    const auto items = palette_items();
     switch (k.kind) {
         case key_kind::character: editor_.insert(k.text); palette_index_ = 0; break;
         case key_kind::newline: editor_.insert("\n"); break;
@@ -74,15 +78,18 @@ void interactive_ui::handle(const ui::key& k) {
         case key_kind::home: editor_.home(); break;
         case key_kind::end: editor_.end(); break;
         case key_kind::up:
-            if (!matches.empty()) palette_index_ = (palette_index_ + matches.size() - 1) % matches.size();
+            if (!palette_items().empty()) palette_index_ = (palette_index_ + palette_items().size() - 1) % palette_items().size();
             else if (!editor_.vertical(-1, inner)) editor_.history_prev();
             break;
         case key_kind::down:
-            if (!matches.empty()) palette_index_ = (palette_index_ + 1) % matches.size();
+            if (!palette_items().empty()) palette_index_ = (palette_index_ + 1) % palette_items().size();
             else if (!editor_.vertical(1, inner)) editor_.history_next();
             break;
         case key_kind::tab:
-            if (!matches.empty()) editor_.set(matches[palette_index_ % matches.size()].first + " ");
+            if (!palette_items().empty()) {
+                const auto items = palette_items();
+                if (palette_index_ < items.size()) editor_.set(items[palette_index_] + " ");
+            }
             break;
         case key_kind::shift_tab: {
             const auto m = next_mode(app_.config.permissions.mode());
