@@ -31,6 +31,8 @@ std::string skills_system_prompt(const std::vector<skill>& skills);
 // Forward declarations
 class mcp_client;
 struct agent_config;
+class provider;
+struct permission_rules;
 
 // Creates the full tool list including builtin tools, skills, MCP tools, and task tool
 std::vector<tool> make_tools(const std::vector<skill>& skills,
