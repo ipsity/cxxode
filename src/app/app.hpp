@@ -4,6 +4,7 @@
 #include "commands/command.hpp"
 #include "config/config.hpp"
 #include "core/agent.hpp"
+#include "core/command_history.hpp"
 #include "core/error_handler.hpp"
 #include "core/tool_suggestion.hpp"
 #include "mcp/mcp_client.hpp"
@@ -38,6 +39,9 @@ struct app {
 
     // Week 2 Day 9: Error handler
     error_handler error_handler_;
+
+    // Week 2 Day 10: Command history
+    command_history history;
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);

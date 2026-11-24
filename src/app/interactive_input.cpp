@@ -31,6 +31,9 @@ void interactive_ui::submit() {
         }
     }
 
+    // Day 10: Add to command history for persistence
+    app_.history.add(text);
+
     editor_.remember(text);
     editor_.clear();
     palette_index_ = 0;

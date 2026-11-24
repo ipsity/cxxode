@@ -8,9 +8,24 @@ using namespace std::chrono_literals;
 interactive_ui::interactive_ui(app& a, ui::terminal& term) : app_(a), term_(term), screen_(term) {
     size_ = term_.dimensions();
     branch_ = git_branch(app_.root);
+
+    // Day 10: Load command history
+    const auto history_path = app_.root / ".claude" / "command_history.txt";
+    if (fs::exists(history_path)) {
+        app_.history.load(history_path);
+    }
 }
 
 interactive_ui::~interactive_ui() {
+    // Day 10: Save command history
+    const auto history_path = app_.root / ".claude" / "command_history.txt";
+    try {
+        fs::create_directories(history_path.parent_path());
+        app_.history.save(history_path);
+    } catch (...) {
+        // Ignore save errors
+    }
+
     cancel_.cancel();
     // The worker may be blocked on a confirmation; answer it so the thread can finish.
     while (worker_.joinable()) {
