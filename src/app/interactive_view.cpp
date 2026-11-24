@@ -38,24 +38,25 @@ std::string spinner(steady::time_point since) {
 }
 
 std::string spinner_with_color(steady::time_point since, std::string_view tool_name, const theme& t) {
-    // Color selection based on tool type from theme
-    const char* color_code;
+    // Use cached color codes for performance
+    const std::string* color_code;
 
     if (tool_name == "Read") {
-        color_code = t.tool_read.ansi_fg().c_str();
+        color_code = &t.tool_read_fg;
     } else if (tool_name == "Write") {
-        color_code = t.tool_write.ansi_fg().c_str();
+        color_code = &t.tool_write_fg;
     } else if (tool_name == "Edit") {
-        color_code = t.tool_edit.ansi_fg().c_str();
+        color_code = &t.tool_edit_fg;
     } else if (tool_name == "Bash") {
-        color_code = t.tool_bash.ansi_fg().c_str();
+        color_code = &t.tool_bash_fg;
     } else if (tool_name == "Grep" || tool_name == "Glob") {
-        color_code = t.tool_search.ansi_fg().c_str();
+        color_code = &t.tool_search_fg;
     } else {
-        color_code = "\033[38;2;200;200;200m"; // Default gray
+        static const std::string default_color = "\033[38;2;200;200;200m";
+        color_code = &default_color;
     }
 
-    return std::string(color_code) + spinner(since) + "\033[0m";
+    return *color_code + spinner(since) + "\033[0m";
 }
 
 std::string seconds(steady::time_point since) {
@@ -150,6 +151,7 @@ std::string interactive_ui::status_line(int columns) const {
 
 std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) {
     std::vector<std::string> rows;
+    rows.reserve(size_.rows);  // Preallocate for performance
     const int columns = std::max(20, size_.columns - 1);
 
     // Unfinished streamed line.
@@ -249,11 +251,11 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     const int content_end = static_cast<int>(rows.size());
 
     // Draw input box with borders (now guaranteed at bottom)
-    // Top border - use theme color with BOLD
+    // Top border - use cached theme color with BOLD
     std::string top_border;
+    top_border.reserve(columns + 20);  // Preallocate
     for (int i = 0; i < columns; ++i) top_border += "─";
-    const auto border_color_code = app_.current_theme.border.ansi_fg();
-    rows.push_back(border_color_code + "\033[1m" + top_border + "\033[0m");
+    rows.push_back(app_.current_theme.border_fg + "\033[1m" + top_border + "\033[0m");
 
     // Input lines
     for (std::size_t i = 0; i < l.rows.size() && i < static_cast<std::size_t>(max_input_lines); ++i) {
@@ -263,20 +265,20 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
 
         if (i == 0) {
-            // Use theme color for input prompt - BOLD
-            const auto prompt_color = app_.current_theme.prompt.ansi_fg();
-            rows.push_back(prompt_color + "\033[1m› \033[0m" + prompt_color + "\033[1m" + shown + "\033[0m");
+            // Use cached theme color for input prompt - BOLD
+            rows.push_back(app_.current_theme.prompt_fg + "\033[1m› \033[0m" +
+                          app_.current_theme.prompt_fg + "\033[1m" + shown + "\033[0m");
         } else {
             // Continuation lines also bold
-            const auto prompt_color = app_.current_theme.prompt.ansi_fg();
-            rows.push_back(prompt_color + "\033[1m  " + shown + "\033[0m");
+            rows.push_back(app_.current_theme.prompt_fg + "\033[1m  " + shown + "\033[0m");
         }
     }
 
-    // Bottom border - reuse color with BOLD
+    // Bottom border - use cached color with BOLD
     std::string bottom_border;
+    bottom_border.reserve(columns + 20);  // Preallocate
     for (int i = 0; i < columns; ++i) bottom_border += "─";
-    rows.push_back(border_color_code + "\033[1m" + bottom_border + "\033[0m");
+    rows.push_back(app_.current_theme.border_fg + "\033[1m" + bottom_border + "\033[0m");
 
     // Status line (fixed at very bottom)
     rows.push_back(status_line(columns));

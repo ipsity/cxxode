@@ -39,6 +39,36 @@ struct theme {
 
     // Background (for reference)
     rgb_color background;
+
+    // Cached ANSI codes (for performance)
+    std::string user_message_fg;
+    std::string assistant_message_fg;
+    std::string tool_read_fg;
+    std::string tool_write_fg;
+    std::string tool_edit_fg;
+    std::string tool_bash_fg;
+    std::string tool_search_fg;
+    std::string prompt_fg;
+    std::string border_fg;
+    std::string accent_fg;
+    std::string error_fg;
+    std::string success_fg;
+
+    // Update cached codes after color changes
+    void update_cache() {
+        user_message_fg = user_message.ansi_fg();
+        assistant_message_fg = assistant_message.ansi_fg();
+        tool_read_fg = tool_read.ansi_fg();
+        tool_write_fg = tool_write.ansi_fg();
+        tool_edit_fg = tool_edit.ansi_fg();
+        tool_bash_fg = tool_bash.ansi_fg();
+        tool_search_fg = tool_search.ansi_fg();
+        prompt_fg = prompt.ansi_fg();
+        border_fg = border.ansi_fg();
+        accent_fg = accent.ansi_fg();
+        error_fg = error.ansi_fg();
+        success_fg = success.ansi_fg();
+    }
 };
 
 // Predefined themes

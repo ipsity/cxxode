@@ -38,7 +38,8 @@ theme dark_theme() {
     t.warning = {206, 145, 120};
     t.info = {79, 193, 255};
     t.background = {30, 30, 30};
-    return t;
+    t.update_cache();  // Pregenerate ANSI codes
+    t.update_cache(); return t;
 }
 
 theme dracula() {
@@ -60,7 +61,7 @@ theme dracula() {
     t.warning = {255, 184, 108};
     t.info = {139, 233, 253};
     t.background = {40, 42, 54};
-    return t;
+    t.update_cache(); return t;
 }
 
 theme nord() {
@@ -82,7 +83,7 @@ theme nord() {
     t.warning = {208, 135, 112};
     t.info = {136, 192, 208};
     t.background = {46, 52, 64};
-    return t;
+    t.update_cache(); return t;
 }
 
 theme monokai() {
@@ -104,7 +105,7 @@ theme monokai() {
     t.warning = {253, 151, 31};
     t.info = {102, 217, 239};
     t.background = {39, 40, 34};
-    return t;
+    t.update_cache(); return t;
 }
 
 theme light_theme() {
@@ -126,7 +127,7 @@ theme light_theme() {
     t.warning = {204, 102, 0};
     t.info = {0, 102, 204};
     t.background = {255, 255, 255};
-    return t;
+    t.update_cache(); return t;
 }
 
 theme solarized_dark() {
@@ -148,7 +149,7 @@ theme solarized_dark() {
     t.warning = {203, 75, 22};
     t.info = {38, 139, 210};
     t.background = {0, 43, 54};
-    return t;
+    t.update_cache(); return t;
 }
 
 std::map<std::string, theme> available_themes() {

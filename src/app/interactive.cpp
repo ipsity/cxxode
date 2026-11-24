@@ -87,10 +87,9 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
 
 void interactive_ui::start_turn(std::string text) {
     section("user");
-    // Use theme color for user messages
-    const auto user_color_code = app_.current_theme.user_message.ansi_fg();
+    // Use cached theme color for user messages
     screen_.commit(ui::layout({{text, ui::tone::normal}}, size_.columns - 1,
-                              {user_color_code + "› \033[0m", 2}, {"  ", 2}));
+                              {app_.current_theme.user_message_fg + "› \033[0m", 2}, {"  ", 2}));
     const auto window = app_.core->context_window;
     if (usage_.context > window * 8 / 10) note("上下文已用 " + short_count(usage_.context) + "，可用 /compact 压缩");
     start_job([this, text = std::move(text)](agent_events& ev, cancel_token& c) { return app_.core->run(text, ev, c); },
