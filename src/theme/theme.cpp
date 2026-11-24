@@ -173,11 +173,10 @@ theme load_theme(const std::string& name) {
 
 bool save_theme_selection(const std::string& theme_name) {
     // On Windows, use USERPROFILE instead of HOME
-    const auto home = std::getenv("USERPROFILE");
+    const char* home = std::getenv("USERPROFILE");
     if (!home) {
-        const auto h = std::getenv("HOME");
-        if (!h) return false;
-        home = h;
+        home = std::getenv("HOME");
+        if (!home) return false;
     }
 
     const std::filesystem::path ode_dir = std::filesystem::path(home) / ".ode";
@@ -193,11 +192,10 @@ bool save_theme_selection(const std::string& theme_name) {
 
 std::string load_theme_selection() {
     // On Windows, use USERPROFILE instead of HOME
-    const auto home = std::getenv("USERPROFILE");
+    const char* home = std::getenv("USERPROFILE");
     if (!home) {
-        const auto h = std::getenv("HOME");
-        if (!h) return "dark";
-        home = h;
+        home = std::getenv("HOME");
+        if (!home) return "dark";
     }
 
     const std::filesystem::path theme_file = std::filesystem::path(home) / ".ode" / "theme";
