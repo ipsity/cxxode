@@ -1,4 +1,5 @@
 #include "app/interactive.hpp"
+#include "ui/welcome.hpp"
 
 namespace ode {
 
@@ -104,6 +105,14 @@ void interactive_ui::drain() {
 }
 
 int interactive_ui::run(std::string first_prompt) {
+    // Show welcome screen properly through screen_ (prevents duplication on resize)
+    if (ui::should_show_welcome() && first_prompt.empty() && !welcome_shown_) {
+        const auto welcome = ui::welcome_screen(size_.columns);
+        screen_.commit(welcome);
+        welcome_shown_ = true;
+        ui::mark_welcome_shown();
+    }
+
     if (!first_prompt.empty()) start_turn(std::move(first_prompt));
     auto last_draw = steady::time_point{};
     bool dirty = true;

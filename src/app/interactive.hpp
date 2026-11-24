@@ -110,6 +110,7 @@ private:
 
     // Thinking block tracking
     std::vector<std::pair<std::string, bool>> thinking_blocks_;  // (signature, expanded)
+    bool welcome_shown_ = false;
 };
 
 } // namespace ode
