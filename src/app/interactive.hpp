@@ -76,6 +76,14 @@ private:
     void push(ui_event e);
     agent_events make_events();
 
+    // Track recent permission requests to prevent loops
+    struct recent_ask {
+        std::string key;  // name + label
+        steady::time_point when;
+        answer response;
+    };
+    std::vector<recent_ask> recent_asks_;
+
     app& app_;
     ui::terminal& term_;
     screen screen_;

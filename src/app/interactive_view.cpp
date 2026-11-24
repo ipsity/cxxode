@@ -21,52 +21,30 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/clear", "开始新会话"},         {"/cost", "本会话 token 用量"}, {"/exit", "退出"},
 };
 
-std::string spinner(steady::time_point since, std::string_view tool_name) {
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - since).count();
-
-    // Breathing animation for Read operations
-    if (tool_name == "Read" || tool_name == "Grep" || tool_name == "Glob") {
-        static constexpr const char* frames[] = {"●", "⬤", "●", "○"};
-        return frames[(ms / 200) % 4];
-    }
-
-    // Breathing animation for Write/Edit operations
-    if (tool_name == "Write" || tool_name == "Edit") {
-        static constexpr const char* frames[] = {"●", "⬤", "●", "○"};
-        return frames[(ms / 200) % 4];
-    }
-
-    // Line rotation for Bash
-    if (tool_name == "Bash") {
-        static constexpr const char* frames[] = {"-", "\\", "|", "/"};
-        return frames[(ms / 150) % 4];
-    }
-
-    // Default: original dot rotation (Braille)
+std::string spinner(steady::time_point since) {
+    // Unified dot rotation for all tools (Braille pattern)
     static constexpr const char* frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"};
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - since).count();
     return frames[(ms / 100) % 8];
 }
 
 std::string spinner_with_color(steady::time_point since, std::string_view tool_name) {
-    // Color codes (RGB)
-    struct { const char* ansi; } colors[] = {
-        {"\033[38;2;79;193;255m"},   // Blue for Read
-        {"\033[38;2;206;145;120m"},  // Orange for Write
-        {"\033[38;2;220;220;170m"},  // Yellow for Edit
-        {"\033[38;2;78;201;176m"},   // Green for Bash
-        {"\033[38;2;78;201;176m"},   // Cyan for Grep/Glob
-        {"\033[0m"}                   // Reset
-    };
-
+    // Color selection based on tool type
     const char* color = "\033[38;2;200;200;200m"; // Default gray
 
-    if (tool_name == "Read") color = colors[0].ansi;
-    else if (tool_name == "Write") color = colors[1].ansi;
-    else if (tool_name == "Edit") color = colors[2].ansi;
-    else if (tool_name == "Bash") color = colors[3].ansi;
-    else if (tool_name == "Grep" || tool_name == "Glob") color = colors[4].ansi;
+    if (tool_name == "Read") {
+        color = "\033[38;2;79;193;255m";   // Blue
+    } else if (tool_name == "Write") {
+        color = "\033[38;2;206;145;120m";  // Orange
+    } else if (tool_name == "Edit") {
+        color = "\033[38;2;220;220;170m";  // Yellow
+    } else if (tool_name == "Bash") {
+        color = "\033[38;2;78;201;176m";   // Green
+    } else if (tool_name == "Grep" || tool_name == "Glob") {
+        color = "\033[38;2;78;201;176m";   // Cyan
+    }
 
-    return std::string(color) + spinner(since, tool_name) + "\033[0m";
+    return std::string(color) + spinner(since) + "\033[0m";
 }
 
 std::string seconds(steady::time_point since) {

@@ -127,11 +127,45 @@ void interactive_ui::apply(ev_tool_done& e) {
 
 void interactive_ui::apply(ev_ask& e) {
     flush_stream(true);
+
+    // Check if this exact request was recently processed (within 10 seconds)
+    const auto now = steady::now();
+    const auto key = e.name + "|" + e.label;
+
+    // Clean up old entries (older than 10 seconds)
+    recent_asks_.erase(
+        std::remove_if(recent_asks_.begin(), recent_asks_.end(),
+                      [&](const recent_ask& r) {
+                          return std::chrono::duration_cast<std::chrono::seconds>(now - r.when).count() > 10;
+                      }),
+        recent_asks_.end()
+    );
+
+    // Check if this is a duplicate request
+    for (const auto& recent : recent_asks_) {
+        if (recent.key == key) {
+            // Duplicate detected - use cached answer and don't show UI
+            e.reply->set_value(recent.response);
+            return;
+        }
+    }
+
+    // Also prevent duplicate if one is already pending
+    if (ask_ && ask_->name == e.name && ask_->label == e.label) {
+        e.reply->set_value(answer::no);
+        return;
+    }
+
     ask_ = std::move(e);
 }
 
 void interactive_ui::answer_ask(answer a) {
     if (!ask_) return;
+
+    // Record this decision to prevent duplicate asks
+    const auto key = ask_->name + "|" + ask_->label;
+    recent_asks_.push_back({key, steady::now(), a});
+
     if (a == answer::no) {
         section("tool");
         const auto line = std::string(ui::verb(ask_->name)) + " " + ask_->label;
