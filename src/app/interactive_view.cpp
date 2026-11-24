@@ -334,8 +334,7 @@ std::vector<std::string> interactive_ui::palette_rows(int columns) {
 
     return rows;
 }
-        rows.push_back(text::width(padded_name) + 4 > columns ? text::keep_head(row, columns) : row);
-    }
+
     return rows;
 }
 
