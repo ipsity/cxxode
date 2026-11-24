@@ -12,6 +12,7 @@ std::string sgr(tone t) {
     switch (t) {
         case tone::normal: return "\x1b[0m";
         case tone::bold: return "\x1b[0;1m";
+        case tone::italic: return "\x1b[0;3m";
         case tone::code: return "\x1b[0;38;2;0;212;255m";
         case tone::dim: return "\x1b[0;90m";
         case tone::accent: return "\x1b[0;38;2;0;212;255m";
@@ -106,10 +107,11 @@ namespace {
 std::vector<span> inline_spans(std::string_view s, tone base) {
     std::vector<span> out;
     std::string current;
-    bool bold = false, code = false;
+    bool bold = false, italic = false, code = false;
     const auto flush = [&] {
         if (current.empty()) return;
-        out.push_back({std::move(current), code ? tone::code : bold ? tone::bold : base});
+        tone t = code ? tone::code : bold ? tone::bold : italic ? tone::italic : base;
+        out.push_back({std::move(current), t});
         current.clear();
     };
     for (std::size_t i = 0; i < s.size(); ++i) {
@@ -120,6 +122,31 @@ std::vector<span> inline_spans(std::string_view s, tone base) {
             flush();
             bold = !bold;
             ++i;
+        } else if (!code && (s[i] == '*' || s[i] == '_')) {
+            // Single * or _ toggles italic (but not inside code or bold)
+            if (!bold) {
+                flush();
+                italic = !italic;
+            } else {
+                current += s[i];
+            }
+        } else if (!code && s[i] == '[') {
+            // Simplified link: [text](url) → just show text
+            std::size_t text_end = i + 1;
+            while (text_end < s.size() && s[text_end] != ']') ++text_end;
+            if (text_end < s.size() && text_end + 1 < s.size() && s[text_end + 1] == '(') {
+                std::size_t url_end = text_end + 2;
+                while (url_end < s.size() && s[url_end] != ')') ++url_end;
+                if (url_end < s.size()) {
+                    // Valid link: extract text only
+                    flush();
+                    current = std::string(s.substr(i + 1, text_end - i - 1));
+                    flush();
+                    i = url_end;
+                    continue;
+                }
+            }
+            current += s[i];
         } else {
             current += s[i];
         }

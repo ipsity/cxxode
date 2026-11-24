@@ -9,7 +9,7 @@
 namespace lay::ui {
 
 // One accent colour, one grey, red for failure. Everything else uses the terminal's own colours.
-enum class tone { normal, bold, code, dim, accent, accent_bold, error };
+enum class tone { normal, bold, italic, code, dim, accent, accent_bold, error };
 
 bool& color_enabled();
 std::string sgr(tone t);
