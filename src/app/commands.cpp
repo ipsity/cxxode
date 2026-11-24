@@ -168,7 +168,8 @@ bool interactive_ui::command(const std::string& line) {
                         // Apply theme
                         app_.current_theme = themes.at(selected);
                         note("✓ Theme applied: " + selected, tone::accent);
-                        note("Theme is now active!");
+                        note("Theme '" + selected + "' is now active!");
+                        note("Colors updated for tools and UI elements");
                     }
                 },
                 []() { /* Cancel */ }

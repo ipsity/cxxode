@@ -249,11 +249,11 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     const int content_end = static_cast<int>(rows.size());
 
     // Draw input box with borders (now guaranteed at bottom)
-    // Top border
+    // Top border - use theme color
     std::string top_border;
     for (int i = 0; i < columns; ++i) top_border += "─";
-    const auto border_color = app_.current_theme.border.ansi_fg();
-    rows.push_back(border_color + top_border + "\033[0m");
+    const auto border_color_code = app_.current_theme.border.ansi_fg();
+    rows.push_back(border_color_code + top_border + "\033[0m");
 
     // Input lines
     for (std::size_t i = 0; i < l.rows.size() && i < static_cast<std::size_t>(max_input_lines); ++i) {
@@ -271,11 +271,10 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
-    // Bottom border
+    // Bottom border - reuse color
     std::string bottom_border;
     for (int i = 0; i < columns; ++i) bottom_border += "─";
-    const auto border_color = app_.current_theme.border.ansi_fg();
-    rows.push_back(border_color + bottom_border + "\033[0m");
+    rows.push_back(border_color_code + bottom_border + "\033[0m");
 
     // Status line (fixed at very bottom)
     rows.push_back(status_line(columns));
