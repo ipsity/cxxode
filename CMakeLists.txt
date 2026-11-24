@@ -24,6 +24,8 @@ add_library(cxxode_core STATIC
     src/core/agent.cpp
     src/core/prompt.cpp
     src/core/rpc.cpp
+    src/core/tool_access.cpp
+    src/core/tool_scheduler.cpp
     src/config/config.cpp
     src/provider/provider.cpp
     src/provider/anthropic.cpp
