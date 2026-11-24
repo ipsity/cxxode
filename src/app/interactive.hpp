@@ -117,6 +117,10 @@ private:
     };
     std::optional<selection_state> selection_;
 
+    // 🆕 最近使用的命令（用于智能排序）
+    std::deque<std::string> recent_commands_;  // 最近使用的命令，最新的在前
+    static constexpr size_t MAX_RECENT_COMMANDS = 10;
+
     app& app_;
     ui::terminal& term_;
     screen screen_;

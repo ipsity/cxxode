@@ -173,6 +173,30 @@ bool interactive_ui::command(const std::string& line) {
             start_turn("Generate or update documentation for " + arg);
         }
     }
+    else if (name == "/goal") {
+        // 🆕 /goal - Goal 管理
+        if (arg.empty()) {
+            // 显示当前 goal 或清除
+            if (app_.goal_mgr.has_active_goal()) {
+                auto status = app_.goal_mgr.format_status();
+                note(status, tone::dim);
+                note("输入 /goal clear 清除目标", tone::dim);
+            } else {
+                note("当前没有活跃的 Goal", tone::dim);
+                note("用法: /goal <描述>  设置工作目标", tone::dim);
+                note("示例: /goal 完成登录功能的实现和测试", tone::dim);
+            }
+        } else if (arg == "clear") {
+            // 清除 goal
+            app_.goal_mgr.clear_goal();
+            note("✅ Goal 已清除", tone::dim);
+        } else {
+            // 设置新 goal
+            app_.goal_mgr.set_goal(arg);
+            note("🎯 Goal 已设置: " + arg, tone::dim);
+            note("AI 将持续工作直到完成此目标", tone::dim);
+        }
+    }
     else if (name == "/clear") {
         core.messages.clear();
         core.total = {};

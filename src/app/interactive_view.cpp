@@ -37,6 +37,7 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/fmt", "📐 格式化快捷方式"},
     {"/doc", "📝 生成文档"},
     {"/d", "📝 文档快捷方式"},
+    {"/goal", "🎯 设置工作目标"},  // 🆕 Goal 功能
     // 核心命令
     {"/compact", "📦 压缩上下文"},
     {"/model", "🤖 查看或切换模型"},
@@ -47,6 +48,22 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/clear", "🆕 开始新会话"},
     {"/cost", "💰 查看用量"},
     {"/exit", "👋 退出"},
+};
+
+// 命令快捷键映射（用于在面板中显示）
+const std::pair<const char*, const char*> command_shortcuts[] = {
+    {"/search", "Alt+S"},
+    {"/s", "Alt+S"},
+    {"/test", "Alt+T"},
+    {"/t", "Alt+T"},
+    {"/build", "Alt+B"},
+    {"/b", "Alt+B"},
+    {"/run", "Alt+R"},
+    {"/r", "Alt+R"},
+    {"/commit", "Alt+C"},
+    {"/c", "Alt+C"},
+    {"/help", "F1"},
+    {"/clear", "Ctrl+N"},
 };
 
 std::string spinner(steady::time_point since) {
@@ -148,6 +165,12 @@ std::vector<std::string> interactive_ui::palette_items() {
     for (const auto& [name, about] : builtin_commands) {
         int score = fuzzy_match(query, name);
         if (score >= 0) {
+            // 🆕 检查是否在最近使用中，提升分数
+            auto recent_it = std::find(recent_commands_.begin(), recent_commands_.end(), name);
+            if (recent_it != recent_commands_.end()) {
+                size_t recent_index = std::distance(recent_commands_.begin(), recent_it);
+                score += (10 - recent_index) * 5;  // 最近的加分更多
+            }
             items.push_back({name, about, command_kind::builtin, score});
         }
     }
@@ -181,6 +204,18 @@ std::vector<std::string> interactive_ui::palette_items() {
     std::vector<std::string> result;
     command_kind last_kind = command_kind::builtin;
 
+    // 🆕 显示最近使用（如果有匹配）
+    bool has_recent = false;
+    for (const auto& item : items) {
+        auto it = std::find(recent_commands_.begin(), recent_commands_.end(), item.name);
+        if (it != recent_commands_.end() && std::distance(recent_commands_.begin(), it) < 3) {
+            if (!has_recent) {
+                result.push_back("── 最近使用 ──");
+                has_recent = true;
+            }
+        }
+    }
+
     for (const auto& item : items) {
         // Add category header when kind changes
         if (items.size() > 3 && item.kind != last_kind) {
@@ -190,8 +225,21 @@ std::vector<std::string> interactive_ui::palette_items() {
             last_kind = item.kind;
         }
 
-        // Format: /name - description
-        result.push_back(item.name + "\t" + item.description);
+        // 🆕 查找快捷键
+        std::string shortcut;
+        for (const auto& [cmd, key] : command_shortcuts) {
+            if (cmd == item.name) {
+                shortcut = key;
+                break;
+            }
+        }
+
+        // Format: /name - description [shortcut]
+        std::string line = item.name + "\t" + item.description;
+        if (!shortcut.empty()) {
+            line += " [" + shortcut + "]";
+        }
+        result.push_back(line);
 
         // Limit to avoid overwhelming display
         if (result.size() >= 15) break;
