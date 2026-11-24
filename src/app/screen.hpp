@@ -63,9 +63,11 @@ public:
 
     // After a width change the old live rows cannot be located; clear the viewport only.
     void reset_view() {
-        term_.write("\x1b[2J\x1b[H");
+        // Clear screen completely and reset state
+        term_.write("\x1b[2J\x1b[3J\x1b[H");
         drawn_ = false;
         up_ = 0;
+        pending_.clear();  // Important: clear pending to avoid duplicates
     }
 
 private:
