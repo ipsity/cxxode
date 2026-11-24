@@ -35,6 +35,13 @@ void interactive_ui::submit() {
     app_.history.add(text);
 
     editor_.remember(text);
+
+    // 🆕 保存执行的命令和时间（防止对话框突然消失）
+    if (!text.empty() && text.front() == '/') {
+        last_executed_command_ = text;
+        last_executed_time_ = steady::now();
+    }
+
     editor_.clear();
     palette_index_ = 0;
 

@@ -121,6 +121,10 @@ private:
     std::deque<std::string> recent_commands_;  // 最近使用的命令，最新的在前
     static constexpr size_t MAX_RECENT_COMMANDS = 10;
 
+    // 🆕 最近执行的命令（用于防止对话框突然消失）
+    std::string last_executed_command_;
+    steady::time_point last_executed_time_;
+
     app& app_;
     ui::terminal& term_;
     screen screen_;

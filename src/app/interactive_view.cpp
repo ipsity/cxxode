@@ -136,11 +136,24 @@ std::vector<std::string> interactive_ui::palette_items() {
     std::vector<palette_item> items;
     const auto& t = editor_.text();
 
-    // Show palette if input starts with / (even with spaces - for fuzzy search)
-    if (t.empty() || t.front() != '/') return {};
+    // 🔧 修复：防止对话框突然消失
+    // 如果刚执行了命令（500ms 内），继续显示命令面板
+    bool just_executed = false;
+    if (!last_executed_command_.empty()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            steady::now() - last_executed_time_).count();
+        if (elapsed < 500) {  // 500ms 内
+            just_executed = true;
+        } else {
+            last_executed_command_.clear();  // 清除过期的命令
+        }
+    }
+
+    // Show palette if input starts with / OR just executed a command
+    if (!just_executed && (t.empty() || t.front() != '/')) return {};
 
     // Extract search query (remove leading /)
-    std::string query = t.substr(1);
+    std::string query = just_executed ? last_executed_command_.substr(1) : t.substr(1);
 
     // Fuzzy match function (checks if all chars in query appear in target in order)
     auto fuzzy_match = [](std::string_view query, std::string_view target) -> int {
