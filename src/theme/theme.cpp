@@ -8,17 +8,15 @@
 namespace ode {
 
 std::string rgb_color::ansi_fg() const {
-    std::ostringstream oss;
-    oss << "\033[38;2;" << static_cast<int>(r) << ";"
-        << static_cast<int>(g) << ";" << static_cast<int>(b) << "m";
-    return oss.str();
+    // Optimized: direct string concatenation instead of stringstream
+    return "\033[38;2;" + std::to_string(r) + ";" +
+           std::to_string(g) + ";" + std::to_string(b) + "m";
 }
 
 std::string rgb_color::ansi_bg() const {
-    std::ostringstream oss;
-    oss << "\033[48;2;" << static_cast<int>(r) << ";"
-        << static_cast<int>(g) << ";" << static_cast<int>(b) << "m";
-    return oss.str();
+    // Optimized: direct string concatenation instead of stringstream
+    return "\033[48;2;" + std::to_string(r) + ";" +
+           std::to_string(g) + ";" + std::to_string(b) + "m";
 }
 
 theme dark_theme() {
