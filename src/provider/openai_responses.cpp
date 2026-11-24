@@ -13,7 +13,7 @@ public:
             const auto text = data.value("delta", "");
             if (events_.text) events_.text(text);
         } else if (type == "response.reasoning_summary_text.delta" || type == "response.reasoning_text.delta") {
-            if (events_.thinking) events_.thinking(data.value("delta", ""));
+            if (events_.thinking) events_.thinking(data.value("delta", ""), "");
         } else if (type == "response.output_item.added") {
             const auto& item = data["item"];
             if (item.value("type", "") == "function_call" && events_.tool_started) events_.tool_started(item.value("name", ""));

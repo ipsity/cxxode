@@ -58,7 +58,9 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         if (events.request_started) events.request_started();
         stream_events stream;
         stream.text = events.text;
-        stream.thinking = events.thinking;
+        stream.thinking = [&events](std::string_view text, std::string_view sig) {
+            if (events.thinking) events.thinking(text, sig);
+        };
         auto reply = provider_.send(request(), stream, cancel);
         if (reply.tokens.input || reply.tokens.output) {
             total.input += reply.tokens.input;

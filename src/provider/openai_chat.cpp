@@ -33,7 +33,7 @@ public:
                 if (events_.text) events_.text(text);
             }
             for (const auto& key : {"reasoning_content", "reasoning"}) {
-                if (d.contains(key) && d[key].is_string() && events_.thinking) events_.thinking(d[key].get<std::string>());
+                if (d.contains(key) && d[key].is_string() && events_.thinking) events_.thinking(d[key].get<std::string>(), "");
             }
             if (d.contains("tool_calls")) {
                 for (const auto& call : d["tool_calls"]) {

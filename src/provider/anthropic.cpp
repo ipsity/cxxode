@@ -62,7 +62,7 @@ public:
             } else if (kind == "thinking_delta") {
                 const auto text = delta.value("thinking", "");
                 b.text += text;
-                if (events_.thinking) events_.thinking(text);
+                if (events_.thinking) events_.thinking(text, block.value("signature", ""));
             } else if (kind == "signature_delta") {
                 b.signature += delta.value("signature", "");
             }
