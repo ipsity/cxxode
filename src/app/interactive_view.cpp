@@ -19,6 +19,7 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/help", "快捷键与命令"},
     {"/compact", "压缩上下文"},
     {"/model", "查看或切换模型"},
+    {"/theme", "切换主题配色"},
     {"/login", "登录 provider"},
     {"/logout", "查看当前 provider"},
     {"/mode", "切换权限档 plan/default/yolo"},

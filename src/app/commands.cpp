@@ -1,6 +1,7 @@
 #include "app/interactive.hpp"
 #include "commands/command.hpp"
 #include "provider/models.hpp"
+#include "theme/theme.hpp"
 
 #include <iostream>
 
@@ -129,6 +130,49 @@ bool interactive_ui::command(const std::string& line) {
         else if (arg.empty()) app_.config.permissions.set_mode(next_mode(app_.config.permissions.mode()));
         else note("档位为 plan、default 或 yolo", tone::error);
         note("权限档 " + std::string(mode_name(app_.config.permissions.mode())));
+    } else if (name == "/theme") {
+        if (arg.empty()) {
+            // Show interactive theme selector
+            const auto themes = available_themes();
+            std::vector<std::string> items;
+            std::vector<std::string> details;
+
+            for (const auto& [name, theme] : themes) {
+                items.push_back(name);
+                // Show color preview
+                details.push_back("User: " + theme.user_message.ansi_fg() + "■■■\033[0m  "
+                                + "Assistant: " + theme.assistant_message.ansi_fg() + "■■■\033[0m  "
+                                + "Accent: " + theme.accent.ansi_fg() + "■■■\033[0m");
+            }
+
+            selection_ = {
+                items,
+                details,
+                0,
+                "Select a theme (Note: Preview only, full integration in progress):",
+                [this, themes](std::size_t index) {
+                    std::vector<std::string> names;
+                    for (const auto& [name, _] : themes) names.push_back(name);
+
+                    const auto& theme_name = names[index];
+                    note("✓ Selected theme: " + theme_name, tone::accent);
+                    note("Theme preview:", tone::accent);
+
+                    const auto& t = themes.at(theme_name);
+                    note("  User message: " + t.user_message.ansi_fg() + "Example text\033[0m");
+                    note("  Assistant: " + t.assistant_message.ansi_fg() + "Example response\033[0m");
+                    note("  Tools: " + t.tool_read.ansi_fg() + "Read\033[0m "
+                         + t.tool_write.ansi_fg() + "Write\033[0m "
+                         + t.tool_bash.ansi_fg() + "Bash\033[0m");
+                    note("");
+                    note("Full theme integration coming soon!", tone::dim);
+                    note("This will apply colors to all UI elements");
+                },
+                []() { /* Cancel */ }
+            };
+        } else {
+            note("Use /theme to open theme selector", tone::dim);
+        }
     } else if (name == "/cost") {
         const auto& t = core.total;
         note("输入 " + short_count(t.input) + "  缓存读 " + short_count(t.cache_read) + "  缓存写 " +
@@ -149,21 +193,29 @@ bool interactive_ui::command(const std::string& line) {
             std::vector<std::string> details;
             for (const auto& [name, desc] : providers) {
                 items.push_back(name);
-                details.push_back(desc);
+                // Mark current provider
+                std::string detail = desc;
+                if (name == app_.config.provider) {
+                    detail += " (current)";
+                }
+                details.push_back(detail);
             }
 
             selection_ = {
                 items,
                 details,
                 0,
-                "Select a provider:",
+                "Select a provider (current: " + app_.config.provider + "):",
                 [this](std::size_t index) {
                     const std::vector<std::string> provider_names = {
                         "anthropic", "openai", "groq", "deepseek", "together", "custom"
                     };
                     const auto provider = provider_names[index];
 
-                    if (provider == "custom") {
+                    if (provider == app_.config.provider) {
+                        note("Already using " + provider, tone::accent);
+                        note("To update API key: /login " + provider + " <new-key>");
+                    } else if (provider == "custom") {
                         note("Custom provider setup:", tone::accent);
                         note("1. Edit ~/.ode/settings.json");
                         note("2. Add your provider configuration");
@@ -172,8 +224,7 @@ bool interactive_ui::command(const std::string& line) {
                         note("Selected: " + provider, tone::accent);
                         note("To set API key:");
                         note("  /login " + provider + " <your-api-key>");
-                        note("Or use command line:");
-                        note("  ode login " + provider);
+                        note("Then restart with: --provider " + provider);
                     }
                 },
                 []() { /* Cancel */ }
@@ -189,7 +240,11 @@ bool interactive_ui::command(const std::string& line) {
 
                 if (save_credential(provider, api_key)) {
                     note("✓ API key saved for " + provider);
-                    note("Restart with --provider " + provider + " to use it");
+                    if (provider == app_.config.provider) {
+                        note("Key updated for current provider");
+                    } else {
+                        note("Restart with --provider " + provider + " to use it");
+                    }
                 } else {
                     note("Failed to save credential", tone::error);
                 }
