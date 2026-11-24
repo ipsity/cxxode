@@ -43,9 +43,13 @@ constexpr const char* help_text =
     "- 需要确认时：`Enter` 允许，`Esc` 拒绝，`a` 总是允许\n"
     "\n"
     "**🚀 快捷工作流**（新）\n"
-    "- `/ref <file>` 快速查看并编辑文件 (Read→Edit→Write)\n"
-    "- `/search <pattern>` 搜索并查看结果 (Grep→Read) [别名: /s]\n"
+    "- `/ref <file>` 快速查看并编辑 (Read→Edit→Write)\n"
+    "- `/search <pattern>` 搜索并查看 (Grep→Read) [别名: /s]\n"
     "- `/fix [file]` 智能检查并修复问题\n"
+    "- `/test [pattern]` 运行测试 [别名: /t]\n"
+    "- `/build` 构建项目 [别名: /b]\n"
+    "- `/run [args]` 运行程序 [别名: /r]\n"
+    "- `/commit [msg]` 智能提交 [别名: /c]\n"
     "\n"
     "**命令**\n"
     "- `/help` 显示此帮助  `/keys` 同 /help\n"
@@ -102,6 +106,41 @@ bool interactive_ui::command(const std::string& line) {
         } else {
             note("工作流: 检查并修复 " + arg, tone::dim);
             start_turn("Check " + arg + " for issues and fix them");
+        }
+    }
+    else if (name == "/test" || name == "/t") {
+        // /test [pattern] - 快速运行测试
+        if (arg.empty()) {
+            note("工作流: 运行所有测试", tone::dim);
+            start_turn("Run all tests and show results");
+        } else {
+            note("工作流: 运行匹配 " + arg + " 的测试", tone::dim);
+            start_turn("Run tests matching " + arg + " and show results");
+        }
+    }
+    else if (name == "/build" || name == "/b") {
+        // /build - 快速构建项目
+        note("工作流: 构建项目", tone::dim);
+        start_turn("Build the project using the available build system");
+    }
+    else if (name == "/run" || name == "/r") {
+        // /run [args] - 运行程序
+        if (arg.empty()) {
+            note("工作流: 运行程序", tone::dim);
+            start_turn("Run the main program");
+        } else {
+            note("工作流: 运行程序带参数: " + arg, tone::dim);
+            start_turn("Run the program with arguments: " + arg);
+        }
+    }
+    else if (name == "/commit" || name == "/c") {
+        // /commit [message] - 智能提交
+        if (arg.empty()) {
+            note("工作流: 分析更改并提交", tone::dim);
+            start_turn("Review changes and create an appropriate commit");
+        } else {
+            note("工作流: 提交更改: " + arg, tone::dim);
+            start_turn("Commit changes with message: " + arg);
         }
     }
     else if (name == "/clear") {
