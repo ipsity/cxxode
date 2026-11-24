@@ -23,6 +23,7 @@ add_library(cxxode_core STATIC
     src/core/session.cpp
     src/core/agent.cpp
     src/core/prompt.cpp
+    src/core/rpc.cpp
     src/config/config.cpp
     src/provider/provider.cpp
     src/provider/anthropic.cpp
@@ -40,6 +41,7 @@ add_library(cxxode_core STATIC
     src/mcp/mcp_tools.cpp
     src/hooks/hooks.cpp
     src/agents/subagent.cpp
+    src/ext/plugins.cpp
     ${CXXODE_PLATFORM_SOURCES})
 target_include_directories(cxxode_core PUBLIC src)
 target_include_directories(cxxode_core SYSTEM PUBLIC third_party)

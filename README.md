@@ -2,7 +2,7 @@
 
 用 C++20 写的终端 coding agent。cxx (C++) + ode (颂诗) = code。
 
-**当前状态：V2 M3** — MCP 客户端、Hooks、权限规则已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
+**当前状态：V2 M4** — Subagents、RPC 协议、Plugins 已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
 
 V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p28`。
 
@@ -27,7 +27,13 @@ ode login anthropic
 
 ## 功能
 
-**M3（当前）**
+**M4（当前）**
+- **Subagents**：独立 agent 实例，支持专门系统提示（`task` 工具）
+- **RPC 协议**：JSONL over stdin/stdout，供编辑器和 IDE 嵌入
+- **Plugins**：自动加载 `~/.ode/plugins/` 和 `~/.claude/plugins/` 中的扩展
+- 详细文档：[docs/M4_FEATURES.md](docs/M4_FEATURES.md)
+
+**M3**
 - **MCP 客户端**：通过 JSON-RPC 2.0 连接外部工具服务器（stdio 传输）
 - **Hooks**：在工具执行前后、用户提交消息、agent 停止时运行自定义脚本
 - **权限规则**：settings.json 中配置 allow/deny 规则，支持通配符和前缀匹配

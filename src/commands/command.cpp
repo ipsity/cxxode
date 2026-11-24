@@ -1,5 +1,6 @@
 #include "commands/command.hpp"
 #include "core/session.hpp"
+#include "ext/plugins.hpp"
 #include "skills/skill.hpp"
 
 #include <algorithm>
@@ -18,6 +19,13 @@ std::vector<user_command> load_commands(const fs::path& workspace) {
     // User-level commands
     const auto home = ode_home().parent_path();
     search_paths.push_back(home / ".claude" / "commands");
+    search_paths.push_back(home / ".ode" / "commands");
+
+    // Plugin commands
+    for (const auto& plugin_path : plugin_search_paths()) {
+        search_paths.push_back(plugin_path / "commands");
+        search_paths.push_back(plugin_path / ".claude" / "commands");
+    }
 
     // Workspace commands - walk up to git root
     for (auto dir = workspace; ; dir = dir.parent_path()) {

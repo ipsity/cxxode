@@ -1,5 +1,6 @@
 #include "skills/skill.hpp"
 #include "core/session.hpp"
+#include "ext/plugins.hpp"
 
 #include <algorithm>
 
@@ -66,6 +67,13 @@ std::vector<skill> load_skills(const fs::path& workspace) {
     // User-level skills
     const auto home = ode_home().parent_path();
     search_paths.push_back(home / ".claude" / "skills");
+    search_paths.push_back(home / ".ode" / "skills");
+
+    // Plugin skills
+    for (const auto& plugin_path : plugin_search_paths()) {
+        search_paths.push_back(plugin_path / "skills");
+        search_paths.push_back(plugin_path / ".claude" / "skills");
+    }
 
     // Workspace skills - walk up to git root
     for (auto dir = workspace; ; dir = dir.parent_path()) {

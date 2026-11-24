@@ -1,5 +1,6 @@
 #include "app/app.hpp"
 #include "commands/command.hpp"
+#include "core/rpc.hpp"
 #include "core/version.hpp"
 #include "skills/skill.hpp"
 #include "tools/tool.hpp"
@@ -27,6 +28,7 @@ constexpr const char* usage_text =
     "  ode [prompt]              interactive session in the current directory\n"
     "  ode -p \"prompt\"           print mode: answer to stdout, tool calls to stderr\n"
     "  ode -c                    continue the most recent session here\n"
+    "  ode --rpc                 RPC mode: JSONL protocol over stdin/stdout\n"
     "  ode login [provider]      store an API key in Windows Credential Manager\n"
     "\n"
     "  --model NAME              model id\n"
@@ -84,7 +86,7 @@ int main(int argc, char** argv) {
     const auto args = utf8_args(argc, argv);
     std::string prompt, model, provider_name, mode_text;
     fs::path workspace = fs::current_path();
-    bool print = false, cont = false, login = false;
+    bool print = false, cont = false, login = false, rpc_mode = false;
     if (const char* nc = std::getenv("NO_COLOR"); nc && *nc) ui::color_enabled() = false;
 
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -104,6 +106,8 @@ int main(int argc, char** argv) {
                 print = true;
             } else if (a == "-c" || a == "--continue") {
                 cont = true;
+            } else if (a == "--rpc") {
+                rpc_mode = true;
             } else if (a == "--model" || a == "-m") {
                 model = value();
             } else if (a == "--provider") {
@@ -215,6 +219,14 @@ int main(int argc, char** argv) {
         resume = sessions.front().path;
     }
     a.open_session(resume);
+
+    if (rpc_mode) {
+        // RPC mode: JSONL protocol over stdin/stdout
+        cancel_token cancel;
+        rpc_server server{*a.core, cancel};
+        server.run();
+        return 0;
+    }
 
     if (print) {
         if (prompt.empty()) return fail("-p needs a prompt");

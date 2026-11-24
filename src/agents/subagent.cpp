@@ -1,5 +1,6 @@
 #include "agents/subagent.hpp"
 #include "core/session.hpp"
+#include "ext/plugins.hpp"
 #include "skills/skill.hpp"
 
 namespace ode {
@@ -11,6 +12,13 @@ std::vector<agent_config> load_agents(const fs::path& workspace) {
     // User-level agents
     const auto home = ode_home().parent_path();
     search_paths.push_back(home / ".claude" / "agents");
+    search_paths.push_back(home / ".ode" / "agents");
+
+    // Plugin agents
+    for (const auto& plugin_path : plugin_search_paths()) {
+        search_paths.push_back(plugin_path / "agents");
+        search_paths.push_back(plugin_path / ".claude" / "agents");
+    }
 
     // Workspace agents - walk up to git root
     for (auto dir = workspace; ; dir = dir.parent_path()) {
