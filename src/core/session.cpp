@@ -52,6 +52,9 @@ fs::path lay_home() {
 #else
     const char* home = std::getenv("HOME");
 #endif
+    // Try .cxxode first, fall back to .lay for compatibility
+    auto cxxode_home = fs::path(home ? home : ".") / ".cxxode";
+    if (fs::exists(cxxode_home)) return cxxode_home;
     return fs::path(home ? home : ".") / ".lay";
 }
 
