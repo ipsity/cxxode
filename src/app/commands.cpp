@@ -40,7 +40,8 @@ std::pair<std::string, std::string> split(const std::string& line) {
 bool interactive_ui::command(const std::string& line) {
     const auto [name, arg] = split(line);
     section("user");
-    screen_.commit(paint(tone::accent, "› ") + paint(tone::dim, line));
+    // Commands in accent_bold for visibility
+    screen_.commit(paint(tone::accent, "› ") + paint(tone::accent_bold, line));
     auto& core = *app_.core;
 
     if (name == "/exit" || name == "/quit") return false;
@@ -71,37 +72,56 @@ bool interactive_ui::command(const std::string& line) {
             if (models.empty()) {
                 note("无可用模型或 provider 不支持列表", tone::error);
             } else {
-                // Display model list
-                note("Available models from " + app_.config.provider + ":");
+                // Build selection items
+                std::vector<std::string> items;
+                std::vector<std::string> details;
+                std::size_t current_index = 0;
+
                 for (std::size_t i = 0; i < models.size(); ++i) {
-                    const bool is_current = models[i].id == core.model;
-                    std::string line = std::to_string(i + 1) + ". " + models[i].id;
-                    if (is_current) line += " ⭐";
+                    items.push_back(models[i].id);
+
+                    std::string detail;
                     if (!models[i].description.empty()) {
-                        line += "  - " + models[i].description;
+                        detail = models[i].description;
                     }
                     if (models[i].context_window > 0) {
-                        line += "  (" + std::to_string(models[i].context_window / 1000) + "k)";
+                        if (!detail.empty()) detail += " ";
+                        detail += "(" + std::to_string(models[i].context_window / 1000) + "k)";
                     }
-                    note(line);
+                    if (models[i].id == core.model) {
+                        detail += " ⭐";
+                        current_index = i;
+                    }
+                    details.push_back(detail);
                 }
-                note("Use: /model <number> or /model <name>");
+
+                // Show selection UI
+                selection_ = {
+                    items,
+                    details,
+                    current_index,
+                    "Select a model from " + app_.config.provider + ":",
+                    [this, models](std::size_t index) {
+                        app_.set_model(models[index].id);
+                        note("✓ Switched to model: " + app_.core->model);
+                    },
+                    []() { /* Cancel - do nothing */ }
+                };
             }
         } else {
-            // Check if arg is a number
+            // Direct selection by number or name
             try {
                 const auto num = std::stoul(arg);
                 const auto models = list_models(app_.provider_cfg);
                 if (num > 0 && num <= models.size()) {
                     app_.set_model(models[num - 1].id);
-                    note("Switched to model: " + core.model);
+                    note("✓ Switched to model: " + core.model);
                 } else {
                     note("Invalid model number", tone::error);
                 }
             } catch (...) {
-                // Not a number, treat as model name
                 app_.set_model(arg);
-                note("Switched to model: " + core.model);
+                note("✓ Switched to model: " + core.model);
             }
         }
     } else if (name == "/mode") {
@@ -115,12 +135,51 @@ bool interactive_ui::command(const std::string& line) {
              short_count(t.cache_write) + "  输出 " + short_count(t.output) + "  当前上下文 " + short_count(core.context_tokens));
     } else if (name == "/login") {
         if (arg.empty()) {
-            note("Usage: /login <provider> <api-key>");
-            note("Supported providers: anthropic, openai, groq, deepseek, together");
-            note("Example: /login openai sk-...");
-            note("Or use command line: ode login <provider>");
+            // Show interactive provider selector
+            const std::vector<std::pair<std::string, std::string>> providers = {
+                {"anthropic", "Claude models from Anthropic"},
+                {"openai", "GPT models from OpenAI"},
+                {"groq", "Fast inference with Groq"},
+                {"deepseek", "DeepSeek models"},
+                {"together", "Together.ai models"},
+                {"custom", "Configure custom provider"}
+            };
+
+            std::vector<std::string> items;
+            std::vector<std::string> details;
+            for (const auto& [name, desc] : providers) {
+                items.push_back(name);
+                details.push_back(desc);
+            }
+
+            selection_ = {
+                items,
+                details,
+                0,
+                "Select a provider:",
+                [this](std::size_t index) {
+                    const std::vector<std::string> provider_names = {
+                        "anthropic", "openai", "groq", "deepseek", "together", "custom"
+                    };
+                    const auto provider = provider_names[index];
+
+                    if (provider == "custom") {
+                        note("Custom provider setup:", tone::accent);
+                        note("1. Edit ~/.ode/settings.json");
+                        note("2. Add your provider configuration");
+                        note("3. Use /login <provider-name> <api-key>");
+                    } else {
+                        note("Selected: " + provider, tone::accent);
+                        note("To set API key:");
+                        note("  /login " + provider + " <your-api-key>");
+                        note("Or use command line:");
+                        note("  ode login " + provider);
+                    }
+                },
+                []() { /* Cancel */ }
+            };
         } else {
-            // Parse provider and key from args
+            // Direct login with provider and key
             const auto space = arg.find(' ');
             if (space == std::string::npos) {
                 note("Missing API key. Usage: /login <provider> <api-key>", tone::error);
@@ -128,10 +187,9 @@ bool interactive_ui::command(const std::string& line) {
                 const auto provider = arg.substr(0, space);
                 const auto api_key = arg.substr(space + 1);
 
-                // Save credential
                 if (save_credential(provider, api_key)) {
                     note("✓ API key saved for " + provider);
-                    note("Restart to use this provider");
+                    note("Restart with --provider " + provider + " to use it");
                 } else {
                     note("Failed to save credential", tone::error);
                 }

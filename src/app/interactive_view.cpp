@@ -169,6 +169,30 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking")) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
     }
     if (!hint_.empty()) rows.push_back("  " + paint(tone::dim, hint_));
+
+    // Selection mode UI
+    if (selection_) {
+        rows.push_back("");  // Blank line
+        rows.push_back(" " + paint(tone::accent_bold, selection_->title));
+        rows.push_back("");
+
+        for (std::size_t i = 0; i < selection_->items.size(); ++i) {
+            const bool is_selected = i == selection_->selected_index;
+            const auto marker = is_selected ? "→ " : "  ";
+            const auto item_color = is_selected ? tone::accent_bold : tone::normal;
+
+            std::string line = marker + std::to_string(i + 1) + ". " + selection_->items[i];
+            if (i < selection_->details.size() && !selection_->details[i].empty()) {
+                line += "  " + selection_->details[i];
+            }
+
+            rows.push_back(" " + paint(item_color, line));
+        }
+
+        rows.push_back("");
+        rows.push_back(" " + paint(tone::dim, "Use ↑↓ to select, Enter to confirm, Esc to cancel"));
+    }
+
     for (auto& r : palette_rows(columns)) rows.push_back(std::move(r));
 
     // File completion palette

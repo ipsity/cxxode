@@ -57,6 +57,26 @@ void interactive_ui::submit() {
 }
 
 void interactive_ui::handle(const ui::key& k) {
+    // Selection mode takes priority
+    if (selection_) {
+        if (k.kind == key_kind::up) {
+            if (selection_->selected_index > 0) selection_->selected_index--;
+            else selection_->selected_index = selection_->items.size() - 1;  // Wrap to bottom
+        } else if (k.kind == key_kind::down) {
+            selection_->selected_index = (selection_->selected_index + 1) % selection_->items.size();
+        } else if (k.kind == key_kind::enter) {
+            auto callback = selection_->on_select;
+            auto index = selection_->selected_index;
+            selection_.reset();
+            if (callback) callback(index);
+        } else if (k.kind == key_kind::escape) {
+            auto callback = selection_->on_cancel;
+            selection_.reset();
+            if (callback) callback();
+        }
+        return;
+    }
+
     if (ask_) {
         if (k.kind == key_kind::enter || (k.kind == key_kind::character && (k.text == "y" || k.text == "Y"))) answer_ask(answer::yes);
         else if (k.kind == key_kind::escape || (k.kind == key_kind::character && (k.text == "n" || k.text == "N"))) answer_ask(answer::no);

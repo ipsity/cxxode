@@ -87,7 +87,8 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
 
 void interactive_ui::start_turn(std::string text) {
     section("user");
-    screen_.commit(ui::layout({{text, ui::tone::normal}}, size_.columns - 1, {ui::paint(ui::tone::accent, "› "), 2},
+    // User messages in accent_bold to distinguish from assistant
+    screen_.commit(ui::layout({{text, ui::tone::accent_bold}}, size_.columns - 1, {ui::paint(ui::tone::accent, "› "), 2},
                               {"  ", 2}));
     const auto window = app_.core->context_window;
     if (usage_.context > window * 8 / 10) note("上下文已用 " + short_count(usage_.context) + "，可用 /compact 压缩");

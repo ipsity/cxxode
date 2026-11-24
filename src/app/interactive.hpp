@@ -84,6 +84,17 @@ private:
     };
     std::vector<recent_ask> recent_asks_;
 
+    // Interactive selection state (for model selector, login, etc.)
+    struct selection_state {
+        std::vector<std::string> items;        // Item labels
+        std::vector<std::string> details;      // Optional details for each item
+        std::size_t selected_index = 0;        // Current selection
+        std::string title;                     // Selection title
+        std::function<void(std::size_t)> on_select;  // Callback when confirmed
+        std::function<void()> on_cancel;       // Callback when cancelled
+    };
+    std::optional<selection_state> selection_;
+
     app& app_;
     ui::terminal& term_;
     screen screen_;
