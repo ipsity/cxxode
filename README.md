@@ -2,17 +2,58 @@
 
 用 C++20 写的终端 coding agent。目标：启动 < 20 ms，空闲内存 < 15 MB，单个 exe，兼容 Claude Code 的 skills、命令、MCP、hooks 和插件格式。
 
-当前状态：**V2 M0**，只有骨架。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
+**当前状态：V2 M1** — 交互式 TUI、无头模式、工具集、会话管理已可用。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
 
-V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p28`。V1 源码暂存在 `legacy/`，供 V2 回收代码。
+V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p28`。
+
+## 快速开始
+
+```bash
+# 交互模式
+lay
+
+# 带初始提示
+lay "解释 main.cpp 的流程"
+
+# 无头模式（输出到 stdout）
+lay -p "README.md 里的构建步骤过时了吗？"
+
+# 继续最近的会话
+lay -c
+
+# 登录（保存 API key）
+lay login anthropic
+```
+
+## 功能
+
+**M1（当前）**
+- 交互式 TUI：内联渲染、权限提示、斜杠命令（/help /compact /undo /resume）
+- 工具：Read/Write/Edit/Bash/Grep/Glob，支持并行读取
+- 权限系统：plan/default/yolo 三档，allow/deny 规则，Shift+Tab 切换
+- 会话：JSONL 日志，自动压缩（85% 上下文触发）
+- 配置：多级 settings.json（~/.claude, ~/.lay, .claude, .lay）
+- 模型别名：opus/sonnet/haiku/fable → 通过 `ANTHROPIC_DEFAULT_*_MODEL` 解析
+
+**按键**
+- `Enter` 发送，`Shift+Enter`/`Ctrl+J` 换行
+- `Esc` 中断/清空，`Ctrl+C` 双击退出
+- `Shift+Tab` 切换权限档
+- `↑` `↓` 历史/编辑导航
+- 权限提示时：`Enter` 允许，`Esc` 拒绝，`a` 总是允许
+
+**平台支持**
+- Windows：完整支持（WinHTTP, ConPTY, Job Object 进程隔离）
+- Linux：暂未实现（需要 libcurl, termios, fork/exec）
 
 ## 构建
 
 需要 C++20 编译器、CMake 3.24+ 和 Ninja。
 
-```
+**Windows**
+```bash
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
-./build/dev/lay --version
+./build/dev/lay.exe --version
 ```
