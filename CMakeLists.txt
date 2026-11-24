@@ -26,6 +26,7 @@ add_library(cxxode_core STATIC
     src/core/rpc.cpp
     src/core/tool_access.cpp
     src/core/tool_scheduler.cpp
+    src/core/tool_suggestion.cpp
     src/config/config.cpp
     src/provider/provider.cpp
     src/provider/anthropic.cpp
