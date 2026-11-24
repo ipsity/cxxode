@@ -21,11 +21,15 @@ struct agent_events {
     std::function<void(std::string_view)> text;
     std::function<void(std::string_view text, std::string_view signature)> thinking;
     std::function<void(const tool&, const json& input)> tool_started;
-    std::function<void(std::string_view)> tool_progress;  // live command output
+    std::function<void(std::string_view)> tool_progress;  // 兼容：简单文本进度
     std::function<void(const tool&, const json& input, const tool_output&)> tool_finished;
     std::function<answer(const tool&, const json& input)> ask;
     std::function<void(const usage&)> usage_updated;
     std::function<std::vector<std::string>()> take_steering;  // messages typed while the agent works
+
+    // Day 6/7: 详细进度回调（percent, step, timing, resources）
+    std::function<void(std::string_view tool_name, int percent, std::string_view step,
+                      int64_t elapsed_ms, int64_t estimated_ms, size_t bytes_io, size_t memory_kb)> tool_progress_detail;
 };
 
 struct turn_result {

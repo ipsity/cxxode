@@ -44,6 +44,11 @@ agent_events interactive_ui::make_events() {
     };
     ev.tool_started = [this](const tool& t, const json& in) { push(ev_tool_start{t.name, tool_label(t, in, app_.root)}); };
     ev.tool_progress = [this](std::string_view s) { push(ev_progress{std::string(s), "", -1, "", 0, 0, 0, 0}); };
+    ev.tool_progress_detail = [this](std::string_view tool_name, int percent, std::string_view step,
+                                     int64_t elapsed_ms, int64_t estimated_ms, size_t bytes_io, size_t memory_kb) {
+        push(ev_progress{std::string(step), std::string(tool_name), percent, std::string(step),
+                        elapsed_ms, estimated_ms, bytes_io, memory_kb});
+    };
     ev.tool_finished = [this](const tool& t, const json& in, const tool_output& o) {
         push(ev_tool_done{t.name, tool_label(t, in, app_.root), o.summary, o.detail, o.text, o.is_error});
     };
