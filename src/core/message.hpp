@@ -11,7 +11,7 @@ namespace ode {
 using json = nlohmann::json;
 
 struct block {
-    enum class kind { text, tool_use, tool_result, thinking, opaque };
+    enum class kind { text, tool_use, tool_result, thinking, image, opaque };
     kind type = kind::text;
     std::string text;       // text, thinking, tool_result content
     std::string id;         // tool_use id, tool_result tool_use_id
@@ -20,9 +20,14 @@ struct block {
     std::string signature;  // thinking signature
     bool is_error = false;
 
+    // Image fields
+    std::string media_type; // image/jpeg, image/png, image/gif, image/webp
+    std::string data;       // base64 encoded image data
+
     static block make_text(std::string text);
     static block make_tool_use(std::string id, std::string name, json input);
     static block make_tool_result(std::string id, std::string content, bool is_error);
+    static block make_image(std::string media_type, std::string base64_data);
 };
 
 struct message {
@@ -40,6 +45,9 @@ struct usage {
     std::size_t cache_read = 0;
     std::size_t cache_write = 0;
     std::size_t context() const { return input + cache_read + cache_write + output; }
+
+    // Calculate cost in USD based on model pricing
+    double cost_usd(std::string_view model) const;
 };
 
 json to_json(const message& value);

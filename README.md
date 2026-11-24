@@ -2,7 +2,7 @@
 
 用 C++20 写的终端 coding agent。cxx (C++) + ode (颂诗) = code。
 
-**当前状态：V2 M4** — Subagents、RPC 协议、Plugins 已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
+**当前状态：V2 M5** — 费用统计、图片输入、性能优化已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
 
 V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p28`。
 
@@ -27,7 +27,13 @@ ode login anthropic
 
 ## 功能
 
-**M4（当前）**
+**M5（当前）**
+- **费用统计**：实时显示 token 使用成本，支持多种模型定价
+- **图片输入**：基础图片支持（base64 编码，符合 Anthropic Vision API）
+- **性能优化**：exe 大小 3.2MB，启动 ~50ms，代码 6,914 行
+- 详细总结：[docs/M5_SUMMARY.md](docs/M5_SUMMARY.md)
+
+**M4**
 - **Subagents**：独立 agent 实例，支持专门系统提示（`task` 工具）
 - **RPC 协议**：JSONL over stdin/stdout，供编辑器和 IDE 嵌入
 - **Plugins**：自动加载 `~/.ode/plugins/` 和 `~/.claude/plugins/` 中的扩展

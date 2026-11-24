@@ -3,7 +3,7 @@
 namespace ode {
 namespace {
 
-constexpr const char* kind_names[] = {"text", "tool_use", "tool_result", "thinking", "opaque"};
+constexpr const char* kind_names[] = {"text", "tool_use", "tool_result", "thinking", "image", "opaque"};
 
 block::kind kind_from(const std::string& name) {
     for (std::size_t i = 0; i < std::size(kind_names); ++i) {
@@ -38,6 +38,14 @@ block block::make_tool_result(std::string id, std::string content, bool is_error
     return b;
 }
 
+block block::make_image(std::string media_type, std::string base64_data) {
+    block b;
+    b.type = kind::image;
+    b.media_type = std::move(media_type);
+    b.data = std::move(base64_data);
+    return b;
+}
+
 std::string message::plain_text() const {
     std::string out;
     for (const auto& b : blocks) {
@@ -64,6 +72,13 @@ json to_json(const message& value) {
         if (!b.input.is_null()) item["input"] = b.input;
         if (!b.signature.empty()) item["signature"] = b.signature;
         if (b.is_error) item["is_error"] = true;
+        if (b.type == block::kind::image) {
+            item["source"] = {
+                {"type", "base64"},
+                {"media_type", b.media_type},
+                {"data", b.data}
+            };
+        }
         blocks.push_back(std::move(item));
     }
     return {{"role", value.from == message::role::user ? "user" : "assistant"}, {"content", std::move(blocks)}};
@@ -81,9 +96,68 @@ message message_from_json(const json& value) {
         if (item.contains("input")) b.input = item["input"];
         b.signature = item.value("signature", "");
         b.is_error = item.value("is_error", false);
+        if (b.type == block::kind::image && item.contains("source")) {
+            const auto& src = item["source"];
+            b.media_type = src.value("media_type", "");
+            b.data = src.value("data", "");
+        }
         m.blocks.push_back(std::move(b));
     }
     return m;
+}
+
+double usage::cost_usd(std::string_view model) const {
+    // Model pricing (USD per million tokens)
+    struct pricing {
+        double input;
+        double output;
+        double cache_read;   // Usually 10% of input
+        double cache_write;  // Usually 125% of input
+    };
+
+    // Extract base model name (remove window suffix like [1m])
+    std::string model_base{model};
+    if (auto pos = model_base.find('['); pos != std::string::npos) {
+        model_base = model_base.substr(0, pos);
+    }
+
+    // Pricing table (as of 2024-2025)
+    static const std::map<std::string, pricing> prices = {
+        // Claude 4.x
+        {"claude-opus-4-8",     {15.0,  75.0,  1.50, 18.75}},
+        {"claude-opus-4-7",     {15.0,  75.0,  1.50, 18.75}},
+        {"claude-opus-4-6",     {15.0,  75.0,  1.50, 18.75}},
+        {"claude-sonnet-4-6",   {3.0,   15.0,  0.30,  3.75}},
+        {"claude-haiku-4-5-20251001", {0.80, 4.0, 0.08,  1.0}},
+
+        // Claude 3.x (legacy)
+        {"claude-3-5-sonnet-20241022", {3.0, 15.0, 0.30, 3.75}},
+        {"claude-3-5-sonnet-20240620", {3.0, 15.0, 0.30, 3.75}},
+        {"claude-3-opus-20240229",     {15.0, 75.0, 1.50, 18.75}},
+        {"claude-3-sonnet-20240229",   {3.0, 15.0, 0.30, 3.75}},
+        {"claude-3-haiku-20240307",    {0.25, 1.25, 0.025, 0.3125}},
+
+        // OpenAI GPT-4
+        {"gpt-4-turbo", {10.0, 30.0, 0.0, 0.0}},
+        {"gpt-4o",      {2.5, 10.0, 0.0, 0.0}},
+        {"gpt-4o-mini", {0.15, 0.6, 0.0, 0.0}},
+
+        // Claude Fable 5 (hypothetical, adjust when known)
+        {"claude-fable-5", {1.0, 5.0, 0.10, 1.25}},
+    };
+
+    // Find pricing
+    auto it = prices.find(model_base);
+    if (it == prices.end()) {
+        // Default to Sonnet pricing if unknown
+        it = prices.find("claude-sonnet-4-6");
+    }
+
+    const auto& p = it->second;
+
+    // Calculate cost: (tokens / 1,000,000) * price_per_million
+    return (input * p.input + output * p.output +
+            cache_read * p.cache_read + cache_write * p.cache_write) / 1'000'000.0;
 }
 
 } // namespace ode

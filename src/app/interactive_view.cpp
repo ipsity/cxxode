@@ -96,7 +96,16 @@ std::vector<std::string> interactive_ui::palette_rows(int columns) {
 std::string interactive_ui::status_line(int columns) const {
     const auto mode = app_.core ? app_.config.permissions.mode() : permission_mode::normal;
     std::string right = std::string(mode_name(mode)) + " · " + app_.core->model;
-    if (usage_.context) right += " · " + short_count(usage_.context) + "/" + short_count(app_.core->context_window);
+    if (usage_.context) {
+        right += " · " + short_count(usage_.context) + "/" + short_count(app_.core->context_window);
+        // Add cost display
+        const double cost = app_.core->total.cost_usd(app_.core->model);
+        if (cost >= 0.01) {
+            right += " · $" + (cost < 1.0 ?
+                std::to_string(static_cast<int>(cost * 100 + 0.5)) + "¢" :
+                std::to_string(cost).substr(0, std::to_string(cost).find('.') + 3));
+        }
+    }
     const auto mode_tone = mode == permission_mode::yolo ? tone::error : mode == permission_mode::plan ? tone::accent : tone::dim;
     std::string left = "ode  " + home_relative(app_.root);
     if (!branch_.empty()) left += "  " + branch_;
