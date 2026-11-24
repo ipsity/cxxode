@@ -155,6 +155,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // Initialize provider config early for commands that need it
+    if (auto error = resolve_provider(a.config, a.config.provider, a.provider_cfg)) return fail(*error);
+
     if (list_models) {
         return cmd_models(a, "");
     }
@@ -165,7 +168,6 @@ int main(int argc, char** argv) {
         a.config.permissions.set_mode(*m);
     }
 
-    if (auto error = resolve_provider(a.config, a.config.provider, a.provider_cfg)) return fail(*error);
     a.model_provider = make_provider(a.provider_cfg);
     a.skills = load_skills(workspace);
     a.commands = load_commands(workspace);

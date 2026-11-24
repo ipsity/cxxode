@@ -11,14 +11,59 @@ std::vector<model_info> list_models(const provider_config& config) {
 
     switch (config.kind) {
         case protocol::anthropic:
-            // Anthropic doesn't have a public models list API
-            // Return known models
-            models = {
-                {"claude-opus-4-8", "Claude Opus 4.8", "Most capable model", 200000, true, true},
-                {"claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced performance", 200000, true, true},
-                {"claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast and efficient", 200000, true, true},
-                {"claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", "Previous generation", 200000, true, true},
-            };
+            // Anthropic doesn't have a public models list API, but try it anyway
+            // Some proxies (like PassionAPI) implement it
+            {
+                std::string base = config.base_url;
+                while (!base.empty() && base.back() == '/') base.pop_back();
+                req.url = base + "/v1/models";
+                req.method = "GET";
+
+                if (!config.api_key.empty()) {
+                    if (config.bearer) {
+                        req.headers.emplace_back("authorization", "Bearer " + config.api_key);
+                    } else {
+                        req.headers.emplace_back("x-api-key", config.api_key);
+                    }
+                }
+
+                cancel_token cancel;
+                std::string body;
+                const auto result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
+
+                if (result.status == 200) {
+                    try {
+                        auto data = json::parse(body);
+                        if (data.contains("data") && data["data"].is_array()) {
+                            for (const auto& m : data["data"]) {
+                                model_info info;
+                                info.id = m.value("id", "");
+                                info.name = m.value("display_name", info.id);
+                                if (m.contains("context_length")) {
+                                    info.context_window = m["context_length"];
+                                } else {
+                                    info.context_window = 200000; // Claude default
+                                }
+                                info.supports_vision = info.id.find("claude") != std::string::npos;
+                                info.supports_tools = true;
+                                if (!info.id.empty()) {
+                                    models.push_back(std::move(info));
+                                }
+                            }
+                        }
+                    } catch (...) {}
+                }
+
+                // Fallback to known Anthropic models if API call failed
+                if (models.empty()) {
+                    models = {
+                        {"claude-opus-4-8", "Claude Opus 4.8", "Most capable model", 200000, true, true},
+                        {"claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced performance", 200000, true, true},
+                        {"claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast and efficient", 200000, true, true},
+                        {"claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", "Previous generation", 200000, true, true},
+                    };
+                }
+            }
             break;
 
         case protocol::openai_chat:
@@ -27,6 +72,7 @@ std::vector<model_info> list_models(const provider_config& config) {
             std::string base = config.base_url;
             while (!base.empty() && base.back() == '/') base.pop_back();
             if (!base.ends_with("/v1")) base += "/v1";
+            req.method = "GET";
             req.url = base + "/models";
 
             if (!config.api_key.empty()) {
