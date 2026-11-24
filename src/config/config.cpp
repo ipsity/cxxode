@@ -136,12 +136,28 @@ std::string resolve_model_alias(const std::string& model) {
 
 settings load_settings(const fs::path& workspace) {
     settings s;
+    // Built-in provider configurations
     s.providers["anthropic"] = {"anthropic", protocol::anthropic,
                                 env("ANTHROPIC_BASE_URL").empty() ? "https://api.anthropic.com" : env("ANTHROPIC_BASE_URL"),
                                 "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "claude-sonnet-4-6"};
-    s.providers["openai"] = {"openai", protocol::openai_responses,
+    s.providers["openai"] = {"openai", protocol::openai_chat,
                              env("OPENAI_BASE_URL").empty() ? "https://api.openai.com/v1" : env("OPENAI_BASE_URL"),
-                             "OPENAI_API_KEY", "", "gpt-5"};
+                             "OPENAI_API_KEY", "", "gpt-4o"};
+
+    // OpenAI-compatible providers
+    s.providers["groq"] = {"groq", protocol::openai_chat,
+                           env("GROQ_BASE_URL").empty() ? "https://api.groq.com/openai/v1" : env("GROQ_BASE_URL"),
+                           "GROQ_API_KEY", "", "llama-3.3-70b-versatile"};
+    s.providers["together"] = {"together", protocol::openai_chat,
+                               env("TOGETHER_BASE_URL").empty() ? "https://api.together.xyz/v1" : env("TOGETHER_BASE_URL"),
+                               "TOGETHER_API_KEY", "", "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"};
+    s.providers["fireworks"] = {"fireworks", protocol::openai_chat,
+                                env("FIREWORKS_BASE_URL").empty() ? "https://api.fireworks.ai/inference/v1" : env("FIREWORKS_BASE_URL"),
+                                "FIREWORKS_API_KEY", "", "accounts/fireworks/models/llama-v3p1-70b-instruct"};
+    s.providers["deepseek"] = {"deepseek", protocol::openai_chat,
+                               env("DEEPSEEK_BASE_URL").empty() ? "https://api.deepseek.com/v1" : env("DEEPSEEK_BASE_URL"),
+                               "DEEPSEEK_API_KEY", "", "deepseek-chat"};
+
     // Claude Code's own model variables, so an existing gateway setup works unchanged.
     for (const auto* var : {"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_MODEL"}) {
         if (!env(var).empty()) s.providers["anthropic"].default_model = env(var);

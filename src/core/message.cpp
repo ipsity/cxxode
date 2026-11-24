@@ -121,7 +121,7 @@ double usage::cost_usd(std::string_view model) const {
         model_base = model_base.substr(0, pos);
     }
 
-    // Pricing table (as of 2024-2025)
+    // Pricing table (as of 2024-2025, USD per million tokens)
     static const std::map<std::string, pricing> prices = {
         // Claude 4.x
         {"claude-opus-4-8",     {15.0,  75.0,  1.50, 18.75}},
@@ -141,8 +141,20 @@ double usage::cost_usd(std::string_view model) const {
         {"gpt-4-turbo", {10.0, 30.0, 0.0, 0.0}},
         {"gpt-4o",      {2.5, 10.0, 0.0, 0.0}},
         {"gpt-4o-mini", {0.15, 0.6, 0.0, 0.0}},
+        {"gpt-4",       {30.0, 60.0, 0.0, 0.0}},
 
-        // Claude Fable 5 (hypothetical, adjust when known)
+        // OpenAI GPT-3.5
+        {"gpt-3.5-turbo", {0.5, 1.5, 0.0, 0.0}},
+
+        // Groq (free tier, approximate)
+        {"llama-3.3-70b-versatile", {0.0, 0.0, 0.0, 0.0}},
+        {"llama-3.1-70b-versatile", {0.0, 0.0, 0.0, 0.0}},
+
+        // DeepSeek
+        {"deepseek-chat", {0.14, 0.28, 0.014, 0.175}},
+        {"deepseek-coder", {0.14, 0.28, 0.014, 0.175}},
+
+        // Claude Fable 5 (hypothetical, adjust when released)
         {"claude-fable-5", {1.0, 5.0, 0.10, 1.25}},
     };
 

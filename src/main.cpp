@@ -1,4 +1,5 @@
 #include "app/app.hpp"
+#include "commands/builtin_commands.hpp"
 #include "commands/command.hpp"
 #include "core/rpc.hpp"
 #include "core/version.hpp"
@@ -30,8 +31,9 @@ constexpr const char* usage_text =
     "  ode -c                    continue the most recent session here\n"
     "  ode --rpc                 RPC mode: JSONL protocol over stdin/stdout\n"
     "  ode login [provider]      store an API key in Windows Credential Manager\n"
+    "  ode models                list available models from current provider\n"
     "\n"
-    "  --model NAME              model id\n"
+    "  --model NAME              model id or alias (opus, sonnet, haiku, fable)\n"\n"
     "  --provider NAME           anthropic, openai, or one from settings.json\n"
     "  --permission MODE         plan | default | yolo\n"
     "  -C DIR                    workspace directory\n"
@@ -86,7 +88,7 @@ int main(int argc, char** argv) {
     const auto args = utf8_args(argc, argv);
     std::string prompt, model, provider_name, mode_text;
     fs::path workspace = fs::current_path();
-    bool print = false, cont = false, login = false, rpc_mode = false;
+    bool print = false, cont = false, login = false, rpc_mode = false, list_models = false;
     if (const char* nc = std::getenv("NO_COLOR"); nc && *nc) ui::color_enabled() = false;
 
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -120,6 +122,8 @@ int main(int argc, char** argv) {
                 ui::color_enabled() = false;
             } else if (a == "login" && i == 0) {
                 login = true;
+            } else if (a == "models" && i == 0) {
+                list_models = true;
             } else if (!a.empty() && a.front() == '-' && a.size() > 1) {
                 return fail("unknown option " + a + ". See ode --help.");
             } else {
@@ -150,6 +154,11 @@ int main(int argc, char** argv) {
         ui::write_stream(true, "Saved to Windows Credential Manager as ode/" + name + "\n");
         return 0;
     }
+
+    if (list_models) {
+        return cmd_models(a, "");
+    }
+
     if (!mode_text.empty()) {
         const auto m = parse_mode(mode_text);
         if (!m) return fail("--permission takes plan, default or yolo");

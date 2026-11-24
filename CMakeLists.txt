@@ -29,6 +29,7 @@ add_library(cxxode_core STATIC
     src/provider/anthropic.cpp
     src/provider/openai_chat.cpp
     src/provider/openai_responses.cpp
+    src/provider/models.cpp
     src/tools/files.cpp
     src/tools/edit_tools.cpp
     src/tools/search_tools.cpp
@@ -37,6 +38,7 @@ add_library(cxxode_core STATIC
     src/skills/skill.cpp
     src/skills/make_tools.cpp
     src/commands/command.cpp
+    src/commands/builtin_commands.cpp
     src/mcp/mcp_client.cpp
     src/mcp/mcp_tools.cpp
     src/hooks/hooks.cpp
