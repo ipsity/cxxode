@@ -35,6 +35,8 @@ add_library(cxxode_core STATIC
     src/tools/search_tools.cpp
     src/tools/bash_tool.cpp
     src/ui/render.cpp
+    src/ui/theme.cpp
+    src/ui/welcome.cpp
     src/skills/skill.cpp
     src/skills/make_tools.cpp
     src/commands/command.cpp

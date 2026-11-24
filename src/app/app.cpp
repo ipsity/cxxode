@@ -1,6 +1,7 @@
 #include "app/app.hpp"
 #include "app/interactive.hpp"
 #include "ui/term.hpp"
+#include "ui/welcome.hpp"
 
 namespace ode {
 
@@ -31,6 +32,17 @@ void app::set_model(const std::string& requested) {
 
 int run_interactive(app& a, std::string first_prompt) {
     ui::terminal term;
+
+    // Show welcome screen on first run
+    if (ui::should_show_welcome() && first_prompt.empty()) {
+        const auto dims = term.dimensions();
+        const auto welcome = ui::welcome_screen(dims.columns);
+        for (const auto& line : welcome) {
+            ui::write_stream(false, line + "\n");
+        }
+        ui::mark_welcome_shown();
+    }
+
     interactive_ui ui(a, term);
     return ui.run(std::move(first_prompt));
 }

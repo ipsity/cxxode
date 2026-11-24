@@ -33,7 +33,7 @@ constexpr const char* usage_text =
     "  ode login [provider]      store an API key in Windows Credential Manager\n"
     "  ode models                list available models from current provider\n"
     "\n"
-    "  --model NAME              model id or alias (opus, sonnet, haiku, fable)\n"\n"
+    "  --model NAME              model id or alias (opus, sonnet, haiku, fable)\n"
     "  --provider NAME           anthropic, openai, or one from settings.json\n"
     "  --permission MODE         plan | default | yolo\n"
     "  -C DIR                    workspace directory\n"
