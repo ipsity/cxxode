@@ -2,7 +2,7 @@
 
 用 C++20 写的终端 coding agent。目标：启动 < 20 ms，空闲内存 < 15 MB，单个 exe，兼容 Claude Code 的 skills、命令、MCP、hooks 和插件格式。
 
-**当前状态：V2 M1** — 交互式 TUI、无头模式、工具集、会话管理已可用。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
+**当前状态：V2 M2** — Skills、用户命令、@文件补全、Esc Esc 分叉已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
 
 V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p28`。
 
@@ -27,7 +27,14 @@ lay login anthropic
 
 ## 功能
 
-**M1（当前）**
+**M2（当前）**
+- **Skills**：从 `.claude/skills/` 和 `~/.claude/skills/` 加载 SKILL.md，通过 `skill` 工具调用
+- **用户斜杠命令**：从 `.claude/commands/` 加载自定义命令，支持 $ARGUMENTS、$WORKSPACE 变量
+- **扩展命令面板**：`/` 触发，显示内置命令 + skills（标记 skill）+ 用户命令
+- **@文件补全**：输入 `@` 后显示工作区文件，Tab 补全路径
+- **Esc Esc 分叉**：双击 Esc（< 500ms）编辑上一条消息，创建分支会话
+
+**M1**
 - 交互式 TUI：内联渲染、权限提示、斜杠命令（/help /compact /undo /resume）
 - 工具：Read/Write/Edit/Bash/Grep/Glob，支持并行读取
 - 权限系统：plan/default/yolo 三档，allow/deny 规则，Shift+Tab 切换
