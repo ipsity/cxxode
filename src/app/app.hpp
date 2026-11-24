@@ -4,6 +4,7 @@
 #include "commands/command.hpp"
 #include "config/config.hpp"
 #include "core/agent.hpp"
+#include "core/error_handler.hpp"
 #include "core/tool_suggestion.hpp"
 #include "mcp/mcp_client.hpp"
 #include "skills/skill.hpp"
@@ -34,6 +35,9 @@ struct app {
 
     // Week 2 Day 8: Tool suggestion engine
     tool_suggestion_engine suggestion_engine;
+
+    // Week 2 Day 9: Error handler
+    error_handler error_handler_;
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);

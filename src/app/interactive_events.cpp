@@ -151,9 +151,31 @@ void interactive_ui::apply(ev_tool_done& e) {
         }
     }
 
-    // Show full output for errors
-    if (e.error && e.name != "Bash" && !e.full.empty()) {
-        note(text::keep_head(ui::one_line(e.full), columns - 4), tone::error);
+    // Show full output for errors - Day 9: Enhanced with friendly error handling
+    if (e.error && !e.full.empty()) {
+        // Analyze error with error_handler
+        auto error_info = app_.error_handler_.analyze(e.full, e.name, e.label);
+
+        // Show friendly error message
+        if (e.name != "Bash") {
+            screen_.commit("   " + paint(tone::error, "❌ " + error_info.friendly_message));
+        }
+
+        // Show recovery suggestions
+        auto suggestions = app_.error_handler_.suggest_recovery(error_info);
+        if (!suggestions.empty() && suggestions.size() <= 3) {
+            screen_.commit("   " + paint(tone::dim, "💡 建议:"));
+            for (size_t i = 0; i < std::min<size_t>(suggestions.size(), 3); ++i) {
+                const auto& sugg = suggestions[i];
+                std::string line = "      " + std::to_string(i + 1) + ". " + sugg.action;
+                screen_.commit("   " + paint(tone::dim, line));
+            }
+        }
+
+        // For Bash, still show original output (more context needed)
+        if (e.name == "Bash") {
+            note(text::keep_head(ui::one_line(e.full), columns - 4), tone::error);
+        }
     }
     last_tool_full_ = e.full;
 }
