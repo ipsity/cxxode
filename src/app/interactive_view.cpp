@@ -461,17 +461,15 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     // Calculate available space for content
     const int available_rows = size_.rows - reserved_bottom;
 
-    // Trim or pad content to fit exactly in available space
+    // 🔧 修复：内容平滑滚动，不要跳动
+    // 策略：只保留最新的内容（从底部），移除顶部旧内容
+    // 不添加 padding，让内容自然增长
     if (static_cast<int>(rows.size()) > available_rows) {
-        // Too much content - remove from top
+        // Too much content - keep bottom rows (newest), remove from top
         const int to_remove = static_cast<int>(rows.size()) - available_rows;
         rows.erase(rows.begin(), rows.begin() + to_remove);
-    } else {
-        // Not enough content - add padding to push input to bottom
-        while (static_cast<int>(rows.size()) < available_rows) {
-            rows.push_back("");
-        }
     }
+    // ✅ 不添加 padding，让输入框位置随内容自然变化
 
     const int content_end = static_cast<int>(rows.size());
 
