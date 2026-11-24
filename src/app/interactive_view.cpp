@@ -252,7 +252,8 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     // Top border
     std::string top_border;
     for (int i = 0; i < columns; ++i) top_border += "─";
-    rows.push_back(paint(tone::dim, top_border));
+    const auto border_color = app_.current_theme.border.ansi_fg();
+    rows.push_back(border_color + top_border + "\033[0m");
 
     // Input lines
     for (std::size_t i = 0; i < l.rows.size() && i < static_cast<std::size_t>(max_input_lines); ++i) {
@@ -262,7 +263,9 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
 
         if (i == 0) {
-            rows.push_back(paint(busy_ ? tone::dim : tone::accent, "› ") + shown);
+            // Use theme color for input prompt
+            const auto prompt_color = app_.current_theme.prompt.ansi_fg();
+            rows.push_back(prompt_color + "› \033[0m" + shown);
         } else {
             rows.push_back("  " + shown);
         }
@@ -271,7 +274,8 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     // Bottom border
     std::string bottom_border;
     for (int i = 0; i < columns; ++i) bottom_border += "─";
-    rows.push_back(paint(tone::dim, bottom_border));
+    const auto border_color = app_.current_theme.border.ansi_fg();
+    rows.push_back(border_color + bottom_border + "\033[0m");
 
     // Status line (fixed at very bottom)
     rows.push_back(status_line(columns));
