@@ -11,6 +11,8 @@
 
 namespace lay {
 
+struct settings;  // Forward declaration
+
 // Hook types that can be registered in settings.json
 enum class hook_type {
     pre_tool_use,      // Before a tool is executed
