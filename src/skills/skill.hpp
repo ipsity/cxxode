@@ -28,7 +28,11 @@ std::vector<skill> load_skills(const std::filesystem::path& workspace);
 // Formats skills as a system prompt section
 std::string skills_system_prompt(const std::vector<skill>& skills);
 
-// Creates the full tool list including builtin tools and the skill tool (if skills are available)
-std::vector<tool> make_tools(const std::vector<skill>& skills);
+// Forward declaration for MCP
+class mcp_client;
+
+// Creates the full tool list including builtin tools, skills, and MCP tools
+std::vector<tool> make_tools(const std::vector<skill>& skills,
+                              const std::vector<std::shared_ptr<mcp_client>>& mcp_clients = {});
 
 } // namespace lay

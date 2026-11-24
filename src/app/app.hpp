@@ -3,6 +3,7 @@
 #include "commands/command.hpp"
 #include "config/config.hpp"
 #include "core/agent.hpp"
+#include "mcp/mcp_client.hpp"
 #include "skills/skill.hpp"
 
 #include <memory>
@@ -22,6 +23,7 @@ struct app {
     std::string session_id;
     std::vector<skill> skills;
     std::vector<user_command> commands;
+    std::vector<std::shared_ptr<mcp_client>> mcp_clients;
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);

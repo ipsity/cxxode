@@ -13,7 +13,7 @@ endif()
 
 set(CXXODE_PLATFORM_SOURCES)
 if(WIN32)
-    list(APPEND CXXODE_PLATFORM_SOURCES src/platform/http_winhttp.cpp src/platform/process_windows.cpp src/ui/term_windows.cpp)
+    list(APPEND CXXODE_PLATFORM_SOURCES src/platform/http_winhttp.cpp src/platform/process_windows.cpp src/platform/interactive_process.cpp src/ui/term_windows.cpp)
 endif()
 
 add_library(cxxode_core STATIC
@@ -36,6 +36,8 @@ add_library(cxxode_core STATIC
     src/skills/skill.cpp
     src/skills/make_tools.cpp
     src/commands/command.cpp
+    src/mcp/mcp_client.cpp
+    src/mcp/mcp_tools.cpp
     ${CXXODE_PLATFORM_SOURCES})
 target_include_directories(cxxode_core PUBLIC src)
 target_include_directories(cxxode_core SYSTEM PUBLIC third_party)
