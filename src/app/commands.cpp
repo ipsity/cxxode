@@ -165,11 +165,13 @@ bool interactive_ui::command(const std::string& line) {
                         // Show customize menu
                         show_customize_menu();
                     } else {
-                        // Apply theme
+                        // Apply theme and save selection
                         app_.current_theme = themes.at(selected);
+                        save_theme_selection(selected);  // Save for next restart
                         note("✓ Theme applied: " + selected, tone::accent);
                         note("Theme '" + selected + "' is now active!");
                         note("Colors updated for tools and UI elements");
+                        note("Theme will be remembered on restart", tone::dim);
                     }
                 },
                 []() { /* Cancel */ }

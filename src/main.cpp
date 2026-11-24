@@ -172,6 +172,10 @@ int main(int argc, char** argv) {
     a.skills = load_skills(workspace);
     a.commands = load_commands(workspace);
 
+    // Load saved theme selection
+    const auto saved_theme_name = load_theme_selection();
+    a.current_theme = load_theme(saved_theme_name);
+
     // Initialize MCP servers
     if (!a.config.mcp_servers.is_null() && a.config.mcp_servers.is_object()) {
         for (const auto& [name, config] : a.config.mcp_servers.items()) {

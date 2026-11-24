@@ -52,5 +52,7 @@ theme monokai();
 // Theme management
 std::map<std::string, theme> available_themes();
 theme load_theme(const std::string& name);
+bool save_theme_selection(const std::string& theme_name);
+std::string load_theme_selection();
 
 } // namespace ode

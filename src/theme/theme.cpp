@@ -1,5 +1,9 @@
 #include "theme/theme.hpp"
+
 #include <sstream>
+#include <fstream>
+#include <filesystem>
+#include <cstdlib>
 
 namespace ode {
 
@@ -164,7 +168,3 @@ theme load_theme(const std::string& name) {
     auto themes = available_themes();
     auto it = themes.find(name);
     if (it != themes.end()) return it->second;
-    return dark_theme();
-}
-
-} // namespace ode
