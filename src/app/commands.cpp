@@ -13,20 +13,41 @@ using ui::tone;
 namespace {
 
 constexpr const char* help_text =
-    "**按键**\n"
+    "**快捷键参考**\n"
+    "\n"
+    "**编辑**\n"
+    "- `Ctrl+A` 移到行首  `Ctrl+E` 移到行尾\n"
+    "- `Ctrl+U` 删除到行首  `Ctrl+K` 删除到行尾\n"
+    "- `Ctrl+W` 删除上一个单词\n"
+    "- `Ctrl+D` 删除字符（空行退出）\n"
+    "- `Backspace` / `Del` 删除字符\n"
+    "- `Ctrl+←` / `Ctrl+→` 单词级移动\n"
+    "\n"
+    "**导航与历史**\n"
+    "- `↑` `↓` 浏览命令历史或多行移动\n"
+    "- `Home` / `End` 行首/行尾\n"
+    "- `←` / `→` 字符移动\n"
+    "\n"
+    "**输入与提交**\n"
     "- `Enter` 发送；模型工作时发送的内容会插进下一步\n"
-    "- `Ctrl+J`、`Shift+Enter` 或行尾 `\\` 换行\n"
+    "- `Shift+Enter` 或行尾 `\\` 换行\n"
+    "- `Tab` 接受补全建议\n"
+    "\n"
+    "**控制**\n"
     "- `Esc` 中断当前轮；空闲时清空草稿\n"
-    "- `Ctrl+C` 中断或清空，连按两次退出；`Ctrl+D` 空草稿时退出\n"
-    "- `Shift+Tab` 切换权限档：plan 只读 → default → yolo 全放行\n"
+    "- `Ctrl+C` 中断或清空，连按两次退出\n"
+    "- `Ctrl+L` 清屏\n"
     "- `Ctrl+O` 展开最近一次工具的完整输出\n"
-    "- `↑` `↓` 输入历史；`Ctrl+L` 清屏\n"
-    "- 需要确认时：`Enter` 允许，`Esc` 拒绝，`a` 本会话总是允许\n"
+    "- `Ctrl+T` 切换思考块展开/折叠\n"
+    "- `Shift+Tab` 切换权限档：plan → default → yolo\n"
+    "- 需要确认时：`Enter` 允许，`Esc` 拒绝，`a` 总是允许\n"
     "\n"
     "**命令**\n"
-    "- `/compact [重点]` 压缩上下文  `/model [名称]` 模型  `/mode [档位]` 权限档\n"
-    "- `/resume [序号]` 恢复会话  `/undo` 撤销上一轮改动  `/clear` 新会话\n"
-    "- `/cost` 用量  `/exit` 退出";
+    "- `/help` 显示此帮助  `/keys` 同 /help\n"
+    "- `/compact [重点]` 压缩上下文  `/model [名称]` 切换模型\n"
+    "- `/mode [档位]` 切换权限档  `/theme` 切换主题\n"
+    "- `/resume [序号]` 恢复会话  `/undo` 撤销上一轮改动\n"
+    "- `/clear` 新会话  `/cost` 查看用量  `/exit` 退出";
 
 std::pair<std::string, std::string> split(const std::string& line) {
     const auto space = line.find(' ');
@@ -46,7 +67,7 @@ bool interactive_ui::command(const std::string& line) {
     auto& core = *app_.core;
 
     if (name == "/exit" || name == "/quit") return false;
-    if (name == "/help") {
+    if (name == "/help" || name == "/keys" || name == "/shortcuts") {
         print_markdown(help_text);
     } else if (name == "/clear") {
         core.messages.clear();
