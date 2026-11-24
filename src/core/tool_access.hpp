@@ -50,7 +50,7 @@ public:
         Origin origin = Origin::Any,
         Scope scope = Scope::Any,
         Mode mode = Mode::Ask,
-        Resource resource = {}
+        Resource resource = Resource{}
     ) : origin_(origin), scope_(scope), mode_(mode), resource_(resource) {}
 
     // 检查访问权限
