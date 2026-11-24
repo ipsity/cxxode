@@ -88,8 +88,8 @@ bool interactive_ui::command(const std::string& line) {
                         if (!detail.empty()) detail += " ";
                         detail += "(" + std::to_string(models[i].context_window / 1000) + "k)";
                     }
+                    // Set current model as default selection
                     if (models[i].id == core.model) {
-                        detail += " ⭐";
                         current_index = i;
                     }
                     details.push_back(detail);

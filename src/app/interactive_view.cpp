@@ -178,12 +178,14 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
 
         for (std::size_t i = 0; i < selection_->items.size(); ++i) {
             const bool is_selected = i == selection_->selected_index;
-            const auto marker = is_selected ? "→ " : "  ";
             const auto item_color = is_selected ? tone::accent_bold : tone::normal;
 
-            std::string line = marker + std::to_string(i + 1) + ". " + selection_->items[i];
+            std::string line = "  " + std::to_string(i + 1) + ". " + selection_->items[i];
             if (i < selection_->details.size() && !selection_->details[i].empty()) {
                 line += "  " + selection_->details[i];
+            }
+            if (is_selected) {
+                line += " ←";  // Arrow on the right for selected item
             }
 
             rows.push_back(" " + paint(item_color, line));
