@@ -198,12 +198,7 @@ std::vector<std::string> markdown_line(std::string_view line, markdown_state& st
 }
 
 std::string_view verb(std::string_view tool) {
-    if (tool == "Read") return "读";
-    if (tool == "Write") return "写";
-    if (tool == "Edit") return "改";
-    if (tool == "Bash") return "跑";
-    if (tool == "Grep") return "搜";
-    if (tool == "Glob") return "找";
+    // Return tool name directly in English
     return tool;
 }
 
