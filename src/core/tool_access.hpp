@@ -49,8 +49,15 @@ public:
     ToolAccess(
         Origin origin = Origin::Any,
         Scope scope = Scope::Any,
-        Mode mode = Mode::Ask,
-        Resource resource = Resource{}
+        Mode mode = Mode::Ask
+    ) : origin_(origin), scope_(scope), mode_(mode), resource_() {}
+
+    // 带资源限制的构造函数
+    ToolAccess(
+        Origin origin,
+        Scope scope,
+        Mode mode,
+        Resource resource
     ) : origin_(origin), scope_(scope), mode_(mode), resource_(resource) {}
 
     // 检查访问权限
