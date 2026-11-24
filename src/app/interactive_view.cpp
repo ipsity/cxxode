@@ -137,19 +137,20 @@ std::vector<std::string> interactive_ui::palette_items() {
     const auto& t = editor_.text();
 
     // 🔧 修复：防止对话框突然消失
-    // 如果刚执行了命令（500ms 内），继续显示命令面板
+    // 策略：在命令执行期间（busy_ 时），继续显示上次的命令
     bool just_executed = false;
     if (!last_executed_command_.empty()) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             steady::now() - last_executed_time_).count();
-        if (elapsed < 500) {  // 500ms 内
+        // 在执行后 1000ms 内，或者在 busy 状态时，继续显示
+        if (elapsed < 1000 || busy_) {
             just_executed = true;
         } else {
             last_executed_command_.clear();  // 清除过期的命令
         }
     }
 
-    // Show palette if input starts with / OR just executed a command
+    // Show palette if input starts with / OR just executed a command OR busy
     if (!just_executed && (t.empty() || t.front() != '/')) return {};
 
     // Extract search query (remove leading /)
@@ -474,15 +475,18 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     // Calculate available space for content
     const int available_rows = size_.rows - reserved_bottom;
 
-    // 🔧 修复：内容平滑滚动，不要跳动
-    // 策略：只保留最新的内容（从底部），移除顶部旧内容
-    // 不添加 padding，让内容自然增长
-    if (static_cast<int>(rows.size()) > available_rows) {
-        // Too much content - keep bottom rows (newest), remove from top
-        const int to_remove = static_cast<int>(rows.size()) - available_rows;
+    // 🔧 修复：输入框固定在底部，内容区域固定高度
+    // 策略：新内容在底部出现（贴着输入框），旧内容向上滚动
+    if (static_cast<int>(rows.size()) < available_rows) {
+        // 内容不够时，在顶部添加空行，保持输入框在底部
+        int to_add = available_rows - static_cast<int>(rows.size());
+        rows.insert(rows.begin(), to_add, "");
+    } else if (static_cast<int>(rows.size()) > available_rows) {
+        // 内容太多时，保留底部（最新），移除顶部（旧）
+        int to_remove = static_cast<int>(rows.size()) - available_rows;
         rows.erase(rows.begin(), rows.begin() + to_remove);
     }
-    // ✅ 不添加 padding，让输入框位置随内容自然变化
+    // ✅ 内容区域固定，输入框固定，新内容贴着输入框
 
     const int content_end = static_cast<int>(rows.size());
 
