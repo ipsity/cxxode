@@ -1,5 +1,7 @@
 #include "app/interactive.hpp"
 
+#include <iostream>
+
 namespace ode {
 
 using namespace std::chrono_literals;
@@ -17,20 +19,10 @@ void interactive_ui::submit() {
 
     // Handle palette selection
     const auto items = palette_items();
-    if (!items.empty() && !text.empty() && text.front() == '/') {
-        // Check if text is just a prefix (user is navigating palette)
-        bool is_prefix_only = true;
-        for (const auto& item : items) {
-            const auto tab = item.find('\t');
-            const auto cmd = tab != std::string::npos ? item.substr(0, tab) : item;
-            if (cmd == text) {
-                is_prefix_only = false;
-                break;
-            }
-        }
 
-        // If user pressed enter while navigating palette, use selected item
-        if (is_prefix_only && palette_index_ < items.size()) {
+    if (!items.empty() && !text.empty() && text.front() == '/') {
+        // When navigating palette, always use the selected item
+        if (palette_index_ < items.size()) {
             text = items[palette_index_];
             const auto tab = text.find('\t');
             if (tab != std::string::npos) {

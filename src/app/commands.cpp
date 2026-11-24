@@ -1,6 +1,8 @@
 #include "app/interactive.hpp"
 #include "commands/command.hpp"
 
+#include <iostream>
+
 namespace ode {
 
 using ui::paint;
