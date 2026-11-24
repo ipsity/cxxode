@@ -163,27 +163,31 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
-    // Input box: ╭─╮ │ › text │ ╰─╯
-    const int inner = std::max(4, columns - 6);
-    std::string bar;
-    for (int i = 0; i < columns - 2; ++i) bar += "─";
-    const auto border = ask_ ? tone::dim : busy_ ? tone::dim : tone::accent;
-    rows.push_back(paint(border, "╭" + bar + "╮"));
+    // Simplified input area - more like Claude Code
+    // Just show prompt marker and text, no box
+    const int inner = std::max(4, columns - 4);
     const auto l = editor_.arrange(inner);
     const int first_input = static_cast<int>(rows.size());
+
+    // Add a subtle separator before input
+    if (!rows.empty()) {
+        rows.push_back("");  // Blank line for spacing
+    }
+
     for (std::size_t i = 0; i < l.rows.size(); ++i) {
         const auto& r = l.rows[i];
         const auto piece = std::string_view(editor_.text()).substr(r.begin, r.end - r.begin);
         std::string shown(piece);
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
-        const int pad = std::max(0, inner - text::width(shown));
+
+        // Simple prompt marker: "› " for first line, "  " for continuation
         const auto mark = i == 0 ? paint(busy_ ? tone::dim : tone::accent, "› ") : std::string("  ");
-        rows.push_back(paint(border, "│") + " " + mark + shown + std::string(static_cast<std::size_t>(pad), ' ') + paint(border, "│"));
+        rows.push_back(mark + shown);
     }
-    rows.push_back(paint(border, "╰" + bar + "╯"));
+
     rows.push_back(status_line(columns));
-    cursor_row = ask_ ? -1 : first_input + l.cursor_row;
-    cursor_col = 4 + l.cursor_column;
+    cursor_row = ask_ ? -1 : first_input + 1 + l.cursor_row;  // +1 for blank line
+    cursor_col = 2 + l.cursor_column;  // 2 for "› " marker
     return rows;
 }
 
