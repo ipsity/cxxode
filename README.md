@@ -8,21 +8,59 @@ V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p2
 
 ## 快速开始
 
+### 安装
+
+**Windows:**
 ```bash
-# 交互模式
+# 1. 编译 release 版本
+cmake --preset release
+cmake --build --preset release
+
+# 2. 运行安装脚本（以管理员身份）
+install.bat
+
+# 3. 重启终端，配置 API 密钥
+ode login anthropic
+```
+
+**Linux/macOS:**
+```bash
+# 1. 编译 release 版本
+cmake --preset release
+cmake --build --preset release
+
+# 2. 运行安装脚本
+sudo ./install.sh
+
+# 3. 配置 API 密钥
+ode login anthropic
+```
+
+**手动安装（所有平台）:**
+1. 将 `build/release/ode.exe` (Windows) 或 `build/release/ode` (Linux/macOS) 复制到 PATH 中的任意目录
+2. 或者添加 `build/release` 目录到系统 PATH
+
+详细安装和配置说明见 [docs/USAGE.md](docs/USAGE.md)
+
+### 基本使用
+
+```bash
+# 在任意目录启动
+cd ~/my-project
 ode
 
-# 带初始提示
-ode "解释 main.cpp 的流程"
+# 单次问答
+ode "分析这个项目的结构"
 
-# 无头模式（输出到 stdout）
-ode -p "README.md 里的构建步骤过时了吗？"
+# 切换模型
+ode --model opus "复杂任务"
+ode --model haiku "简单问题"
 
-# 继续最近的会话
-ode -c
+# 列出可用模型
+ode models
 
-# 登录（保存 API key）
-ode login anthropic
+# 查看帮助
+ode --help
 ```
 
 ## 功能
