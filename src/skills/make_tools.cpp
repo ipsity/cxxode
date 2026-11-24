@@ -4,6 +4,9 @@
 
 namespace lay {
 
+// Forward declaration
+std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>&);
+
 std::vector<tool> make_tools(const std::vector<skill>& skills,
                               const std::vector<std::shared_ptr<mcp_client>>& mcp_clients,
                               const std::vector<agent_config>* agents,
