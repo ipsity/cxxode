@@ -42,6 +42,11 @@ constexpr const char* help_text =
     "- `Shift+Tab` 切换权限档：plan → default → yolo\n"
     "- 需要确认时：`Enter` 允许，`Esc` 拒绝，`a` 总是允许\n"
     "\n"
+    "**🚀 快捷工作流**（新）\n"
+    "- `/ref <file>` 快速查看并编辑文件 (Read→Edit→Write)\n"
+    "- `/search <pattern>` 搜索并查看结果 (Grep→Read) [别名: /s]\n"
+    "- `/fix [file]` 智能检查并修复问题\n"
+    "\n"
     "**命令**\n"
     "- `/help` 显示此帮助  `/keys` 同 /help\n"
     "- `/compact [重点]` 压缩上下文  `/model [名称]` 切换模型\n"
@@ -69,7 +74,37 @@ bool interactive_ui::command(const std::string& line) {
     if (name == "/exit" || name == "/quit") return false;
     if (name == "/help" || name == "/keys" || name == "/shortcuts") {
         print_markdown(help_text);
-    } else if (name == "/clear") {
+    }
+    // 🆕 快捷工作流命令 - 减少重复操作
+    else if (name == "/ref") {
+        // /ref <file> - 快速 Read-Edit-Write 工作流
+        if (arg.empty()) {
+            note("用法: /ref <file>  快速查看并编辑文件", tone::error);
+        } else {
+            note("工作流: Read → Edit → Write " + arg, tone::dim);
+            start_turn("Read " + arg + " then suggest edits");
+        }
+    }
+    else if (name == "/search" || name == "/s") {
+        // /search <pattern> - 快速 Grep-Read 工作流
+        if (arg.empty()) {
+            note("用法: /search <pattern>  搜索并查看结果", tone::error);
+        } else {
+            note("工作流: Grep → Read 匹配的文件", tone::dim);
+            start_turn("Grep for " + arg + " then read the matching files");
+        }
+    }
+    else if (name == "/fix") {
+        // /fix [file] - 智能修复工作流
+        if (arg.empty()) {
+            note("工作流: 分析最近错误并修复", tone::dim);
+            start_turn("Analyze the recent errors and fix them");
+        } else {
+            note("工作流: 检查并修复 " + arg, tone::dim);
+            start_turn("Check " + arg + " for issues and fix them");
+        }
+    }
+    else if (name == "/clear") {
         core.messages.clear();
         core.total = {};
         core.context_tokens = 0;

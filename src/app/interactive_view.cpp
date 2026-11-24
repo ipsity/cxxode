@@ -13,21 +13,26 @@ struct palette_item {
     std::string name;
     std::string description;
     command_kind kind;
+    int score = 0;  // For fuzzy search ranking
 };
 
 const std::pair<const char*, const char*> builtin_commands[] = {
-    {"/help", "快捷键与命令"},
-    {"/compact", "压缩上下文"},
-    {"/model", "查看或切换模型"},
-    {"/theme", "切换主题配色"},
-    {"/login", "登录 provider"},
-    {"/logout", "查看当前 provider"},
-    {"/mode", "切换权限档 plan/default/yolo"},
-    {"/resume", "恢复本目录的会话"},
-    {"/undo", "撤销上一轮的文件改动"},
-    {"/clear", "开始新会话"},
-    {"/cost", "本会话 token 用量"},
-    {"/exit", "退出"},
+    {"/help", "📖 快捷键与命令"},
+    // 🚀 快捷工作流命令（新）
+    {"/ref", "🔄 快速查看编辑 (Read→Edit→Write)"},
+    {"/search", "🔍 搜索并查看 (Grep→Read) [别名: /s]"},
+    {"/s", "🔍 搜索并查看 (Grep→Read) [别名]"},
+    {"/fix", "🔧 智能检查修复"},
+    // 核心命令
+    {"/compact", "📦 压缩上下文"},
+    {"/model", "🤖 查看或切换模型"},
+    {"/theme", "🎨 切换主题配色"},
+    {"/mode", "🔐 切换权限档 (plan/default/yolo)"},
+    {"/resume", "⏮️  恢复会话"},
+    {"/undo", "↩️  撤销改动"},
+    {"/clear", "🆕 开始新会话"},
+    {"/cost", "💰 查看用量"},
+    {"/exit", "👋 退出"},
 };
 
 std::string spinner(steady::time_point since) {
@@ -100,37 +105,84 @@ std::vector<std::string> interactive_ui::palette_items() {
     std::vector<palette_item> items;
     const auto& t = editor_.text();
 
-    // Only show palette if input starts with / and has no spaces or newlines
-    if (t.empty() || t.front() != '/' || t.find_first_of(" \n") != std::string::npos) return {};
+    // Show palette if input starts with / (even with spaces - for fuzzy search)
+    if (t.empty() || t.front() != '/') return {};
 
-    // Add builtin commands
+    // Extract search query (remove leading /)
+    std::string query = t.substr(1);
+
+    // Fuzzy match function (checks if all chars in query appear in target in order)
+    auto fuzzy_match = [](std::string_view query, std::string_view target) -> int {
+        if (query.empty()) return 100;  // Empty query matches everything
+
+        size_t qi = 0, ti = 0;
+        int score = 0;
+        while (qi < query.size() && ti < target.size()) {
+            if (std::tolower(query[qi]) == std::tolower(target[ti])) {
+                score += 10;
+                if (ti == 0 || target[ti-1] == ' ' || target[ti-1] == '/') {
+                    score += 5;  // Bonus for word start
+                }
+                qi++;
+            }
+            ti++;
+        }
+        return qi == query.size() ? score : -1;  // -1 = no match
+    };
+
+    // Add builtin commands with fuzzy matching
     for (const auto& [name, about] : builtin_commands) {
-        if (std::string_view(name).starts_with(t)) {
-            items.push_back({name, about, command_kind::builtin});
+        int score = fuzzy_match(query, name);
+        if (score >= 0) {
+            items.push_back({name, about, command_kind::builtin, score});
         }
     }
 
-    // Add skills
+    // Add skills with fuzzy matching
     for (const auto& skill : app_.skills) {
         const auto name = "/" + skill.name;
-        if (name.starts_with(t)) {
-            items.push_back({name, skill.description + " (skill)", command_kind::skill});
+        int score = fuzzy_match(query, name);
+        if (score >= 0) {
+            items.push_back({name, skill.description + " (skill)", command_kind::skill, score});
         }
     }
 
-    // Add user commands
+    // Add user commands with fuzzy matching
     for (const auto& cmd : app_.commands) {
         const auto name = "/" + cmd.name;
-        if (name.starts_with(t)) {
-            items.push_back({name, cmd.description, command_kind::user_command});
+        int score = fuzzy_match(query, name);
+        if (score >= 0) {
+            items.push_back({name, cmd.description, command_kind::user_command, score});
         }
     }
 
-    // Convert to string pairs (name, description)
+    // Sort by score (highest first), then by kind, then by name
+    std::sort(items.begin(), items.end(), [](const auto& a, const auto& b) {
+        if (a.score != b.score) return a.score > b.score;
+        if (a.kind != b.kind) return a.kind < b.kind;
+        return a.name < b.name;
+    });
+
+    // Format output with categories
     std::vector<std::string> result;
+    command_kind last_kind = command_kind::builtin;
+
     for (const auto& item : items) {
+        // Add category header when kind changes
+        if (items.size() > 3 && item.kind != last_kind) {
+            const char* category = item.kind == command_kind::skill ? "── Skills ──" :
+                                  item.kind == command_kind::user_command ? "── User Commands ──" : "── Commands ──";
+            result.push_back(std::string(category));
+            last_kind = item.kind;
+        }
+
+        // Format: /name - description
         result.push_back(item.name + "\t" + item.description);
+
+        // Limit to avoid overwhelming display
+        if (result.size() >= 15) break;
     }
+
     return result;
 }
 
@@ -310,24 +362,26 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
-    // Day 8: Tool suggestions (shown when not busy and no other completions)
-    if (palette_rows(columns).empty() && files.empty()) {
-        const auto suggestions = suggestion_items();
-        if (!suggestions.empty()) {
-            const std::size_t show = std::min<std::size_t>(suggestions.size(), 3);  // Max 3 suggestions
-            for (std::size_t i = 0; i < show; ++i) {
-                rows.push_back("  " + paint(tone::dim, suggestions[i]));
-            }
-        }
-    }
-
-    // Day 12: Input validation hints
+    // Smart hints with priority: validation > suggestions
+    // Only show one type at a time to avoid clutter
     if (!editor_.text().empty() && !busy_ && !ask_) {
+        // Priority 1: Input validation (errors/warnings)
         auto validation = app_.validator.validate(editor_.text());
         if (validation.type != ode::input_validator::issue_type::none) {
             const auto icon = validation.is_warning ? "⚠️  " : "❌ ";
             const auto color = validation.is_warning ? tone::dim : tone::error;
             rows.push_back("  " + paint(color, icon + validation.message));
+        }
+        // Priority 2: Tool suggestions (only if no validation issues and no other completions)
+        else if (palette_rows(columns).empty() && files.empty() && editor_.text().size() > 3) {
+            const auto suggestions = suggestion_items();
+            if (!suggestions.empty()) {
+                // Max 2 suggestions (not 3) for cleaner display
+                const std::size_t show = std::min<std::size_t>(suggestions.size(), 2);
+                for (std::size_t i = 0; i < show; ++i) {
+                    rows.push_back("  " + paint(tone::dim, suggestions[i]));
+                }
+            }
         }
     }
 
