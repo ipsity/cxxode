@@ -4,6 +4,7 @@
 #include "commands/command.hpp"
 #include "config/config.hpp"
 #include "core/agent.hpp"
+#include "core/tool_suggestion.hpp"
 #include "mcp/mcp_client.hpp"
 #include "skills/skill.hpp"
 #include "theme/theme.hpp"
@@ -30,6 +31,9 @@ struct app {
 
     // Current theme
     theme current_theme = dark_theme();
+
+    // Week 2 Day 8: Tool suggestion engine
+    tool_suggestion_engine suggestion_engine;
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);

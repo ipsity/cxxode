@@ -118,6 +118,10 @@ void interactive_ui::apply(ev_tool_done& e) {
         }
     }
     if (running_.empty()) progress_tail_.clear();
+
+    // Day 8: Record tool usage for suggestion learning
+    app_.suggestion_engine.record_tool_use(e.name);
+
     section("tool");
     const int columns = size_.columns - 1;
     const auto head = std::string(ui::verb(e.name));

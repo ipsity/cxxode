@@ -92,6 +92,7 @@ private:
     std::vector<std::string> palette_rows(int columns);
     std::vector<std::string> palette_items();  // All available commands/skills/user commands
     std::vector<std::string> file_items();     // File completion candidates
+    std::vector<std::string> suggestion_items();  // Day 8: Tool suggestions based on input
     std::string status_line(int columns) const;
     void push(ui_event e);
     agent_events make_events();

@@ -134,6 +134,27 @@ std::vector<std::string> interactive_ui::palette_items() {
     return result;
 }
 
+std::vector<std::string> interactive_ui::suggestion_items() {
+    const auto& input = editor_.text();
+
+    // Don't suggest for empty input or commands
+    if (input.empty() || input.front() == '/') return {};
+
+    // Don't suggest when busy or asking
+    if (busy_ || ask_) return {};
+
+    // Get suggestions from engine
+    auto suggestions = app_.suggestion_engine.analyze(input);
+
+    // Format as strings: "tool_name - reason"
+    std::vector<std::string> result;
+    for (const auto& sugg : suggestions) {
+        result.push_back("💡 " + sugg.tool_name + " - " + sugg.reason);
+    }
+
+    return result;
+}
+
 std::vector<std::string> interactive_ui::palette_rows(int columns) {
     std::vector<std::string> rows;
     const auto items = palette_items();
@@ -286,6 +307,17 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
             auto name = files[i];
             if (text::width(name) > columns - 6) name = text::keep_tail(name, columns - 6);
             rows.push_back("  " + paint(on ? tone::accent : tone::dim, name));
+        }
+    }
+
+    // Day 8: Tool suggestions (shown when not busy and no other completions)
+    if (palette_rows(columns).empty() && files.empty()) {
+        const auto suggestions = suggestion_items();
+        if (!suggestions.empty()) {
+            const std::size_t show = std::min<std::size_t>(suggestions.size(), 3);  // Max 3 suggestions
+            for (std::size_t i = 0; i < show; ++i) {
+                rows.push_back("  " + paint(tone::dim, suggestions[i]));
+            }
         }
     }
 
