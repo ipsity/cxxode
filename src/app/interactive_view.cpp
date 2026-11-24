@@ -21,19 +21,52 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/clear", "开始新会话"},         {"/cost", "本会话 token 用量"}, {"/exit", "退出"},
 };
 
-std::string spinner(steady::time_point since) {
-    // Option A: Block corners rotating (clean 4-frame)
-    // static constexpr const char* frames[] = {"▘", "▝", "▗", "▖"};
-
-    // Option B: Dots on square perimeter (8-frame)
-    // Positions: TL, T, TR, R, BR, B, BL, L
-    static constexpr const char* frames[] = {"◜", "◠", "◝", "◞", "◟", "◡", "◞", "◜"};
-
-    // Option C: Simple rotating bar (4-frame)
-    // static constexpr const char* frames[] = {"│", "╱", "─", "╲"};
-
+std::string spinner(steady::time_point since, std::string_view tool_name) {
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - since).count();
-    return frames[(ms / 150) % 8];
+
+    // Breathing animation for Read operations
+    if (tool_name == "Read" || tool_name == "Grep" || tool_name == "Glob") {
+        static constexpr const char* frames[] = {"●", "⬤", "●", "○"};
+        return frames[(ms / 200) % 4];
+    }
+
+    // Breathing animation for Write/Edit operations
+    if (tool_name == "Write" || tool_name == "Edit") {
+        static constexpr const char* frames[] = {"●", "⬤", "●", "○"};
+        return frames[(ms / 200) % 4];
+    }
+
+    // Line rotation for Bash
+    if (tool_name == "Bash") {
+        static constexpr const char* frames[] = {"-", "\\", "|", "/"};
+        return frames[(ms / 150) % 4];
+    }
+
+    // Default: original dot rotation (Braille)
+    static constexpr const char* frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"};
+    return frames[(ms / 100) % 8];
+}
+
+std::string spinner_with_color(steady::time_point since, std::string_view tool_name) {
+    // Color codes (RGB)
+    struct { const char* ansi; } colors[] = {
+        {"\033[38;2;79;193;255m"},   // Blue for Read
+        {"\033[38;2;206;145;120m"},  // Orange for Write
+        {"\033[38;2;220;220;170m"},  // Yellow for Edit
+        {"\033[38;2;78;201;176m"},   // Green for Bash
+        {"\033[38;2;78;201;176m"},   // Cyan for Grep/Glob
+        {"\033[0m"}                   // Reset
+    };
+
+    const char* color = "\033[38;2;200;200;200m"; // Default gray
+
+    if (tool_name == "Read") color = colors[0].ansi;
+    else if (tool_name == "Write") color = colors[1].ansi;
+    else if (tool_name == "Edit") color = colors[2].ansi;
+    else if (tool_name == "Bash") color = colors[3].ansi;
+    else if (tool_name == "Grep" || tool_name == "Glob") color = colors[4].ansi;
+
+    return std::string(color) + spinner(since, tool_name) + "\033[0m";
 }
 
 std::string seconds(steady::time_point since) {
@@ -136,7 +169,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         for (auto& r : ui::markdown_line(stream_, state, columns)) rows.push_back(std::move(r));
     }
     for (const auto& t : running_) {
-        const auto head = spinner(t.started) + " " + std::string(ui::verb(t.name)) + " ";
+        const auto head = spinner_with_color(t.started, t.name) + " " + std::string(ui::verb(t.name)) + " ";
         const auto tail = "  " + seconds(t.started);
         const auto label = text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
         rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
@@ -155,7 +188,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
                        paint(tone::dim, " 拒绝   ") + paint(tone::accent, "a") +
                        paint(tone::dim, " 总是允许 " + text::keep_head(ask_->rule, std::max(8, columns - 32))));
     } else if (busy_ && running_.empty() && (thinking_ || stream_.empty())) {
-        rows.push_back(" " + paint(tone::accent, spinner(busy_since_)) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
+        rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking")) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
     }
     if (!hint_.empty()) rows.push_back("  " + paint(tone::dim, hint_));
     for (auto& r : palette_rows(columns)) rows.push_back(std::move(r));
