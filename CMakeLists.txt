@@ -38,6 +38,7 @@ add_library(cxxode_core STATIC
     src/commands/command.cpp
     src/mcp/mcp_client.cpp
     src/mcp/mcp_tools.cpp
+    src/hooks/hooks.cpp
     ${CXXODE_PLATFORM_SOURCES})
 target_include_directories(cxxode_core PUBLIC src)
 target_include_directories(cxxode_core SYSTEM PUBLIC third_party)
