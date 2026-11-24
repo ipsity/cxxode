@@ -176,6 +176,13 @@ void interactive_ui::handle(const ui::key& k) {
                 case 'e': editor_.end(); break;
                 case 'u': editor_.kill_line_before(); break;
                 case 'l': screen_.clear_screen(); break;
+                case 't':
+                    // Ctrl+T: toggle thinking block expansion
+                    if (!thinking_blocks_.empty()) {
+                        // Toggle the most recent thinking block
+                        thinking_blocks_.back().second = !thinking_blocks_.back().second;
+                    }
+                    break;
                 case 'o':
                     if (!last_tool_full_.empty()) {
                         auto shown = clip(last_tool_full_, 12000);

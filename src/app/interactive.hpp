@@ -20,7 +20,7 @@ using steady = std::chrono::steady_clock;
 
 // Events travel from the agent thread to the UI thread through this queue.
 struct ev_text { std::string text; };
-struct ev_thinking {};
+struct ev_thinking { std::string text; std::string signature; };
 struct ev_request {};
 struct ev_tool_start { std::string name, label; };
 struct ev_progress { std::string text; };
@@ -107,6 +107,9 @@ private:
     std::string last_section_;         // "user", "assistant" or "tool"
     std::size_t palette_index_ = 0;
     std::string branch_;
+
+    // Thinking block tracking
+    std::vector<std::pair<std::string, bool>> thinking_blocks_;  // (signature, expanded)
 };
 
 } // namespace lay

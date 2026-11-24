@@ -38,7 +38,9 @@ agent_events interactive_ui::make_events() {
     agent_events ev;
     ev.request_started = [this] { push(ev_request{}); };
     ev.text = [this](std::string_view t) { push(ev_text{std::string(t)}); };
-    ev.thinking = [this](std::string_view) { push(ev_thinking{}); };
+    ev.thinking = [this](std::string_view text, std::string_view sig) {
+        push(ev_thinking{std::string(text), std::string(sig)});
+    };
     ev.tool_started = [this](const tool& t, const json& in) { push(ev_tool_start{t.name, tool_label(t, in, app_.root)}); };
     ev.tool_progress = [this](std::string_view s) { push(ev_progress{std::string(s)}); };
     ev.tool_finished = [this](const tool& t, const json& in, const tool_output& o) {

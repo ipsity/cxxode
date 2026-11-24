@@ -62,6 +62,24 @@ void interactive_ui::apply(ev_text& e) {
     flush_stream(false);
 }
 
+void interactive_ui::apply(ev_thinking& e) {
+    flush_stream(true);
+    // Track thinking block - collapsed by default
+    thinking_blocks_.push_back({e.signature, false});
+    section("assistant");
+
+    if (thinking_blocks_.back().second) {
+        // Expanded: show full text
+        for (auto& row : ui::layout({{e.text, ui::tone::dim}}, size_.columns - 1, {"  💭 ", 4}, {"    ", 4})) {
+            screen_.commit(row);
+        }
+    } else {
+        // Collapsed: show summary
+        const auto summary = text::keep_head(ui::one_line(e.text), size_.columns - 20);
+        screen_.commit("  " + paint(ui::tone::dim, "💭 " + summary + " ⋯ Ctrl+T 展开"));
+    }
+}
+
 void interactive_ui::apply(ev_tool_start& e) {
     thinking_ = false;
     flush_stream(true);
