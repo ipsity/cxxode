@@ -1,78 +1,40 @@
 # 接入 Passion API (ccswitch)
 
-## 步骤 1：准备 API 信息
+格式说明见 [配置第三方服务商.md](配置第三方服务商.md)。
 
-从 ccswitch 获取：
-- API Base URL
-- API Key
-- 确认协议类型（OpenAI Responses）
+## 1. 写配置
 
-## 步骤 2：配置文件
-
-创建 `~/.cxxode/config.json`（Windows: `%USERPROFILE%\.cxxode\config.json`）：
+`~/.ode/settings.json`（Windows：`%USERPROFILE%\.ode\settings.json`）：
 
 ```json
 {
-  "provider": {
-    "type": "openai_responses",
-    "base_url": "https://your-passion-api-url/v1",
-    "api_key": "your-api-key",
-    "model": "gpt-6.2-sol"
-  },
-  "permissions": {
-    "mode": "default"
+  "provider": "passion",
+  "model": "gpt-6.2-sol",
+  "providers": {
+    "passion": {
+      "protocol": "openai-responses",
+      "base_url": "https://api.passionapi.com",
+      "api_key_env": "PASSION_API_KEY",
+      "model": "gpt-6.2-sol"
+    }
   }
 }
 ```
 
-## 步骤 3：或使用命令行配置
+ode 会请求 `<base_url>/responses`。如果服务商要求 `/v1` 前缀，把它写进 `base_url`。
+
+## 2. 存密钥
+
+二选一，密钥不要写进仓库里的任何文件：
 
 ```bash
-# 方式 1：直接创建配置
-mkdir -p ~/.cxxode
-cat > ~/.cxxode/config.json <<JSON
-{
-  "provider": {
-    "type": "openai_responses",
-    "base_url": "https://your-passion-api-url/v1",
-    "api_key": "your-api-key",
-    "model": "gpt-6.2-sol"
-  }
-}
-JSON
-
-# 方式 2：使用环境变量
-export OPENAI_API_BASE=https://your-passion-api-url/v1
-export OPENAI_API_KEY=your-passion-key
-export OPENAI_MODEL=gpt-6.2-sol
+setx PASSION_API_KEY "<你的 key>"    # 新开终端后生效
+ode login passion                   # 或存入 Windows 凭据管理器
 ```
 
-## 步骤 4：验证配置
+## 3. 验证
 
 ```bash
-cd D:/02_开发项目/lay-code
-./build/dev/ode.exe /model
-# 应该显示：gpt-6.2-sol (openai_responses)
+cd D:/02_开发项目/cxxode
+./build/dev/ode.exe -p "你好，测试 Passion API 连接"
 ```
-
-## 步骤 5：测试连接
-
-```bash
-./build/dev/ode.exe "你好，测试 Passion API 连接"
-```
-
-## 配置说明
-
-- **type**: `openai_responses` - 使用 OpenAI Responses 协议
-- **base_url**: Passion API 的基础 URL
-- **api_key**: 你的 API key
-- **model**: `gpt-6.2-sol` - 指定的模型
-
-## 如果需要我帮你配置
-
-请提供：
-1. Passion API 的 Base URL
-2. API Key（可以私密提供）
-3. 确认模型名称：gpt-6.2-sol
-
-我会帮你创建配置文件并测试。
