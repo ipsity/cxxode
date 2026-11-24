@@ -1,5 +1,6 @@
 #include "app/interactive.hpp"
 #include "commands/command.hpp"
+#include "provider/models.hpp"
 
 #include <iostream>
 
@@ -64,10 +65,44 @@ bool interactive_ui::command(const std::string& line) {
         if (restored.empty()) note("没有可撤销的改动");
         for (const auto& p : restored) note("已恢复 " + p);
     } else if (name == "/model") {
-        if (arg.empty()) note("当前模型 " + core.model + "。用 /model 名称 切换");
-        else {
-            app_.set_model(arg);
-            note("模型已切换为 " + core.model);
+        if (arg.empty()) {
+            // Show interactive model selector
+            const auto models = list_models(app_.provider_cfg);
+            if (models.empty()) {
+                note("无可用模型或 provider 不支持列表", tone::error);
+            } else {
+                // Display model list
+                note("Available models from " + app_.config.provider + ":");
+                for (std::size_t i = 0; i < models.size(); ++i) {
+                    const bool is_current = models[i].id == core.model;
+                    std::string line = std::to_string(i + 1) + ". " + models[i].id;
+                    if (is_current) line += " ⭐";
+                    if (!models[i].description.empty()) {
+                        line += "  - " + models[i].description;
+                    }
+                    if (models[i].context_window > 0) {
+                        line += "  (" + std::to_string(models[i].context_window / 1000) + "k)";
+                    }
+                    note(line);
+                }
+                note("Use: /model <number> or /model <name>");
+            }
+        } else {
+            // Check if arg is a number
+            try {
+                const auto num = std::stoul(arg);
+                const auto models = list_models(app_.provider_cfg);
+                if (num > 0 && num <= models.size()) {
+                    app_.set_model(models[num - 1].id);
+                    note("Switched to model: " + core.model);
+                } else {
+                    note("Invalid model number", tone::error);
+                }
+            } catch (...) {
+                // Not a number, treat as model name
+                app_.set_model(arg);
+                note("Switched to model: " + core.model);
+            }
         }
     } else if (name == "/mode") {
         if (auto m = parse_mode(arg)) app_.config.permissions.set_mode(*m);
@@ -78,6 +113,35 @@ bool interactive_ui::command(const std::string& line) {
         const auto& t = core.total;
         note("输入 " + short_count(t.input) + "  缓存读 " + short_count(t.cache_read) + "  缓存写 " +
              short_count(t.cache_write) + "  输出 " + short_count(t.output) + "  当前上下文 " + short_count(core.context_tokens));
+    } else if (name == "/login") {
+        if (arg.empty()) {
+            note("Usage: /login <provider> <api-key>");
+            note("Supported providers: anthropic, openai, groq, deepseek, together");
+            note("Example: /login openai sk-...");
+            note("Or use command line: ode login <provider>");
+        } else {
+            // Parse provider and key from args
+            const auto space = arg.find(' ');
+            if (space == std::string::npos) {
+                note("Missing API key. Usage: /login <provider> <api-key>", tone::error);
+            } else {
+                const auto provider = arg.substr(0, space);
+                const auto api_key = arg.substr(space + 1);
+
+                // Save credential
+                if (save_credential(provider, api_key)) {
+                    note("✓ API key saved for " + provider);
+                    note("Restart to use this provider");
+                } else {
+                    note("Failed to save credential", tone::error);
+                }
+            }
+        }
+    } else if (name == "/logout") {
+        note("Current provider: " + app_.config.provider);
+        note("To switch provider, restart with --provider <name>");
+        note("Credentials remain in Windows Credential Manager");
+        note("Use 'ode login <provider>' to update keys");
     } else if (name == "/resume") {
         const auto sessions = list_sessions(app_.root);
         if (sessions.empty()) {
