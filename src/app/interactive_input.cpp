@@ -1,6 +1,6 @@
 #include "app/interactive.hpp"
 
-namespace lay {
+namespace ode {
 
 using namespace std::chrono_literals;
 using ui::key_kind;
@@ -198,4 +198,4 @@ void interactive_ui::handle(const ui::key& k) {
     }
 }
 
-} // namespace lay
+} // namespace ode

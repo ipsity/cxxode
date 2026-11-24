@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace lay {
+namespace ode {
 
 std::string user_command::load_body() const {
     if (!body.empty()) return body;
@@ -16,7 +16,7 @@ std::vector<user_command> load_commands(const fs::path& workspace) {
     std::vector<fs::path> search_paths;
 
     // User-level commands
-    const auto home = lay_home().parent_path();
+    const auto home = ode_home().parent_path();
     search_paths.push_back(home / ".claude" / "commands");
 
     // Workspace commands - walk up to git root
@@ -86,4 +86,4 @@ std::string expand_variables(std::string_view body, const std::map<std::string, 
     return result;
 }
 
-} // namespace lay
+} // namespace ode

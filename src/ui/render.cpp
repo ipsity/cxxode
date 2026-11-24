@@ -1,6 +1,6 @@
 #include "ui/render.hpp"
 
-namespace lay::ui {
+namespace ode::ui {
 
 bool& color_enabled() {
     static bool enabled = true;
@@ -213,4 +213,4 @@ std::string one_line(std::string_view s) {
     return out;
 }
 
-} // namespace lay::ui
+} // namespace ode::ui

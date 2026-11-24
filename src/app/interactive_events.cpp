@@ -1,6 +1,6 @@
 #include "app/interactive.hpp"
 
-namespace lay {
+namespace ode {
 
 using ui::paint;
 using ui::tone;
@@ -175,4 +175,4 @@ void interactive_ui::apply(ev_done& e) {
     }
 }
 
-} // namespace lay
+} // namespace ode

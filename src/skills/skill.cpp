@@ -3,7 +3,7 @@
 
 #include <algorithm>
 
-namespace lay {
+namespace ode {
 
 std::string skills_system_prompt(const std::vector<skill>& skills) {
     if (skills.empty()) return {};
@@ -64,7 +64,7 @@ std::vector<skill> load_skills(const fs::path& workspace) {
     std::vector<fs::path> search_paths;
 
     // User-level skills
-    const auto home = lay_home().parent_path();
+    const auto home = ode_home().parent_path();
     search_paths.push_back(home / ".claude" / "skills");
 
     // Workspace skills - walk up to git root
@@ -108,4 +108,4 @@ std::vector<skill> load_skills(const fs::path& workspace) {
     return skills;
 }
 
-} // namespace lay
+} // namespace ode

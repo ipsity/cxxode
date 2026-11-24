@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 // MCP (Model Context Protocol) client for stdio-based servers.
 // Implements JSON-RPC 2.0 over stdin/stdout to communicate with external tools.
@@ -57,4 +57,4 @@ private:
 // Load MCP server configurations from settings
 std::vector<mcp_client::server_config> load_mcp_servers(const fs::path& workspace);
 
-} // namespace lay
+} // namespace ode

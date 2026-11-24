@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace lay {
+namespace ode {
 
 fs::path resolve(const fs::path& root, std::string_view path) {
     fs::path p = fs::path(std::u8string(path.begin(), path.end()));
@@ -177,4 +177,4 @@ std::vector<std::string> restore(const turn_backup& backup, const fs::path& root
     return restored;
 }
 
-} // namespace lay
+} // namespace ode

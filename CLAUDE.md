@@ -47,7 +47,7 @@ legacy/          V1 源码，只用于回收代码，不参与构建
 
 ## 代码风格
 
-- 命名空间 `lay`，`snake_case` 函数和变量，类型也用 `snake_case`，与 V1 一致。
+- 命名空间 `ode`，`snake_case` 函数和变量，类型也用 `snake_case`，与 V1 一致。
 - 头文件用 `#pragma once`。
 - 只在必要的边界引入抽象。JSON 类型不出协议层。
 - 注释写"为什么"，不写"做了什么"。

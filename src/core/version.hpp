@@ -2,8 +2,8 @@
 
 #include <string_view>
 
-namespace lay {
+namespace ode {
 
 std::string_view version();
 
-} // namespace lay
+} // namespace ode

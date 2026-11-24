@@ -5,7 +5,7 @@
 #include <chrono>
 #include <thread>
 
-namespace lay {
+namespace ode {
 namespace {
 
 void feed(stream_parser& parser, std::string_view name, std::string_view data) {
@@ -129,4 +129,4 @@ std::unique_ptr<provider> make_provider(const provider_config& config) {
     return std::make_unique<http_provider>(config);
 }
 
-} // namespace lay
+} // namespace ode

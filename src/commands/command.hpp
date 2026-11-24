@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct user_command {
     std::string name;
@@ -22,4 +22,4 @@ std::vector<user_command> load_commands(const std::filesystem::path& workspace);
 // Expands variables like $ARGUMENTS, $WORKSPACE in the command body
 std::string expand_variables(std::string_view body, const std::map<std::string, std::string>& vars);
 
-} // namespace lay
+} // namespace ode

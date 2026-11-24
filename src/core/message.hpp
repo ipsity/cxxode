@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 using json = nlohmann::json;
 
@@ -45,4 +45,4 @@ struct usage {
 json to_json(const message& value);
 message message_from_json(const json& value);
 
-} // namespace lay
+} // namespace ode

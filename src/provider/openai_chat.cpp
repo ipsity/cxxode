@@ -2,7 +2,7 @@
 
 #include <map>
 
-namespace lay {
+namespace ode {
 namespace {
 
 class parser final : public stream_parser {
@@ -131,4 +131,4 @@ std::unique_ptr<stream_parser> make_chat_parser(const stream_events& events) {
     return std::make_unique<parser>(events);
 }
 
-} // namespace lay
+} // namespace ode

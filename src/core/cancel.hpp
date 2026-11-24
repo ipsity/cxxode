@@ -4,7 +4,7 @@
 #include <functional>
 #include <mutex>
 
-namespace lay {
+namespace ode {
 
 // Shared between the UI thread (cancel) and the worker (hooks). A hook lets a
 // blocking call such as an HTTP read be interrupted from the outside.
@@ -43,4 +43,4 @@ private:
     std::function<void()> hook_;
 };
 
-} // namespace lay
+} // namespace ode

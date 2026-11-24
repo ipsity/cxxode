@@ -1,6 +1,6 @@
 #include "core/message.hpp"
 
-namespace lay {
+namespace ode {
 namespace {
 
 constexpr const char* kind_names[] = {"text", "tool_use", "tool_result", "thinking", "opaque"};
@@ -86,4 +86,4 @@ message message_from_json(const json& value) {
     return m;
 }
 
-} // namespace lay
+} // namespace ode

@@ -3,7 +3,7 @@
 #ifdef _WIN32
 #include <stdexcept>
 
-namespace lay {
+namespace ode {
 
 interactive_process::interactive_process(const std::string& command, const std::vector<std::string>& args,
                                          const options& opts) {
@@ -101,6 +101,6 @@ void interactive_process::terminate() {
     }
 }
 
-} // namespace lay
+} // namespace ode
 
 #endif

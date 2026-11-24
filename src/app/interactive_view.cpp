@@ -1,6 +1,6 @@
 #include "app/interactive.hpp"
 
-namespace lay {
+namespace ode {
 
 using ui::paint;
 using ui::tone;
@@ -98,7 +98,7 @@ std::string interactive_ui::status_line(int columns) const {
     std::string right = std::string(mode_name(mode)) + " · " + app_.core->model;
     if (usage_.context) right += " · " + short_count(usage_.context) + "/" + short_count(app_.core->context_window);
     const auto mode_tone = mode == permission_mode::yolo ? tone::error : mode == permission_mode::plan ? tone::accent : tone::dim;
-    std::string left = "lay  " + home_relative(app_.root);
+    std::string left = "ode  " + home_relative(app_.root);
     if (!branch_.empty()) left += "  " + branch_;
     const int room = columns - 2 - text::width(right) - 2;
     left = room > 8 ? text::keep_tail(left, room) : std::string{};
@@ -178,4 +178,4 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     return rows;
 }
 
-} // namespace lay
+} // namespace ode

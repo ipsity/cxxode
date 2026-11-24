@@ -4,7 +4,7 @@
 
 #include <sstream>
 
-namespace lay {
+namespace ode {
 
 mcp_client::mcp_client(const server_config& config) : config_(config) {}
 
@@ -203,4 +203,4 @@ std::vector<mcp_client::server_config> load_mcp_servers(const fs::path& workspac
     return servers;
 }
 
-} // namespace lay
+} // namespace ode

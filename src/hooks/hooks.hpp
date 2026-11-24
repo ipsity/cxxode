@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct settings;  // Forward declaration
 
@@ -49,4 +49,4 @@ hook_result execute_hook(const hook_config& config, const hook_context& ctx, can
 // Load hooks from settings
 std::vector<hook_config> load_hooks(const settings&);
 
-} // namespace lay
+} // namespace ode

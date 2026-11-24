@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct http_request {
     std::string method = "POST";
@@ -29,4 +29,4 @@ using http_sink = std::function<void(std::string_view chunk)>;
 // Streams the 2xx response body to sink as it arrives.
 http_result http_send(const http_request& request, const http_sink& sink, cancel_token& cancel);
 
-} // namespace lay
+} // namespace ode

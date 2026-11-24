@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace lay::ui {
+namespace ode::ui {
 
 enum class key_kind {
     character, enter, newline, backspace, del, left, right, up, down, home, end,
@@ -50,4 +50,4 @@ private:
 void write_stream(bool error_stream, std::string_view utf8);
 bool stdin_is_terminal();
 
-} // namespace lay::ui
+} // namespace ode::ui

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 enum class answer { yes, no, always };
 
@@ -72,4 +72,4 @@ private:
 std::string build_system_prompt(const fs::path& root, std::string_view shell,
                                 const std::vector<std::pair<fs::path, std::string>>& memory);
 
-} // namespace lay
+} // namespace ode

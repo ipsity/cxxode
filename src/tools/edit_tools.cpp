@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <fstream>
 
-namespace lay {
+namespace ode {
 namespace {
 
 constexpr std::size_t max_read_bytes = 10 * 1024 * 1024;
@@ -217,4 +217,4 @@ std::vector<tool> edit_tools() {
     };
 }
 
-} // namespace lay
+} // namespace ode

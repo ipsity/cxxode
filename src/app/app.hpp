@@ -11,9 +11,9 @@
 #include <optional>
 #include <string>
 
-namespace lay {
+namespace ode {
 
-// Everything one running lay process owns.
+// Everything one running ode process owns.
 struct app {
     fs::path root;
     settings config;
@@ -40,4 +40,4 @@ std::string git_branch(const fs::path& root);
 std::string tool_label(const tool& t, const json& input, const fs::path& root);
 std::string home_relative(const fs::path& path);
 
-} // namespace lay
+} // namespace ode

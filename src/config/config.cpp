@@ -10,7 +10,7 @@
 #include <wincred.h>
 #endif
 
-namespace lay {
+namespace ode {
 namespace {
 
 std::string env(const std::string& name) {
@@ -19,7 +19,7 @@ std::string env(const std::string& name) {
     return v ? v : "";
 }
 
-fs::path user_home() { return lay_home().parent_path(); }
+fs::path user_home() { return ode_home().parent_path(); }
 
 void merge(settings& s, const json& j) {
     if (j.contains("provider") && j["provider"].is_string()) s.provider = j["provider"];
@@ -111,10 +111,10 @@ settings load_settings(const fs::path& workspace) {
     }
     const auto home = user_home();
     merge_file(s, home / ".claude" / "settings.json");
-    merge_file(s, lay_home() / "settings.json");
+    merge_file(s, ode_home() / "settings.json");
     merge_file(s, workspace / ".claude" / "settings.json");
     merge_file(s, workspace / ".claude" / "settings.local.json");
-    merge_file(s, workspace / ".lay" / "settings.json");
+    merge_file(s, workspace / ".ode" / "settings.json");
     if (s.providers.contains(s.provider) == false) {
         s.warnings.push_back("Unknown provider '" + s.provider + "'; using anthropic.");
         s.provider = "anthropic";
@@ -140,7 +140,7 @@ std::optional<std::string> resolve_provider(const settings& s, const std::string
     }
 #ifdef _WIN32
     PCREDENTIALW cred = nullptr;
-    const auto target = widen("lay/" + name);
+    const auto target = widen("ode/" + name);
     if (CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &cred)) {
         std::unique_ptr<CREDENTIALW, decltype(&CredFree)> owner(cred, CredFree);
         out.api_key.assign(reinterpret_cast<const char*>(cred->CredentialBlob), cred->CredentialBlobSize);
@@ -148,12 +148,12 @@ std::optional<std::string> resolve_provider(const settings& s, const std::string
     }
 #endif
     if (e.api_key_env.empty()) return std::nullopt;  // unauthenticated local server
-    return "No API key for " + name + ". Set " + e.api_key_env + " or run: lay login " + name;
+    return "No API key for " + name + ". Set " + e.api_key_env + " or run: ode login " + name;
 }
 
 bool save_credential(const std::string& provider, const std::string& key) {
 #ifdef _WIN32
-    auto target = widen("lay/" + provider);
+    auto target = widen("ode/" + provider);
     CREDENTIALW cred{};
     cred.Type = CRED_TYPE_GENERIC;
     cred.TargetName = target.data();
@@ -176,7 +176,7 @@ std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& worksp
         if (auto text = read_file(p); text && !text->empty()) out.emplace_back(p, clip(*text, 40000));
     };
     add(user_home() / ".claude" / "CLAUDE.md");
-    add(lay_home() / "LAY.md");
+    add(ode_home() / "ODE.md");
     // Ancestors first so the nearest file has the last word.
     std::vector<fs::path> dirs;
     for (auto d = workspace; ; d = d.parent_path()) {
@@ -184,10 +184,10 @@ std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& worksp
         if (d == d.parent_path() || fs::exists(d / ".git")) break;
     }
     for (auto it = dirs.rbegin(); it != dirs.rend(); ++it) {
-        for (const auto* name : {"CLAUDE.md", "AGENTS.md", "LAY.md", "CLAUDE.local.md"}) add(*it / name);
+        for (const auto* name : {"CLAUDE.md", "AGENTS.md", "ODE.md", "CLAUDE.local.md"}) add(*it / name);
         add(*it / ".claude" / "CLAUDE.md");
     }
     return out;
 }
 
-} // namespace lay
+} // namespace ode

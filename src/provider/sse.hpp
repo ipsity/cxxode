@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace lay {
+namespace ode {
 
 // Incremental text/event-stream decoder. Bytes may arrive split at any position.
 class sse_decoder {
@@ -59,4 +59,4 @@ private:
     bool has_data_ = false;
 };
 
-} // namespace lay
+} // namespace ode

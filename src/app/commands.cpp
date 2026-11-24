@@ -1,7 +1,7 @@
 #include "app/interactive.hpp"
 #include "commands/command.hpp"
 
-namespace lay {
+namespace ode {
 
 using ui::paint;
 using ui::tone;
@@ -129,4 +129,4 @@ bool interactive_ui::user_command(const std::string& line) {
     return false;  // Not a user command
 }
 
-} // namespace lay
+} // namespace ode

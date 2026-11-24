@@ -173,11 +173,11 @@ loop:
 - 不需要预先声明可写文件。工作区外的写入单独确认。
 - bash 白名单沿用 Claude Code 的 `permissions.allow` 规则语法，比如 `Bash(git status:*)`、`Bash(cmake --build:*)`。确认时按 `a` 表示"本会话以后都放行这个前缀"。
 - 确认就是一行：`$ cmake --build build    ⏎ 运行  esc 拒绝  a 总是`。
-- `edit/write` 执行前，原文件复制到 `~/.lay/backup/<session>/<turn>/`。`/undo` 回退最近一轮的全部文件改动。工作区是 git 仓库时，状态栏显示未提交文件数。
+- `edit/write` 执行前，原文件复制到 `~/.ode/backup/<session>/<turn>/`。`/undo` 回退最近一轮的全部文件改动。工作区是 git 仓库时，状态栏显示未提交文件数。
 
 ### 3.5 会话存储：JSONL 取代 SQLite
 
-- 每个会话一个 `~/.lay/sessions/<project-hash>/<id>.jsonl`，一行一条消息，只追加。
+- 每个会话一个 `~/.ode/sessions/<project-hash>/<id>.jsonl`，一行一条消息，只追加。
 - 进程崩溃最多丢最后一行，读取时丢弃不完整的尾行即可恢复。这已满足 coding agent 的恢复需求，不需要事务。
 - 格式变化靠每行的 `"v"` 字段兼容读取，不做迁移。
 - `/resume` 列出最近会话，`--continue` 直接接上一次。
@@ -187,15 +187,15 @@ loop:
 
 启动时按顺序加载，与 Claude Code 一致：
 
-1. `~/.lay/LAY.md`（用户级），同时识别 `~/.claude/CLAUDE.md`
-2. 从工作区根往下：`CLAUDE.md`、`AGENTS.md`、`LAY.md`
+1. `~/.ode/ODE.md`（用户级），同时识别 `~/.claude/CLAUDE.md`
+2. 从工作区根往下：`CLAUDE.md`、`AGENTS.md`、`ODE.md`
 3. `@path` 引用：草稿里输入 `@` 弹出文件补全，选中的文件内容直接附进消息
 
 系统提示控制在 1,500 token 左右，内容是：工具用法、"先做再说，少问"、"不要编造测试结果"。不再写引用格式、重读规则、证据要求。
 
 ### 3.7 扩展层：直接兼容 Claude Code 生态
 
-原则：**读别人的格式，不定义自己的格式**。搜索路径同时包含 `.lay/` 和 `.claude/`，用户已有的配置零改动可用。
+原则：**读别人的格式，不定义自己的格式**。搜索路径同时包含 `.ode/` 和 `.claude/`，用户已有的配置零改动可用。
 
 | 能力 | 格式 | 实现方式 | 阶段 |
 | --- | --- | --- | --- |
@@ -204,7 +204,7 @@ loop:
 | MCP | `.mcp.json` / `mcpServers` | 实现 MCP 客户端：stdio 传输先做，Streamable HTTP 后做。工具名映射为 `mcp__server__tool` | M3 |
 | Hooks | `settings.json` 里的 `hooks` | `PreToolUse`、`PostToolUse`、`UserPromptSubmit`、`Stop`，子进程执行，stdin 传 JSON，退出码 2 表示阻止 | M3 |
 | Subagents | `.claude/agents/*.md` | 内核里的 `task` 工具：开一个独立上下文的子 loop，只返回最终文本 | M4 |
-| Plugins | `.claude-plugin/plugin.json` | 插件就是上面几类文件的打包目录。实现"安装 = 解压到 `~/.lay/plugins/`"，再按 marketplace.json 拉取 | M4 |
+| Plugins | `.claude-plugin/plugin.json` | 插件就是上面几类文件的打包目录。实现"安装 = 解压到 `~/.ode/plugins/`"，再按 marketplace.json 拉取 | M4 |
 
 为什么不做 C++ 原生插件（DLL）：ABI 不稳定、跨编译器不兼容、崩溃会拖垮宿主。需要原生性能的扩展可以写成 MCP server，进程隔离，用什么语言都行。
 
@@ -264,7 +264,7 @@ V1 使用备用屏幕全屏自绘。V2 改成 Claude Code、pi 的做法：**对
 ╭──────────────────────────────────────────────────────────╮
 │ › 顺便把 README 里的说明也改一下▌                         │
 ╰──────────────────────────────────────────────────────────╯
-  lay-code  D:/02_开发项目/lay-code  main +2      default · opus · 18k/200k · ¥0.21
+  cxxode  D:/02_开发项目/cxxode  main +2      default · opus · 18k/200k · ¥0.21
 ```
 
 ### 4.3 视觉规则
@@ -343,21 +343,21 @@ V1 使用备用屏幕全屏自绘。V2 改成 Claude Code、pi 的做法：**对
 
 只有两个位置，格式与 Claude Code 的 `settings.json` 相同：
 
-- 用户级 `~/.lay/settings.json`（Windows 为 `%USERPROFILE%\.lay\`）
-- 项目级 `<workspace>/.lay/settings.json`，另外只读识别 `.claude/settings.json`
+- 用户级 `~/.ode/settings.json`（Windows 为 `%USERPROFILE%\.ode\`）
+- 项目级 `<workspace>/.ode/settings.json`，另外只读识别 `.claude/settings.json`
 
-内容：`model`、`providers`、`permissions.allow/deny`、`hooks`、`mcpServers`、`env`。密钥仍存 Windows 凭据管理器，用 `lay login <provider>` 录入。
+内容：`model`、`providers`、`permissions.allow/deny`、`hooks`、`mcpServers`、`env`。密钥仍存 Windows 凭据管理器，用 `ode login <provider>` 录入。
 
 ### 5.4 命令行
 
 ```
-lay                         交互模式，工作区为当前目录
-lay "修复空配置"             带首条消息进入交互
-lay -p "..."                无头模式
-lay -c                      接上一次会话
-lay -r                      选择会话恢复
-lay --model X --permission yolo
-lay login / lay models / lay mcp list
+ode                         交互模式，工作区为当前目录
+ode "修复空配置"             带首条消息进入交互
+ode -p "..."                无头模式
+ode -c                      接上一次会话
+ode -r                      选择会话恢复
+ode --model X --permission yolo
+ode login / ode models / ode mcp list
 ```
 
 V1 的 29 个参数收缩到约 10 个。`--write`、`--allow-run`、`--session`、`--quote-task` 等全部移除。
@@ -498,7 +498,7 @@ M1 是关键。M1 之前不做任何扩展层工作，也不做 UI 细节打磨�
 3. **全屏换内联**：默认换。这是砍掉读屏窗口和尺寸矩阵的前提。
 4. **bash 用 Git Bash 还是 PowerShell**：默认优先 Git Bash，因为模型生成的命令大多是 POSIX 风格。没装 Git for Windows 时用 PowerShell。
 5. **Linux**：保持能编译，不作为发布门槛。macOS 暂不考虑。
-6. **项目名和命令名**：默认命令为 `lay`，配置目录 `~/.lay/`。
+6. **项目名和命令名**：默认命令为 `ode`，配置目录 `~/.ode/`。
 
 ---
 

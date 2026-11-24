@@ -17,17 +17,17 @@
 #include <shellapi.h>
 #endif
 
-using namespace lay;
+using namespace ode;
 
 namespace {
 
 constexpr const char* usage_text =
     "ode — a terminal coding agent\n"
     "\n"
-    "  lay [prompt]              interactive session in the current directory\n"
-    "  lay -p \"prompt\"           print mode: answer to stdout, tool calls to stderr\n"
-    "  lay -c                    continue the most recent session here\n"
-    "  lay login [provider]      store an API key in Windows Credential Manager\n"
+    "  ode [prompt]              interactive session in the current directory\n"
+    "  ode -p \"prompt\"           print mode: answer to stdout, tool calls to stderr\n"
+    "  ode -c                    continue the most recent session here\n"
+    "  ode login [provider]      store an API key in Windows Credential Manager\n"
     "\n"
     "  --model NAME              model id\n"
     "  --provider NAME           anthropic, openai, or one from settings.json\n"
@@ -54,7 +54,7 @@ std::vector<std::string> utf8_args(int argc, char** argv) {
 }
 
 int fail(const std::string& message) {
-    ui::write_stream(true, "lay: " + message + "\n");
+    ui::write_stream(true, "ode: " + message + "\n");
     return 2;
 }
 
@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
             } else if (a == "login" && i == 0) {
                 login = true;
             } else if (!a.empty() && a.front() == '-' && a.size() > 1) {
-                return fail("unknown option " + a + ". See lay --help.");
+                return fail("unknown option " + a + ". See ode --help.");
             } else {
                 prompt += (prompt.empty() ? "" : " ") + a;
             }
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
     app a;
     a.root = workspace;
     a.config = load_settings(workspace);
-    for (const auto& w : a.config.warnings) ui::write_stream(true, "lay: " + w + "\n");
+    for (const auto& w : a.config.warnings) ui::write_stream(true, "ode: " + w + "\n");
     if (!provider_name.empty()) a.config.provider = provider_name;
 
     if (login) {
@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
     a.core->system = build_system_prompt(workspace, shell_name(), load_memory(workspace));
     a.core->system += skills_system_prompt(a.skills);
 
-    // Piped stdin is part of the prompt, as in `git diff | lay -p "review this"`.
+    // Piped stdin is part of the prompt, as in `git diff | ode -p "review this"`.
     if (!ui::stdin_is_terminal()) {
         std::string piped((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
         if (!piped.empty()) prompt = prompt.empty() ? piped : prompt + "\n\n" + piped;
@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
         if (mode_text.empty()) a.config.permissions.set_mode(permission_mode::plan);
         return run_print(a, prompt);
     }
-    if (!ui::terminal::interactive()) return fail("not a terminal; use lay -p \"...\"");
+    if (!ui::terminal::interactive()) return fail("not a terminal; use ode -p \"...\"");
     try {
         return run_interactive(a, prompt);
     } catch (const std::exception& e) {

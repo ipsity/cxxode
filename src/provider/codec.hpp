@@ -5,7 +5,7 @@
 #include <memory>
 #include <string_view>
 
-namespace lay {
+namespace ode {
 
 // Per-protocol stream state. Receives each SSE event's data and builds the reply.
 class stream_parser {
@@ -32,4 +32,4 @@ inline json parse_arguments(const std::string& text) {
     return value.is_object() ? value : json();
 }
 
-} // namespace lay
+} // namespace ode

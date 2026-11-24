@@ -1,7 +1,7 @@
 #include "hooks/hooks.hpp"
 #include "config/config.hpp"
 
-namespace lay {
+namespace ode {
 
 hook_result execute_hook(const hook_config& config, const hook_context& ctx, cancel_token& cancel) {
     // Build input JSON
@@ -71,4 +71,4 @@ std::vector<hook_config> load_hooks(const settings&) {
     return hooks;
 }
 
-} // namespace lay
+} // namespace ode

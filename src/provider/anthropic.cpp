@@ -1,6 +1,6 @@
 #include "provider/codec.hpp"
 
-namespace lay {
+namespace ode {
 namespace {
 
 json encode_block(const block& b) {
@@ -152,4 +152,4 @@ std::unique_ptr<stream_parser> make_anthropic_parser(const stream_events& events
     return std::make_unique<parser>(events);
 }
 
-} // namespace lay
+} // namespace ode

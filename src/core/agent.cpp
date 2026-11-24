@@ -3,7 +3,7 @@
 #include <future>
 #include <mutex>
 
-namespace lay {
+namespace ode {
 namespace {
 
 constexpr int max_rounds_without_user = 200;
@@ -239,4 +239,4 @@ turn_result agent::compact(agent_events& events, cancel_token& cancel, std::stri
     return {stop_reason::end_turn, {}};
 }
 
-} // namespace lay
+} // namespace ode

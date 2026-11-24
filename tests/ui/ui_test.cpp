@@ -4,7 +4,7 @@
 
 #include <doctest.h>
 
-using namespace lay;
+using namespace ode;
 
 TEST_CASE("display width counts CJK and emoji as two columns") {
     CHECK(text::width("abc") == 3);

@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace lay::text {
+namespace ode::text {
 
 inline std::size_t scalar_bytes(unsigned char first) {
     return first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
@@ -155,4 +155,4 @@ inline std::string keep_head(std::string_view s, int columns) {
     return std::string(s.substr(0, end)) + "…";
 }
 
-} // namespace lay::text
+} // namespace ode::text

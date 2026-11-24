@@ -1,7 +1,7 @@
 #include "core/version.hpp"
 
-namespace lay {
+namespace ode {
 
 std::string_view version() { return CXXODE_VERSION; }
 
-} // namespace lay
+} // namespace ode

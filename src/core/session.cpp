@@ -10,7 +10,7 @@
 #include <random>
 #include <set>
 
-namespace lay {
+namespace ode {
 
 namespace fs = std::filesystem;
 
@@ -46,16 +46,13 @@ void session_log::append_message(const message& m) {
     append({{"v", 1}, {"type", "message"}, {"message", to_json(m)}});
 }
 
-fs::path lay_home() {
+fs::path ode_home() {
 #ifdef _WIN32
     const char* home = std::getenv("USERPROFILE");
 #else
     const char* home = std::getenv("HOME");
 #endif
-    // Try .cxxode first, fall back to .lay for compatibility
-    auto cxxode_home = fs::path(home ? home : ".") / ".cxxode";
-    if (fs::exists(cxxode_home)) return cxxode_home;
-    return fs::path(home ? home : ".") / ".lay";
+    return fs::path(home ? home : ".") / ".ode";
 }
 
 fs::path sessions_dir(const fs::path& workspace) {
@@ -65,7 +62,7 @@ fs::path sessions_dir(const fs::path& workspace) {
         const auto u = static_cast<unsigned char>(c);
         slug += std::isalnum(u) || u >= 0x80 ? static_cast<char>(c) : '-';
     }
-    return lay_home() / "sessions" / fs::path(std::u8string(slug.begin(), slug.end()));
+    return ode_home() / "sessions" / fs::path(std::u8string(slug.begin(), slug.end()));
 }
 
 std::string new_session_id() {
@@ -154,4 +151,4 @@ void close_dangling_tool_calls(std::vector<message>& messages) {
     }
 }
 
-} // namespace lay
+} // namespace ode

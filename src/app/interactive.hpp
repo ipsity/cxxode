@@ -14,7 +14,7 @@
 #include <thread>
 #include <variant>
 
-namespace lay {
+namespace ode {
 
 using steady = std::chrono::steady_clock;
 
@@ -112,4 +112,4 @@ private:
     std::vector<std::pair<std::string, bool>> thinking_blocks_;  // (signature, expanded)
 };
 
-} // namespace lay
+} // namespace ode

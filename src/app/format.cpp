@@ -3,7 +3,7 @@
 
 #include <cstdio>
 
-namespace lay {
+namespace ode {
 
 std::string short_count(std::size_t n) {
     char buf[32];
@@ -29,7 +29,7 @@ std::string git_branch(const fs::path& root) {
 }
 
 std::string home_relative(const fs::path& path) {
-    const auto home = lay_home().parent_path();
+    const auto home = ode_home().parent_path();
     std::string shown;
     if (inside(home, path)) {
         const auto rel = path.lexically_relative(home).generic_u8string();
@@ -52,4 +52,4 @@ std::string tool_label(const tool& t, const json& input, const fs::path& root) {
     return t.name;
 }
 
-} // namespace lay
+} // namespace ode

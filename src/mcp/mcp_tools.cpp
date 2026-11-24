@@ -1,7 +1,7 @@
 #include "mcp/mcp_client.hpp"
 #include "skills/skill.hpp"
 
-namespace lay {
+namespace ode {
 
 // Wraps MCP tools as cxxode tools
 std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>& mcp_clients) {
@@ -77,4 +77,4 @@ std::vector<tool> make_tools(const std::vector<skill>& skills,
     return tools;
 }
 
-} // namespace lay
+} // namespace ode

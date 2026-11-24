@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <stdexcept>
 
-namespace lay::ui {
+namespace ode::ui {
 
 struct terminal::native {
     HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
@@ -31,7 +31,7 @@ bool stdin_is_terminal() {
 terminal::terminal() : native_(std::make_unique<native>()) {
     auto& n = *native_;
     if (!GetConsoleMode(n.in, &n.original_in) || !GetConsoleMode(n.out, &n.original_out)) {
-        throw std::runtime_error("The interactive UI needs a console. Use lay -p \"...\" for scripts.");
+        throw std::runtime_error("The interactive UI needs a console. Use ode -p \"...\" for scripts.");
     }
     n.original_cp = GetConsoleOutputCP();
     // Raw key events: Ctrl+C arrives as a key, and modifiers on Tab and Enter stay visible.
@@ -158,4 +158,4 @@ void write_stream(bool error_stream, std::string_view utf8) {
     std::fflush(f);
 }
 
-} // namespace lay::ui
+} // namespace ode::ui

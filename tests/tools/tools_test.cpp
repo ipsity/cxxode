@@ -6,7 +6,7 @@
 #include <fstream>
 #include <random>
 
-using namespace lay;
+using namespace ode;
 
 namespace {
 
@@ -14,7 +14,7 @@ struct temp_dir {
     fs::path path;
     temp_dir() {
         std::random_device rd;
-        path = fs::temp_directory_path() / ("lay-test-" + std::to_string(rd()) + std::to_string(rd()));
+        path = fs::temp_directory_path() / ("ode-test-" + std::to_string(rd()) + std::to_string(rd()));
         fs::create_directories(path);
     }
     ~temp_dir() {

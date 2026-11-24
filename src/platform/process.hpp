@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct process_request {
     std::filesystem::path program;
@@ -34,4 +34,4 @@ process_result run_process(const process_request& request, cancel_token& cancel,
 
 std::optional<std::filesystem::path> find_on_path(std::string_view name);
 
-} // namespace lay
+} // namespace ode

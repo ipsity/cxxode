@@ -4,7 +4,7 @@
 #include <doctest.h>
 #include <fstream>
 
-using namespace lay;
+using namespace ode;
 
 TEST_CASE("expand_variables replaces variable references") {
     std::map<std::string, std::string> vars;
@@ -35,7 +35,7 @@ TEST_CASE("expand_variables handles edge cases") {
 }
 
 TEST_CASE("load_commands finds and parses command files") {
-    const auto temp = std::filesystem::temp_directory_path() / "lay-commands-test";
+    const auto temp = std::filesystem::temp_directory_path() / "ode-commands-test";
     std::filesystem::create_directories(temp / ".claude" / "commands");
 
     {
@@ -58,7 +58,7 @@ TEST_CASE("load_commands finds and parses command files") {
 }
 
 TEST_CASE("user_command uses stem as name if name not in frontmatter") {
-    const auto temp = std::filesystem::temp_directory_path() / "lay-commands-stem-test";
+    const auto temp = std::filesystem::temp_directory_path() / "ode-commands-stem-test";
     std::filesystem::create_directories(temp / ".claude" / "commands");
 
     {

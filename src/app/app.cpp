@@ -2,7 +2,7 @@
 #include "app/interactive.hpp"
 #include "ui/term.hpp"
 
-namespace lay {
+namespace ode {
 
 bool app::open_session(const std::optional<fs::path>& resume) {
     log.close();
@@ -47,10 +47,10 @@ int run_print(app& a, std::string prompt) {
     const auto r = a.core->run(std::move(prompt), ev, cancel);
     ui::write_stream(false, "\n");
     if (r.stop == stop_reason::error || r.stop == stop_reason::cancelled) {
-        ui::write_stream(true, "lay: " + (r.error.empty() ? std::string("stopped") : r.error) + "\n");
+        ui::write_stream(true, "ode: " + (r.error.empty() ? std::string("stopped") : r.error) + "\n");
         return 1;
     }
     return 0;
 }
 
-} // namespace lay
+} // namespace ode

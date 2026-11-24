@@ -6,7 +6,7 @@
 #include <iterator>
 #include <string_view>
 
-namespace lay::unicode {
+namespace ode::unicode {
 
 // Values correspond to the masks in packaging/generate_unicode.py (tag v1-final).
 enum class Break { other, cr, lf, control, extend, zwj, regional, prepend, spacing, l, v, t, lv, lvt };
@@ -35,7 +35,7 @@ inline Properties properties(std::uint32_t code) {
 // The emulator, not the language of the application, determines ambiguous width.
 inline bool cjk_width() {
     static const bool wide = [] {
-        const auto* setting = std::getenv("LAY_CJK_WIDTH");
+        const auto* setting = std::getenv("ODE_CJK_WIDTH");
         return setting && std::string_view(setting) == "wide";
     }();
     return wide;
@@ -86,4 +86,4 @@ private:
     bool regional_odd_ = false;
 };
 
-} // namespace lay::unicode
+} // namespace ode::unicode

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct provider_entry {
     std::string name;
@@ -29,7 +29,7 @@ struct settings {
     std::vector<std::string> warnings;
 };
 
-// Merges ~/.lay, ~/.claude and the workspace's .claude/.lay settings files.
+// Merges ~/.ode, ~/.claude and the workspace's .claude/.ode settings files.
 settings load_settings(const std::filesystem::path& workspace);
 
 // Resolves the API key: environment variable first, then Windows Credential Manager.
@@ -43,7 +43,7 @@ std::optional<protocol> parse_protocol(std::string_view text);
 // the built-in id, so a gateway mapping set up for Claude Code applies unchanged.
 std::string resolve_model_alias(const std::string& model);
 
-// CLAUDE.md, AGENTS.md and LAY.md files that apply to the workspace, user level first.
+// CLAUDE.md, AGENTS.md and ODE.md files that apply to the workspace, user level first.
 std::vector<std::pair<std::filesystem::path, std::string>> load_memory(const std::filesystem::path& workspace);
 
-} // namespace lay
+} // namespace ode

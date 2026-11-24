@@ -4,7 +4,7 @@
 #include <mutex>
 #include <thread>
 
-namespace lay {
+namespace ode {
 namespace {
 
 class handle {
@@ -143,4 +143,4 @@ process_result run_process(const process_request& request, cancel_token& cancel,
     return result;
 }
 
-} // namespace lay
+} // namespace ode

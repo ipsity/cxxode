@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace lay::ui {
+namespace ode::ui {
 
 // Multi-line draft with grapheme-aware cursor movement and input history.
 class editor {
@@ -173,4 +173,4 @@ private:
     bool browsing_ = false;
 };
 
-} // namespace lay::ui
+} // namespace ode::ui

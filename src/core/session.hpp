@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 // Append-only JSON Lines log. A crash loses at most the line being written;
 // load() drops an incomplete last line.
@@ -43,7 +43,7 @@ struct loaded_session {
     std::string model;
 };
 
-std::filesystem::path lay_home();
+std::filesystem::path ode_home();
 std::filesystem::path sessions_dir(const std::filesystem::path& workspace);
 std::string new_session_id();
 loaded_session load_session(const std::filesystem::path& path);
@@ -52,4 +52,4 @@ std::vector<session_info> list_sessions(const std::filesystem::path& workspace);
 // Every tool_use needs a matching tool_result; patch gaps left by a crash or cancel.
 void close_dangling_tool_calls(std::vector<message>& messages);
 
-} // namespace lay
+} // namespace ode

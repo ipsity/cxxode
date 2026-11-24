@@ -2,14 +2,14 @@
 #include "core/session.hpp"
 #include "skills/skill.hpp"
 
-namespace lay {
+namespace ode {
 
 std::vector<agent_config> load_agents(const fs::path& workspace) {
     std::vector<agent_config> agents;
     std::vector<fs::path> search_paths;
 
     // User-level agents
-    const auto home = lay_home().parent_path();
+    const auto home = ode_home().parent_path();
     search_paths.push_back(home / ".claude" / "agents");
 
     // Workspace agents - walk up to git root
@@ -82,4 +82,4 @@ tool_output run_subagent(const agent_config& config, const std::string& task,
     return {output, false, "完成", ""};
 }
 
-} // namespace lay
+} // namespace ode

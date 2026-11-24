@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct tool_schema {
     std::string name;
@@ -64,4 +64,4 @@ std::unique_ptr<provider> make_provider(const provider_config& config);
 model_reply decode_stream(protocol kind, std::string_view sse_bytes, const stream_events& events = {});
 json encode_request(protocol kind, const model_request& request);
 
-} // namespace lay
+} // namespace ode

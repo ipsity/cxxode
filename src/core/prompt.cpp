@@ -2,7 +2,7 @@
 
 #include <ctime>
 
-namespace lay {
+namespace ode {
 
 std::string build_system_prompt(const fs::path& root, std::string_view shell,
                                 const std::vector<std::pair<fs::path, std::string>>& memory) {
@@ -18,7 +18,7 @@ std::string build_system_prompt(const fs::path& root, std::string_view shell,
     const auto root_text = root.generic_u8string();
 
     std::string p =
-        "You are Lay, a coding agent running in the user's terminal. You help with software engineering tasks by "
+        "You are ode, a coding agent running in the user's terminal. You help with software engineering tasks by "
         "reading code, editing files and running commands in the workspace.\n\n"
         "# How to work\n"
         "- Act, then report. Do the task with the tools rather than describing what you would do. Ask only when the "
@@ -55,4 +55,4 @@ std::string build_system_prompt(const fs::path& root, std::string_view shell,
     return p;
 }
 
-} // namespace lay
+} // namespace ode

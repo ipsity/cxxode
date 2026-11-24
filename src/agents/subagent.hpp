@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 // Subagent configuration from .claude/agents/*.md
 struct agent_config {
@@ -26,4 +26,4 @@ tool_output run_subagent(const agent_config& config, const std::string& task,
                          provider& model_provider, const std::vector<tool>& tools,
                          permission_rules& rules, const fs::path& workspace);
 
-} // namespace lay
+} // namespace ode

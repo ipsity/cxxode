@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 
-namespace lay {
+namespace ode {
 
 std::vector<std::string> interactive_ui::file_items() {
     const auto mention = editor_.at_mention();
@@ -25,7 +25,7 @@ std::vector<std::string> interactive_ui::file_items() {
 
         // Skip common ignore patterns
         if (path.find(".git/") == 0 || path.find("node_modules/") == 0 ||
-            path.find(".lay/") == 0 || path.find(".claude/") == 0) continue;
+            path.find(".ode/") == 0 || path.find(".claude/") == 0) continue;
 
         // Match if pattern is a substring of the path
         if (pattern.empty() || path.find(pattern) != std::string::npos) {
@@ -38,4 +38,4 @@ std::vector<std::string> interactive_ui::file_items() {
     return matches;
 }
 
-} // namespace lay
+} // namespace ode

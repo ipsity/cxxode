@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace lay::ui {
+namespace ode::ui {
 
 // One accent colour, one grey, red for failure. Everything else uses the terminal's own colours.
 enum class tone { normal, bold, italic, code, dim, accent, accent_bold, error };
@@ -41,4 +41,4 @@ std::string_view verb(std::string_view tool);
 // Single-line form of a label: newlines become spaces.
 std::string one_line(std::string_view s);
 
-} // namespace lay::ui
+} // namespace ode::ui

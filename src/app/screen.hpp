@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 // Inline renderer. Finished output scrolls into the terminal's own history;
 // only the live area at the bottom (activity, input box, status) is redrawn.
@@ -83,4 +83,4 @@ private:
     bool drawn_ = false;
 };
 
-} // namespace lay
+} // namespace ode

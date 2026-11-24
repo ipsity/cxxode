@@ -5,7 +5,7 @@
 
 #include <memory>
 
-namespace lay {
+namespace ode {
 namespace {
 
 struct handle_closer {
@@ -20,9 +20,9 @@ std::string last_error(std::string_view what) {
 HINTERNET session_handle() {
     // One process-wide session keeps connections and TLS sessions warm across requests.
     static hinternet session{[] {
-        auto* h = WinHttpOpen(L"lay/0.2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        auto* h = WinHttpOpen(L"ode/0.2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                               WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (!h) h = WinHttpOpen(L"lay/0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        if (!h) h = WinHttpOpen(L"ode/0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (h) {
             DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
@@ -111,4 +111,4 @@ http_result http_send(const http_request& request, const http_sink& sink, cancel
     return finish();
 }
 
-} // namespace lay
+} // namespace ode

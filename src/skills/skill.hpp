@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 struct skill {
     std::string name;
@@ -42,4 +42,4 @@ std::vector<tool> make_tools(const std::vector<skill>& skills,
                               permission_rules* rules = nullptr,
                               const fs::path* workspace = nullptr);
 
-} // namespace lay
+} // namespace ode

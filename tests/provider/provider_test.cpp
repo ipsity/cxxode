@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-using namespace lay;
+using namespace ode;
 
 TEST_CASE("sse decoder handles arbitrary splits") {
     const std::string stream = "event: a\r\ndata: {\"x\":1}\r\n\r\n: comment\ndata: one\ndata: two\n\n";

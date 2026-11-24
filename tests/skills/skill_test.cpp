@@ -4,7 +4,7 @@
 #include <fstream>
 #include <filesystem>
 
-using namespace lay;
+using namespace ode;
 
 TEST_CASE("parse_frontmatter extracts YAML metadata") {
     const auto text = R"(---
@@ -37,7 +37,7 @@ TEST_CASE("parse_frontmatter handles CRLF line endings") {
 }
 
 TEST_CASE("load_skills finds and parses skill files") {
-    const auto temp = std::filesystem::temp_directory_path() / "lay-skills-test";
+    const auto temp = std::filesystem::temp_directory_path() / "ode-skills-test";
     std::filesystem::create_directories(temp / ".claude" / "skills");
 
     {

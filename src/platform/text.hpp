@@ -12,7 +12,7 @@
 #endif
 #include <windows.h>
 
-namespace lay {
+namespace ode {
 
 inline std::wstring widen(std::string_view text) {
     if (text.empty()) return {};
@@ -30,5 +30,5 @@ inline std::string narrow(std::wstring_view text) {
     return out;
 }
 
-} // namespace lay
+} // namespace ode
 #endif

@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 namespace fs = std::filesystem;
 
@@ -69,4 +69,4 @@ std::optional<file_stamp> stamp(const fs::path& path);
 // Restores every file in the backup. Returns the display paths restored.
 std::vector<std::string> restore(const turn_backup& backup, const fs::path& root);
 
-} // namespace lay
+} // namespace ode

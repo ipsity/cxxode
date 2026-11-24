@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace lay {
+namespace ode {
 namespace {
 
 std::string_view trim(std::string_view s) {
@@ -148,4 +148,4 @@ std::string permission_rules::always_rule(const tool& t, const json& input) {
     return "Bash(" + std::string(prefix) + ":*)";
 }
 
-} // namespace lay
+} // namespace ode

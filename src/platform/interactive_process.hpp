@@ -10,7 +10,7 @@
 #include <windows.h>
 #endif
 
-namespace lay {
+namespace ode {
 
 // Interactive process with bidirectional stdin/stdout communication
 // Used for MCP servers and other long-running subprocesses
@@ -40,4 +40,4 @@ private:
 #endif
 };
 
-} // namespace lay
+} // namespace ode

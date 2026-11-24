@@ -64,17 +64,17 @@ Skills、用户命令、文件补全、消息分叉。
   - /resume 命令：列出和恢复历史会话
 - 斜杠命令：/help /clear /compact /model /mode /undo /resume /cost /exit
 - 配置：
-  - 多级 settings.json：~/.claude、~/.lay、.claude、.lay
+  - 多级 settings.json：~/.claude、~/.ode、.claude、.ode
   - 模型别名解析：opus/sonnet/haiku/fable
   - 环境变量支持：ANTHROPIC_DEFAULT_*_MODEL、ANTHROPIC_API_KEY、ANTHROPIC_AUTH_TOKEN
-- 凭据管理：`lay login <provider>` 保存到 Windows Credential Manager
+- 凭据管理：`ode login <provider>` 保存到 Windows Credential Manager
 - Markdown 渲染：标题加粗，代码块 dim，列表项转换
 - Unicode 17.0：CJK 宽度识别，字素边界正确处理
 - 并行工具执行：连续只读调用并发运行，混合调用串行执行
 
 **无头模式**
 - `-p` 或 `--print`：文本流向 stdout，工具日志到 stderr
-- 管道支持：`git diff | lay -p "review this"`
+- 管道支持：`git diff | ode -p "review this"`
 - 默认 plan 模式，ask 自动拒绝
 
 **平台**
@@ -91,7 +91,7 @@ Skills、用户命令、文件补全、消息分叉。
 **已知限制**
 - 仅支持 Windows（Linux 需要 libcurl、termios、fork/exec）
 - 无 `--output json` JSONL 事件流（推迟到 M4）
-- 无 `lay models` 命令
+- 无 `ode models` 命令
 - Thinking 文本不显示（仅显示"思考中"）
 - Markdown 渲染简化（无内联代码高亮）
 

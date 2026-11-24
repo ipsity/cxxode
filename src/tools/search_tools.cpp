@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <regex>
 
-namespace lay {
+namespace ode {
 namespace {
 
 constexpr std::size_t max_scan_bytes = 2 * 1024 * 1024;
@@ -141,4 +141,4 @@ std::vector<tool> search_tools() {
     };
 }
 
-} // namespace lay
+} // namespace ode

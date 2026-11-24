@@ -1,6 +1,6 @@
 #include "app/interactive.hpp"
 
-namespace lay {
+namespace ode {
 
 using namespace std::chrono_literals;
 
@@ -150,4 +150,4 @@ int interactive_ui::run(std::string first_prompt) {
     return 0;
 }
 
-} // namespace lay
+} // namespace ode

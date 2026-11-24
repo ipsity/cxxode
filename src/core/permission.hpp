@@ -6,14 +6,14 @@
 #include <string>
 #include <vector>
 
-namespace lay {
+namespace ode {
 
 enum class permission_mode { plan, normal, yolo };
 enum class verdict { allow, deny, ask };
 
 std::string_view mode_name(permission_mode mode);
 permission_mode next_mode(permission_mode mode);
-// Accepts lay names and Claude Code's defaultMode names.
+// Accepts ode names and Claude Code's defaultMode names.
 std::optional<permission_mode> parse_mode(std::string_view text);
 
 // Rules use Claude Code syntax: "Read", "Bash", "Bash(git status)", "Bash(npm run:*)".
@@ -46,4 +46,4 @@ private:
 // Splits a shell command on && || ; | and newlines, outside quotes.
 std::vector<std::string> command_segments(std::string_view command);
 
-} // namespace lay
+} // namespace ode

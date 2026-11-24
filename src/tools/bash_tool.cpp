@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace lay {
+namespace ode {
 namespace {
 
 struct shell {
@@ -17,7 +17,7 @@ struct shell {
 // Git Bash first: models write POSIX commands. PowerShell when Git for Windows is absent.
 const shell& detect_shell() {
     static const shell value = [] {
-        if (const char* custom = std::getenv("LAY_SHELL"); custom && *custom) {
+        if (const char* custom = std::getenv("ODE_SHELL"); custom && *custom) {
             return shell{custom, {"-c"}, fs::path(custom).stem().string()};
         }
         std::vector<fs::path> candidates;
@@ -104,4 +104,4 @@ std::vector<tool> builtin_tools() {
     return tools;
 }
 
-} // namespace lay
+} // namespace ode
