@@ -6,6 +6,7 @@
 #include "core/agent.hpp"
 #include "mcp/mcp_client.hpp"
 #include "skills/skill.hpp"
+#include "theme/theme.hpp"
 
 #include <memory>
 #include <optional>
@@ -26,6 +27,9 @@ struct app {
     std::vector<user_command> commands;
     std::vector<std::shared_ptr<mcp_client>> mcp_clients;
     std::vector<agent_config> agents;
+
+    // Current theme
+    theme current_theme = dark_theme();
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);

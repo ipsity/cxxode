@@ -37,23 +37,25 @@ std::string spinner(steady::time_point since) {
     return frames[(ms / 100) % 8];
 }
 
-std::string spinner_with_color(steady::time_point since, std::string_view tool_name) {
-    // Color selection based on tool type
-    const char* color = "\033[38;2;200;200;200m"; // Default gray
+std::string spinner_with_color(steady::time_point since, std::string_view tool_name, const theme& t) {
+    // Color selection based on tool type from theme
+    const char* color_code;
 
     if (tool_name == "Read") {
-        color = "\033[38;2;79;193;255m";   // Blue
+        color_code = t.tool_read.ansi_fg().c_str();
     } else if (tool_name == "Write") {
-        color = "\033[38;2;206;145;120m";  // Orange
+        color_code = t.tool_write.ansi_fg().c_str();
     } else if (tool_name == "Edit") {
-        color = "\033[38;2;220;220;170m";  // Yellow
+        color_code = t.tool_edit.ansi_fg().c_str();
     } else if (tool_name == "Bash") {
-        color = "\033[38;2;78;201;176m";   // Green
+        color_code = t.tool_bash.ansi_fg().c_str();
     } else if (tool_name == "Grep" || tool_name == "Glob") {
-        color = "\033[38;2;78;201;176m";   // Cyan
+        color_code = t.tool_search.ansi_fg().c_str();
+    } else {
+        color_code = "\033[38;2;200;200;200m"; // Default gray
     }
 
-    return std::string(color) + spinner(since) + "\033[0m";
+    return std::string(color_code) + spinner(since) + "\033[0m";
 }
 
 std::string seconds(steady::time_point since) {
@@ -156,7 +158,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         for (auto& r : ui::markdown_line(stream_, state, columns)) rows.push_back(std::move(r));
     }
     for (const auto& t : running_) {
-        const auto head = spinner_with_color(t.started, t.name) + " " + std::string(ui::verb(t.name)) + " ";
+        const auto head = spinner_with_color(t.started, t.name, app_.current_theme) + " " + std::string(ui::verb(t.name)) + " ";
         const auto tail = "  " + seconds(t.started);
         const auto label = text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
         rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
@@ -175,7 +177,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
                        paint(tone::dim, " 拒绝   ") + paint(tone::accent, "a") +
                        paint(tone::dim, " 总是允许 " + text::keep_head(ask_->rule, std::max(8, columns - 32))));
     } else if (busy_ && running_.empty() && (thinking_ || stream_.empty())) {
-        rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking")) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
+        rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking", app_.current_theme)) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
     }
     if (!hint_.empty()) rows.push_back("  " + paint(tone::dim, hint_));
 

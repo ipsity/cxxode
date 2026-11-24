@@ -132,41 +132,44 @@ bool interactive_ui::command(const std::string& line) {
         note("权限档 " + std::string(mode_name(app_.config.permissions.mode())));
     } else if (name == "/theme") {
         if (arg.empty()) {
-            // Show interactive theme selector
-            const auto themes = available_themes();
+            // Show interactive theme selector with customize option
+            auto themes = available_themes();
             std::vector<std::string> items;
             std::vector<std::string> details;
 
+            // Add all themes
             for (const auto& [name, theme] : themes) {
                 items.push_back(name);
-                // Show color preview
                 details.push_back("User: " + theme.user_message.ansi_fg() + "■■■\033[0m  "
                                 + "Assistant: " + theme.assistant_message.ansi_fg() + "■■■\033[0m  "
                                 + "Accent: " + theme.accent.ansi_fg() + "■■■\033[0m");
             }
 
+            // Add customize option
+            items.push_back("customize");
+            details.push_back("Create or edit custom theme");
+
             selection_ = {
                 items,
                 details,
                 0,
-                "Select a theme (Note: Preview only, full integration in progress):",
+                "Select a theme:",
                 [this, themes](std::size_t index) {
                     std::vector<std::string> names;
                     for (const auto& [name, _] : themes) names.push_back(name);
+                    names.push_back("customize");
 
-                    const auto& theme_name = names[index];
-                    note("✓ Selected theme: " + theme_name, tone::accent);
-                    note("Theme preview:", tone::accent);
+                    const auto& selected = names[index];
 
-                    const auto& t = themes.at(theme_name);
-                    note("  User message: " + t.user_message.ansi_fg() + "Example text\033[0m");
-                    note("  Assistant: " + t.assistant_message.ansi_fg() + "Example response\033[0m");
-                    note("  Tools: " + t.tool_read.ansi_fg() + "Read\033[0m "
-                         + t.tool_write.ansi_fg() + "Write\033[0m "
-                         + t.tool_bash.ansi_fg() + "Bash\033[0m");
-                    note("");
-                    note("Full theme integration coming soon!", tone::dim);
-                    note("This will apply colors to all UI elements");
+                    if (selected == "customize") {
+                        // Show customize menu
+                        show_customize_menu();
+                    } else {
+                        // Apply theme
+                        app_.current_theme = themes.at(selected);
+                        note("✓ Theme applied: " + selected, tone::accent);
+                        note("Theme is now active!");
+                    }
                 },
                 []() { /* Cancel */ }
             };

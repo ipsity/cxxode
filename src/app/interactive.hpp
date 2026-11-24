@@ -75,6 +75,7 @@ private:
     std::string status_line(int columns) const;
     void push(ui_event e);
     agent_events make_events();
+    void show_customize_menu();  // Show theme customization menu
 
     // Track recent permission requests to prevent loops
     struct recent_ask {

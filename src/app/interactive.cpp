@@ -87,9 +87,10 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
 
 void interactive_ui::start_turn(std::string text) {
     section("user");
-    // User messages in accent_bold to distinguish from assistant
-    screen_.commit(ui::layout({{text, ui::tone::accent_bold}}, size_.columns - 1, {ui::paint(ui::tone::accent, "› "), 2},
-                              {"  ", 2}));
+    // Use theme color for user messages
+    const auto user_color_code = app_.current_theme.user_message.ansi_fg();
+    screen_.commit(ui::layout({{text, ui::tone::normal}}, size_.columns - 1,
+                              {user_color_code + "› \033[0m", 2}, {"  ", 2}));
     const auto window = app_.core->context_window;
     if (usage_.context > window * 8 / 10) note("上下文已用 " + short_count(usage_.context) + "，可用 /compact 压缩");
     start_job([this, text = std::move(text)](agent_events& ev, cancel_token& c) { return app_.core->run(text, ev, c); },
@@ -158,6 +159,43 @@ int interactive_ui::run(std::string first_prompt) {
     }
     screen_.finish();
     return 0;
+}
+
+void interactive_ui::show_customize_menu() {
+    std::vector<std::string> items = {
+        "User message", "Assistant", "Tool: Read", "Tool: Write",
+        "Tool: Edit", "Tool: Bash", "Accent", "Borders", "Error", "Success"
+    };
+
+    std::vector<std::string> details;
+    auto& t = app_.current_theme;
+
+    auto rgb_str = [](const rgb_color& c) {
+        return c.ansi_fg() + "■■■\033[0m (" +
+               std::to_string(c.r) + "," + std::to_string(c.g) + "," + std::to_string(c.b) + ")";
+    };
+
+    details.push_back(rgb_str(t.user_message));
+    details.push_back(rgb_str(t.assistant_message));
+    details.push_back(rgb_str(t.tool_read));
+    details.push_back(rgb_str(t.tool_write));
+    details.push_back(rgb_str(t.tool_edit));
+    details.push_back(rgb_str(t.tool_bash));
+    details.push_back(rgb_str(t.accent));
+    details.push_back(rgb_str(t.border));
+    details.push_back(rgb_str(t.error));
+    details.push_back(rgb_str(t.success));
+
+    selection_ = {
+        items, details, 0,
+        "Customize - Select element to edit:",
+        [this](std::size_t) {
+            section("assistant");
+            screen_.commit(paint(ui::tone::accent, "RGB color editor coming soon!"));
+            screen_.commit(paint(ui::tone::dim, "Will allow adjusting R/G/B values 0-255"));
+        },
+        []() {}
+    };
 }
 
 } // namespace ode
