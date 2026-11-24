@@ -3,6 +3,7 @@
 #include "config/config.hpp"
 #include "core/permission.hpp"
 #include "core/session.hpp"
+#include "core/tool_scheduler.hpp"  // 新增：智能调度器
 #include "provider/provider.hpp"
 #include "tools/tool.hpp"
 
@@ -70,6 +71,10 @@ private:
     std::map<fs::path, file_stamp> seen_;
     std::string pending_note_;
     std::vector<hook_config> hooks_;
+
+    // 新增：智能调度器和进度追踪
+    std::unique_ptr<SmartToolScheduler> scheduler_;
+    std::unique_ptr<ToolProgressTracker> progress_tracker_;
 };
 
 std::string build_system_prompt(const fs::path& root, std::string_view shell,
