@@ -29,6 +29,7 @@ add_library(cxxode_core STATIC
     src/core/tool_suggestion.cpp
     src/core/error_handler.cpp
     src/core/command_history.cpp
+    src/core/input_validator.cpp
     src/config/config.cpp
     src/provider/provider.cpp
     src/provider/anthropic.cpp

@@ -6,6 +6,7 @@
 #include "core/agent.hpp"
 #include "core/command_history.hpp"
 #include "core/error_handler.hpp"
+#include "core/input_validator.hpp"
 #include "core/tool_suggestion.hpp"
 #include "mcp/mcp_client.hpp"
 #include "skills/skill.hpp"
@@ -42,6 +43,9 @@ struct app {
 
     // Week 2 Day 10: Command history
     command_history history;
+
+    // Week 2 Day 12: Input validator
+    input_validator validator;
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);

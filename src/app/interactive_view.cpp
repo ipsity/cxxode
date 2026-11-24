@@ -321,6 +321,16 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
+    // Day 12: Input validation hints
+    if (!editor_.text().empty() && !busy_ && !ask_) {
+        auto validation = app_.validator.validate(editor_.text());
+        if (validation.type != ode::input_validator::issue_type::none) {
+            const auto icon = validation.is_warning ? "⚠️  " : "❌ ";
+            const auto color = validation.is_warning ? tone::dim : tone::error;
+            rows.push_back("  " + paint(color, icon + validation.message));
+        }
+    }
+
     // Fixed bottom input box design
     const int inner = columns - 4;
     const auto l = editor_.arrange(inner);
