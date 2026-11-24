@@ -33,6 +33,8 @@ add_library(lay_core STATIC
     src/tools/search_tools.cpp
     src/tools/bash_tool.cpp
     src/ui/render.cpp
+    src/skills/skill.cpp
+    src/skills/make_tools.cpp
     ${LAY_PLATFORM_SOURCES})
 target_include_directories(lay_core PUBLIC src)
 target_include_directories(lay_core SYSTEM PUBLIC third_party)
@@ -63,7 +65,8 @@ if(BUILD_TESTING)
         tests/core/agent_test.cpp
         tests/provider/provider_test.cpp
         tests/tools/tools_test.cpp
-        tests/ui/ui_test.cpp)
+        tests/ui/ui_test.cpp
+        tests/skills/skill_test.cpp)
     target_include_directories(lay_tests SYSTEM PRIVATE third_party/doctest)
     target_link_libraries(lay_tests PRIVATE lay_core)
     if(MINGW)
