@@ -22,9 +22,18 @@ const std::pair<const char*, const char*> builtin_commands[] = {
 };
 
 std::string spinner(steady::time_point since) {
-    static constexpr const char* frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    // Option A: Block corners rotating (clean 4-frame)
+    // static constexpr const char* frames[] = {"▘", "▝", "▗", "▖"};
+
+    // Option B: Dots on square perimeter (8-frame)
+    // Positions: TL, T, TR, R, BR, B, BL, L
+    static constexpr const char* frames[] = {"◜", "◠", "◝", "◞", "◟", "◡", "◞", "◜"};
+
+    // Option C: Simple rotating bar (4-frame)
+    // static constexpr const char* frames[] = {"│", "╱", "─", "╲"};
+
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - since).count();
-    return frames[(ms / 100) % 10];
+    return frames[(ms / 150) % 8];
 }
 
 std::string seconds(steady::time_point since) {

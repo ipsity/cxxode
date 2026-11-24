@@ -14,18 +14,36 @@ void interactive_ui::submit() {
     auto text = editor_.text();
     while (!text.empty() && (text.back() == '\n' || text.back() == ' ')) text.pop_back();
     if (text.empty()) return;
+
+    // Handle palette selection
     const auto items = palette_items();
-    // A command chosen in the palette runs as typed in full.
-    if (!items.empty() && text != items[palette_index_ % items.size()]) {
-        // Extract just the command name (before space if present)
-        const auto chosen = items[palette_index_ % items.size()];
-        const auto space = chosen.find(' ');
-        text = space == std::string::npos ? chosen : chosen.substr(0, space);
+    if (!items.empty() && !text.empty() && text.front() == '/') {
+        // Check if text is just a prefix (user is navigating palette)
+        bool is_prefix_only = true;
+        for (const auto& item : items) {
+            const auto tab = item.find('\t');
+            const auto cmd = tab != std::string::npos ? item.substr(0, tab) : item;
+            if (cmd == text) {
+                is_prefix_only = false;
+                break;
+            }
+        }
+
+        // If user pressed enter while navigating palette, use selected item
+        if (is_prefix_only && palette_index_ < items.size()) {
+            text = items[palette_index_];
+            const auto tab = text.find('\t');
+            if (tab != std::string::npos) {
+                text = text.substr(0, tab);  // Extract command name before tab
+            }
+        }
     }
+
     editor_.remember(text);
     editor_.clear();
     palette_index_ = 0;
-    if (text.front() == '/') {
+
+    if (!text.empty() && text.front() == '/') {
         if (busy_) {
             hint_ = "模型工作中，命令需等这一轮结束";
             hint_at_ = steady::now();

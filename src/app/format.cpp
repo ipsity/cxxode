@@ -45,7 +45,7 @@ std::string tool_label(const tool& t, const json& input, const fs::path& root) {
     if (t.name == "Read" || t.name == "Write" || t.name == "Edit") {
         const auto p = input.value("file_path", std::string{});
         auto shown = display_path(root, resolve(root, p));
-        if (t.name == "Read" && input.contains("offset")) shown += "  从第 " + std::to_string(input.value("offset", 1)) + " 行";
+        if (t.name == "Read" && input.contains("offset")) shown += "  from line " + std::to_string(input.value("offset", 1));
         return shown;
     }
     if (t.label) return ui::one_line(t.label(input));

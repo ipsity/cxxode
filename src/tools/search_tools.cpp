@@ -27,7 +27,7 @@ bool filter_match(std::string_view pattern, const std::string& rel) {
 
 tool_output glob_tool(const json& input, tool_context& ctx) {
     const auto pattern = input.value("pattern", std::string{});
-    if (pattern.empty()) return {"pattern is required.", true, "失败", {}};
+    if (pattern.empty()) return {"pattern is required.", true, "failed", {}};
     const auto base = base_path(input, ctx);
     std::vector<std::pair<fs::file_time_type, std::string>> hits;
     for (const auto& file : workspace_files(ctx.root, base)) {
@@ -42,19 +42,19 @@ tool_output glob_tool(const json& input, tool_context& ctx) {
     for (std::size_t i = 0; i < shown; ++i) out += hits[i].second + "\n";
     if (hits.empty()) out = "No files matched.\n";
     else if (hits.size() > shown) out += "… " + std::to_string(hits.size() - shown) + " more; narrow the pattern.\n";
-    return {out, false, std::to_string(hits.size()) + " 个文件", {}};
+    return {out, false, std::to_string(hits.size()) + " files", {}};
 }
 
 tool_output grep_tool(const json& input, tool_context& ctx) {
     const auto pattern = input.value("pattern", std::string{});
-    if (pattern.empty()) return {"pattern is required.", true, "失败", {}};
+    if (pattern.empty()) return {"pattern is required.", true, "failed", {}};
     auto flags = std::regex::ECMAScript | std::regex::optimize;
     if (input.value("-i", false)) flags |= std::regex::icase;
     std::regex re;
     try {
         re = std::regex(pattern, flags);
     } catch (const std::regex_error& e) {
-        return {std::string("Invalid regular expression: ") + e.what(), true, "失败", {}};
+        return {std::string("Invalid regular expression: ") + e.what(), true, "failed", {}};
     }
     const auto mode = input.value("output_mode", std::string("files_with_matches"));
     const auto filter = input.value("glob", std::string{});
@@ -108,7 +108,7 @@ tool_output grep_tool(const json& input, tool_context& ctx) {
     }
     if (out.empty()) out = "No matches.\n";
     if (truncated) out += "… results truncated at head_limit=" + std::to_string(limit) + ".\n";
-    return {out, false, std::to_string(matched_files) + " 个文件", {}};
+    return {out, false, std::to_string(matched_files) + " files", {}};
 }
 
 } // namespace

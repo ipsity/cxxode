@@ -47,32 +47,32 @@ const shell& detect_shell() {
 
 tool_output bash_tool(const json& input, tool_context& ctx) {
     const auto command = input.value("command", std::string{});
-    if (command.empty()) return {"command is required.", true, "失败", {}};
+    if (command.empty()) return {"command is required.", true, "failed", {}};
     const auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, 600000);
     const auto& sh = detect_shell();
     process_request req{sh.program, sh.prefix, ctx.root, std::chrono::milliseconds(timeout)};
     req.arguments.push_back(command);
     cancel_token never;
     auto r = run_process(req, ctx.cancel ? *ctx.cancel : never, ctx.output);
-    if (!r.error.empty()) return {"Could not start " + sh.name + ": " + r.error, true, "无法启动", {}};
+    if (!r.error.empty()) return {"Could not start " + sh.name + ": " + r.error, true, "failed to start", {}};
 
     std::string text = clip(std::move(r.output), 30000);
     std::string summary;
     bool error = false;
     if (r.cancelled) {
         text += "\n[Interrupted by the user]";
-        summary = "已中断";
+        summary = "cancelled";
         error = true;
     } else if (r.timed_out) {
         text += "\n[Killed after " + std::to_string(timeout) + " ms timeout]";
-        summary = "超时";
+        summary = "timeout";
         error = true;
     } else {
         const int code = r.exit_code.value_or(-1);
         if (code != 0) text += "\n[exit code " + std::to_string(code) + "]";
         char seconds[32];
         std::snprintf(seconds, sizeof(seconds), "%.1fs", static_cast<double>(r.elapsed.count()) / 1000.0);
-        summary = code == 0 ? std::string("✓ ") + seconds : "✗ 退出码 " + std::to_string(code) + "  " + seconds;
+        summary = code == 0 ? std::string("✓ ") + seconds : "✗ exit " + std::to_string(code) + "  " + seconds;
         error = code != 0;
     }
     if (text.empty()) text = "(no output)";

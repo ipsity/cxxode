@@ -13,7 +13,7 @@ std::string path_arg(const json& input) {
     return input.contains("file_path") && input["file_path"].is_string() ? input["file_path"].get<std::string>() : "";
 }
 
-tool_output fail(std::string text) { return {std::move(text), true, "失败", {}}; }
+tool_output fail(std::string text) { return {std::move(text), true, "failed", {}}; }
 
 void remember(tool_context& ctx, const fs::path& path) {
     if (!ctx.seen) return;
@@ -88,7 +88,7 @@ tool_output read_tool(const json& input, tool_context& ctx) {
             out += '\n';
             if (++n >= 1000) break;
         }
-        return {out, false, std::to_string(n) + " 项", {}};
+        return {out, false, std::to_string(n) + " items", {}};
     }
     if (!fs::is_regular_file(path, ec)) return fail("File does not exist: " + display_path(ctx.root, path));
     if (fs::file_size(path, ec) > max_read_bytes) return fail("File is larger than 10 MB. Use Grep or Bash to inspect it.");
@@ -124,7 +124,7 @@ tool_output read_tool(const json& input, tool_context& ctx) {
     if (content->empty()) out = "(empty file)\n";
     else if (static_cast<std::size_t>(offset - 1 + emitted) < total)
         out += "… file has " + std::to_string(total) + " lines; continue with offset.\n";
-    return {out, false, std::to_string(emitted) + " 行", {}};
+    return {out, false, std::to_string(emitted) + " lines", {}};
 }
 
 tool_output write_tool(const json& input, tool_context& ctx) {
@@ -137,7 +137,7 @@ tool_output write_tool(const json& input, tool_context& ctx) {
     remember(ctx, path);
     const auto lines = count_lines(content);
     return {(existed ? "Overwrote " : "Created ") + display_path(ctx.root, path) + " (" + std::to_string(lines) + " lines).",
-            false, (existed ? "覆盖 " : "新建 ") + std::to_string(lines) + " 行", {}};
+            false, (existed ? "overwrote " : "created ") + std::to_string(lines) + " lines", {}};
 }
 
 tool_output edit_tool(const json& input, tool_context& ctx) {
