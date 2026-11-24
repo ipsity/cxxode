@@ -208,6 +208,31 @@ void interactive_ui::handle(const ui::key& k) {
                 case 'a': editor_.home(); break;
                 case 'e': editor_.end(); break;
                 case 'u': editor_.kill_line_before(); break;
+                case 'k': {
+                    // Day 11: Kill to end of line (like Emacs/Bash)
+                    while (editor_.cursor() < editor_.text().size()) {
+                        if (editor_.text()[editor_.cursor()] == '\n') break;
+                        editor_.erase_forward();
+                    }
+                    break;
+                }
+                case 'w': {
+                    // Day 11: Delete word backward (like Emacs/Bash)
+                    if (editor_.empty() || editor_.cursor() == 0) break;
+
+                    // Skip trailing whitespace
+                    while (editor_.cursor() > 0 &&
+                           std::isspace(static_cast<unsigned char>(editor_.text()[editor_.cursor() - 1]))) {
+                        editor_.backspace();
+                    }
+
+                    // Delete word characters
+                    while (editor_.cursor() > 0 &&
+                           !std::isspace(static_cast<unsigned char>(editor_.text()[editor_.cursor() - 1]))) {
+                        editor_.backspace();
+                    }
+                    break;
+                }
                 case 'l': screen_.clear_screen(); break;
                 case 't':
                     // Ctrl+T: toggle thinking block expansion
