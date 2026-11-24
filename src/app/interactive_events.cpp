@@ -107,7 +107,16 @@ void interactive_ui::apply(ev_tool_done& e) {
     const int fixed = 4 + text::width(head) + text::width(summary);
     const auto label = text::keep_head(e.label, std::max(8, columns - fixed));
     const auto dot = paint(e.error ? tone::error : tone::dim, "●");
-    screen_.commit(" " + dot + " " + paint(tone::dim, head + " " + label) + paint(e.error ? tone::error : tone::dim, summary));
+
+    // Show tool completion with label (command/file)
+    screen_.commit(" " + dot + " " + paint(tone::dim, head + " ") + paint(tone::accent, label) + paint(e.error ? tone::error : tone::dim, summary));
+
+    // Show full command for Bash
+    if (e.name == "Bash" && !e.label.empty() && e.label.size() < 200) {
+        screen_.commit("   " + paint(tone::dim, "│ $ ") + paint(tone::accent, e.label));
+    }
+
+    // Show detail (diff/output)
     if (!e.detail.empty()) {
         std::size_t start = 0;
         while (start < e.detail.size()) {
@@ -119,6 +128,8 @@ void interactive_ui::apply(ev_tool_done& e) {
             start = end + 1;
         }
     }
+
+    // Show full output for errors
     if (e.error && e.name != "Bash" && !e.full.empty()) {
         note(text::keep_head(ui::one_line(e.full), columns - 4), tone::error);
     }

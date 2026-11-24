@@ -263,11 +263,13 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
 
         if (i == 0) {
-            // Use theme color for input prompt
+            // Use theme color for input prompt - BOLD
             const auto prompt_color = app_.current_theme.prompt.ansi_fg();
-            rows.push_back(prompt_color + "› \033[0m" + shown);
+            rows.push_back(prompt_color + "\033[1m› \033[0m" + prompt_color + "\033[1m" + shown + "\033[0m");
         } else {
-            rows.push_back("  " + shown);
+            // Continuation lines also bold
+            const auto prompt_color = app_.current_theme.prompt.ansi_fg();
+            rows.push_back(prompt_color + "\033[1m  " + shown + "\033[0m");
         }
     }
 
