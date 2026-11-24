@@ -1,5 +1,6 @@
 #pragma once
 
+#include "agents/subagent.hpp"
 #include "commands/command.hpp"
 #include "config/config.hpp"
 #include "core/agent.hpp"
@@ -24,6 +25,7 @@ struct app {
     std::vector<skill> skills;
     std::vector<user_command> commands;
     std::vector<std::shared_ptr<mcp_client>> mcp_clients;
+    std::vector<agent_config> agents;
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);
