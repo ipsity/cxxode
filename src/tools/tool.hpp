@@ -47,7 +47,11 @@ struct tool {
     std::string name;
     std::string description;
     json schema;
-    tool_access access;
+    tool_access access;  // 保留：简单访问模式（向后兼容）
+
+    // 新增：四维权限控制（超越 Pi）
+    ToolAccess access_control = ToolAccess::safe_default();
+
     std::function<tool_output(const json& input, tool_context& ctx)> run;
     // Short label for the UI and permission prompt, e.g. the path or the command.
     std::function<std::string(const json& input)> label;
