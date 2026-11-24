@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.24)
+project(lay VERSION 0.2.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(MSVC)
+    add_compile_options(/W4 /permissive- /utf-8)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+add_library(lay_core STATIC src/core/version.cpp)
+target_include_directories(lay_core PUBLIC src)
+target_compile_definitions(lay_core PUBLIC LAY_VERSION="${PROJECT_VERSION}")
+
+add_executable(lay src/main.cpp)
+target_link_libraries(lay PRIVATE lay_core)
+if(MINGW)
+    target_link_options(lay PRIVATE -static)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(lay_tests tests/main.cpp tests/version_test.cpp)
+    target_include_directories(lay_tests PRIVATE third_party/doctest)
+    target_link_libraries(lay_tests PRIVATE lay_core)
+    add_test(NAME unit COMMAND lay_tests)
+    add_test(NAME cli.version COMMAND lay --version)
+    set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "^lay ${PROJECT_VERSION}")
+endif()
