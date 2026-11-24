@@ -1,5 +1,6 @@
 #include "config/config.hpp"
 #include "core/session.hpp"
+#include "hooks/hooks.hpp"
 #include "tools/tool.hpp"
 
 #include <cstdlib>
@@ -52,6 +53,33 @@ void merge(settings& s, const json& j) {
             for (const auto& r : p[key]) if (r.is_string()) list.push_back(r);
         }
         if (auto m = parse_mode(p.value("defaultMode", ""))) s.permissions.set_mode(*m);
+    }
+    if (j.contains("hooks") && j["hooks"].is_object()) {
+        const auto& hooks = j["hooks"];
+        for (const auto& [type_name, hook_list] : hooks.items()) {
+            if (!hook_list.is_array()) continue;
+            hook_type type;
+            if (type_name == "PreToolUse") type = hook_type::pre_tool_use;
+            else if (type_name == "PostToolUse") type = hook_type::post_tool_use;
+            else if (type_name == "UserPromptSubmit") type = hook_type::user_prompt_submit;
+            else if (type_name == "Stop") type = hook_type::stop;
+            else continue;  // Unknown hook type
+
+            for (const auto& hook : hook_list) {
+                if (!hook.is_object()) continue;
+                hook_config cfg;
+                cfg.type = type;
+                cfg.command = hook.value("command", "");
+                if (cfg.command.empty()) continue;
+                if (hook.contains("args") && hook["args"].is_array()) {
+                    for (const auto& arg : hook["args"]) {
+                        if (arg.is_string()) cfg.args.push_back(arg);
+                    }
+                }
+                cfg.working_dir = hook.value("cwd", "");
+                s.hooks.push_back(cfg);
+            }
+        }
     }
 }
 

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "core/permission.hpp"
+#include "platform/process.hpp"
 #include "provider/provider.hpp"
+#include "tools/tool.hpp"
 
 #include <filesystem>
 #include <map>
@@ -10,6 +12,22 @@
 #include <vector>
 
 namespace ode {
+
+// Hook types that can be registered in settings.json
+enum class hook_type {
+    pre_tool_use,      // Before a tool is executed
+    post_tool_use,     // After a tool completes
+    user_prompt_submit, // When user submits a prompt
+    stop               // Before agent stops (normal or error)
+};
+
+// Hook configuration from settings.json
+struct hook_config {
+    hook_type type;
+    std::string command;
+    std::vector<std::string> args;
+    std::filesystem::path working_dir;
+};
 
 struct provider_entry {
     std::string name;
@@ -25,6 +43,7 @@ struct settings {
     std::string model;
     std::map<std::string, provider_entry> providers;
     permission_rules permissions;
+    std::vector<hook_config> hooks;  // Hooks loaded from settings.json
     std::vector<std::filesystem::path> loaded_files;
     std::vector<std::string> warnings;
 };

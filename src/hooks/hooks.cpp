@@ -37,9 +37,8 @@ hook_result execute_hook(const hook_config& config, const hook_context& ctx, can
     req.arguments = config.args;
     req.directory = config.working_dir.empty() ? fs::current_path() : config.working_dir;
     req.timeout = std::chrono::milliseconds(5000);  // 5s timeout for hooks
+    req.stdin_data = input.dump();  // Pass JSON input to hook via stdin
 
-    // TODO: Need to pass stdin to run_process
-    // For now, hooks run without stdin and return based on exit code
     auto result = run_process(req, cancel);
 
     hook_result hr;
@@ -56,19 +55,9 @@ hook_result execute_hook(const hook_config& config, const hook_context& ctx, can
     return hr;
 }
 
-std::vector<hook_config> load_hooks(const settings&) {
-    std::vector<hook_config> hooks;
-
-    // Parse hooks from config (not yet implemented in settings structure)
-    // Format in settings.json:
-    // "hooks": {
-    //   "PreToolUse": [{"command": "...", "args": [...]}],
-    //   "PostToolUse": [...]
-    // }
-
-    // TODO: Add hooks field to settings structure and parse here
-
-    return hooks;
+std::vector<hook_config> load_hooks(const settings& s) {
+    // Hooks are already parsed from settings.json into s.hooks
+    return s.hooks;
 }
 
 } // namespace ode

@@ -69,7 +69,22 @@ process_result run_process(const process_request& request, cancel_token& cancel,
     }
     handle read_end(read_raw), write_end(write_raw);
     SetHandleInformation(read_end.get(), HANDLE_FLAG_INHERIT, 0);
-    handle stdin_null(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr));
+
+    // Setup stdin: pipe if we have data to send, otherwise NUL
+    handle stdin_read, stdin_write;
+    if (!request.stdin_data.empty()) {
+        HANDLE stdin_r = nullptr, stdin_w = nullptr;
+        if (!CreatePipe(&stdin_r, &stdin_w, &inherit, 0)) {
+            result.error = error_text("CreatePipe for stdin");
+            return result;
+        }
+        stdin_read.reset(stdin_r);
+        stdin_write.reset(stdin_w);
+        SetHandleInformation(stdin_write.get(), HANDLE_FLAG_INHERIT, 0);
+    } else {
+        stdin_read.reset(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr));
+    }
+
     handle job(CreateJobObjectW(nullptr, nullptr));
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -83,7 +98,7 @@ process_result run_process(const process_request& request, cancel_token& cancel,
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = stdin_null.get();
+    startup.hStdInput = stdin_read.get();
     startup.hStdOutput = write_end.get();
     startup.hStdError = write_end.get();
     PROCESS_INFORMATION child{};
@@ -100,6 +115,13 @@ process_result run_process(const process_request& request, cancel_token& cancel,
     ResumeThread(thread.get());
     thread.reset();
     write_end.reset();
+
+    // Write stdin data if provided, then close the write end
+    if (!request.stdin_data.empty()) {
+        DWORD written = 0;
+        WriteFile(stdin_write.get(), request.stdin_data.data(), static_cast<DWORD>(request.stdin_data.size()), &written, nullptr);
+        stdin_write.reset();  // Close stdin so the child sees EOF
+    }
 
     std::mutex mutex;
     std::thread reader([&] {

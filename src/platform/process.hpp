@@ -16,6 +16,7 @@ struct process_request {
     std::vector<std::string> arguments;
     std::filesystem::path directory;
     std::chrono::milliseconds timeout{120000};
+    std::string stdin_data;  // Data to write to stdin; empty means close stdin immediately
 };
 
 struct process_result {
