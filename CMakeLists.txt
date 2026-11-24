@@ -56,7 +56,7 @@ add_executable(ode src/main.cpp
     src/app/interactive_files.cpp)
 target_link_libraries(ode PRIVATE cxxode_core)
 if(MINGW)
-    target_link_options(lay PRIVATE -static)
+    target_link_options(ode PRIVATE -static)
 endif()
 
 include(CTest)
