@@ -27,7 +27,8 @@ void interactive_ui::submit() {
             hint_at_ = steady::now();
             return;
         }
-        if (!command(text)) quit_ = true;
+        // Try user commands first, then builtin
+        if (!user_command(text) && !command(text)) quit_ = true;
         return;
     }
     if (busy_) {

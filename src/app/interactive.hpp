@@ -47,6 +47,7 @@ public:
     void note(std::string_view text, ui::tone tone = ui::tone::dim);
     void print_markdown(std::string_view text);
     bool command(const std::string& line);  // false: exit requested
+    bool user_command(const std::string& line);  // false: not a user command
 
 private:
     void handle(const ui::key& k);

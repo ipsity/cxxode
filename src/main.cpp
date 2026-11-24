@@ -1,4 +1,5 @@
 #include "app/app.hpp"
+#include "commands/command.hpp"
 #include "core/version.hpp"
 #include "skills/skill.hpp"
 #include "tools/tool.hpp"
@@ -154,6 +155,7 @@ int main(int argc, char** argv) {
     if (auto error = resolve_provider(a.config, a.config.provider, a.provider_cfg)) return fail(*error);
     a.model_provider = make_provider(a.provider_cfg);
     a.skills = load_skills(workspace);
+    a.commands = load_commands(workspace);
     a.core = std::make_unique<agent>(*a.model_provider, make_tools(a.skills), a.config.permissions, workspace);
     const auto& entry = a.config.providers.at(a.config.provider);
     a.set_model(!model.empty() ? model : !a.config.model.empty() ? a.config.model : entry.default_model);

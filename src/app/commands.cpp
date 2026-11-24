@@ -1,4 +1,5 @@
 #include "app/interactive.hpp"
+#include "commands/command.hpp"
 
 namespace lay {
 
@@ -99,6 +100,33 @@ bool interactive_ui::command(const std::string& line) {
         note("未知命令 " + name + "，/help 查看全部", tone::error);
     }
     return true;
+}
+
+bool interactive_ui::user_command(const std::string& line) {
+    const auto [name, arg] = split(line);
+    const auto cmd_name = name.substr(1);  // Remove leading /
+
+    for (const auto& cmd : app_.commands) {
+        if (cmd.name == cmd_name) {
+            const auto content = read_file(cmd.path);
+            if (!content) {
+                note("无法加载命令 " + cmd_name, tone::error);
+                return true;
+            }
+
+            auto [meta, body] = parse_frontmatter(*content);
+            std::map<std::string, std::string> vars;
+            vars["ARGUMENTS"] = arg;
+            const auto ws = app_.root.generic_u8string();
+            vars["WORKSPACE"] = std::string(ws.begin(), ws.end());
+
+            const auto expanded = expand_variables(body, vars);
+            start_turn(expanded);
+            return true;
+        }
+    }
+
+    return false;  // Not a user command
 }
 
 } // namespace lay
