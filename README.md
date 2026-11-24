@@ -2,7 +2,7 @@
 
 用 C++20 写的终端 coding agent。cxx (C++) + ode (颂诗) = code。
 
-**当前状态：V2 M2** — Skills、用户命令、@文件补全、Esc Esc 分叉已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
+**当前状态：V2 M3** — MCP 客户端、Hooks、权限规则已完成。完整设计见 [docs/BLUEPRINT_V2.md](docs/BLUEPRINT_V2.md)。
 
 V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p28`。
 
@@ -27,7 +27,13 @@ ode login anthropic
 
 ## 功能
 
-**M2（当前）**
+**M3（当前）**
+- **MCP 客户端**：通过 JSON-RPC 2.0 连接外部工具服务器（stdio 传输）
+- **Hooks**：在工具执行前后、用户提交消息、agent 停止时运行自定义脚本
+- **权限规则**：settings.json 中配置 allow/deny 规则，支持通配符和前缀匹配
+- 详细文档：[docs/M3_FEATURES.md](docs/M3_FEATURES.md)
+
+**M2**
 - **Skills**：从 `.claude/skills/` 和 `~/.claude/skills/` 加载 SKILL.md，通过 `skill` 工具调用
 - **用户斜杠命令**：从 `.claude/commands/` 加载自定义命令，支持 $ARGUMENTS、$WORKSPACE 变量
 - **扩展命令面板**：`/` 触发，显示内置命令 + skills（标记 skill）+ 用户命令

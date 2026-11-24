@@ -44,6 +44,7 @@ struct settings {
     std::map<std::string, provider_entry> providers;
     permission_rules permissions;
     std::vector<hook_config> hooks;  // Hooks loaded from settings.json
+    json mcp_servers;  // MCP server configurations from settings.json
     std::vector<std::filesystem::path> loaded_files;
     std::vector<std::string> warnings;
 };

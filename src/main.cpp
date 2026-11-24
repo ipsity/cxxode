@@ -156,7 +156,46 @@ int main(int argc, char** argv) {
     a.model_provider = make_provider(a.provider_cfg);
     a.skills = load_skills(workspace);
     a.commands = load_commands(workspace);
-    a.core = std::make_unique<agent>(*a.model_provider, make_tools(a.skills), a.config.permissions, workspace);
+
+    // Initialize MCP servers
+    if (!a.config.mcp_servers.is_null() && a.config.mcp_servers.is_object()) {
+        for (const auto& [name, config] : a.config.mcp_servers.items()) {
+            if (!config.is_object()) continue;
+            mcp_client::server_config cfg;
+            cfg.name = name;
+            cfg.command = config.value("command", "");
+            if (cfg.command.empty()) continue;
+            if (config.contains("args") && config["args"].is_array()) {
+                for (const auto& arg : config["args"]) {
+                    if (arg.is_string()) cfg.args.push_back(arg);
+                }
+            }
+            if (config.contains("env") && config["env"].is_object()) {
+                for (const auto& [k, v] : config["env"].items()) {
+                    if (v.is_string()) cfg.env[k] = v;
+                }
+            }
+            auto client = std::make_shared<mcp_client>(cfg);
+            if (client->initialize()) {
+                a.mcp_clients.push_back(std::move(client));
+            } else {
+                ui::write_stream(true, "ode: failed to initialize MCP server: " + name + "\n");
+            }
+        }
+    }
+
+    // Load subagent configs
+    a.agents = load_agents(workspace);
+
+    // Create agent with hooks and all tools (builtin + skills + MCP + subagents)
+    a.core = std::make_unique<agent>(
+        *a.model_provider,
+        make_tools(a.skills, a.mcp_clients, &a.agents, a.model_provider.get(), &a.config.permissions, &workspace),
+        a.config.permissions,
+        workspace,
+        a.config.hooks
+    );
+
     const auto& entry = a.config.providers.at(a.config.provider);
     a.set_model(!model.empty() ? model : !a.config.model.empty() ? a.config.model : entry.default_model);
     a.core->system = build_system_prompt(workspace, shell_name(), load_memory(workspace));

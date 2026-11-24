@@ -1,4 +1,5 @@
 #include "core/agent.hpp"
+#include "hooks/hooks.hpp"
 
 #include <future>
 #include <mutex>
@@ -18,8 +19,9 @@ std::string stop_text(stop_reason stop) {
 
 } // namespace
 
-agent::agent(provider& model_provider, std::vector<tool> tools, permission_rules& rules, fs::path root)
-    : provider_(model_provider), tools_(std::move(tools)), rules_(rules), root_(std::move(root)) {}
+agent::agent(provider& model_provider, std::vector<tool> tools, permission_rules& rules, fs::path root,
+             std::vector<hook_config> hooks)
+    : provider_(model_provider), tools_(std::move(tools)), rules_(rules), root_(std::move(root)), hooks_(std::move(hooks)) {}
 
 const tool* agent::find_tool(std::string_view name) const {
     for (const auto& t : tools_) if (t.name == name) return &t;
@@ -41,6 +43,18 @@ void agent::append(message m) {
 }
 
 turn_result agent::run(std::string user_text, agent_events& events, cancel_token& cancel) {
+    // Execute UserPromptSubmit hooks
+    for (const auto& hook : hooks_) {
+        if (hook.type != hook_type::user_prompt_submit) continue;
+        hook_context ctx;
+        ctx.type = hook_type::user_prompt_submit;
+        ctx.user_prompt = user_text;
+        auto result = execute_hook(hook, ctx, cancel);
+        if (!result.allow) {
+            return {stop_reason::error, result.message.empty() ? "Prompt blocked by hook" : result.message};
+        }
+    }
+
     message user{message::role::user, {}};
     if (!pending_note_.empty()) {
         user.blocks.push_back(block::make_text(pending_note_));
@@ -83,6 +97,14 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         if (reply.stop != stop_reason::tool_use) {
             if (steering.empty() || cancel.cancelled()) {
                 keep_backup();
+                // Execute Stop hooks before returning
+                for (const auto& hook : hooks_) {
+                    if (hook.type != hook_type::stop) continue;
+                    hook_context ctx;
+                    ctx.type = hook_type::stop;
+                    ctx.stop_reason = stop_text(reply.stop);
+                    execute_hook(hook, ctx, cancel);
+                }
                 return {reply.stop, stop_text(reply.stop)};
             }
             message next{message::role::user, {}};
@@ -102,10 +124,26 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         append(std::move(results));
         if (cancel.cancelled()) {
             keep_backup();
+            // Execute Stop hooks before returning
+            for (const auto& hook : hooks_) {
+                if (hook.type != hook_type::stop) continue;
+                hook_context ctx;
+                ctx.type = hook_type::stop;
+                ctx.stop_reason = "Cancelled.";
+                execute_hook(hook, ctx, cancel);
+            }
             return {stop_reason::cancelled, "Cancelled."};
         }
     }
     keep_backup();
+    // Execute Stop hooks before returning
+    for (const auto& hook : hooks_) {
+        if (hook.type != hook_type::stop) continue;
+        hook_context ctx;
+        ctx.type = hook_type::stop;
+        ctx.stop_reason = "Stopped after " + std::to_string(max_rounds_without_user) + " rounds without user input.";
+        execute_hook(hook, ctx, cancel);
+    }
     return {stop_reason::error, "Stopped after " + std::to_string(max_rounds_without_user) + " rounds without user input."};
 }
 
@@ -194,6 +232,23 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
         }
         case verdict::allow: break;
     }
+
+    // Execute PreToolUse hooks
+    for (const auto& hook : hooks_) {
+        if (hook.type != hook_type::pre_tool_use) continue;
+        hook_context ctx;
+        ctx.type = hook_type::pre_tool_use;
+        ctx.tool_name = call.name;
+        ctx.tool_input = call.input;
+        auto result = execute_hook(hook, ctx, cancel);
+        if (!result.allow) {
+            out = {result.message.empty() ? "Blocked by hook" : result.message, true, "已拒绝", {}};
+            if (events.tool_started) events.tool_started(*t, call.input);
+            if (events.tool_finished) events.tool_finished(*t, call.input, out);
+            return out;
+        }
+    }
+
     if (events.tool_started) events.tool_started(*t, call.input);
     tool_context ctx{root_, &cancel, t->access == tool_access::write ? &backup : nullptr, &seen, events.tool_progress};
     try {
@@ -202,6 +257,17 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
         out = {std::string("Tool failed: ") + e.what(), true, "失败", {}};
     }
     if (events.tool_finished) events.tool_finished(*t, call.input, out);
+
+    // Execute PostToolUse hooks
+    for (const auto& hook : hooks_) {
+        if (hook.type != hook_type::post_tool_use) continue;
+        hook_context hook_ctx;
+        hook_ctx.type = hook_type::post_tool_use;
+        hook_ctx.tool_name = call.name;
+        hook_ctx.tool_output = out;
+        execute_hook(hook, hook_ctx, cancel);  // PostToolUse hooks are informational, don't block
+    }
+
     return out;
 }
 

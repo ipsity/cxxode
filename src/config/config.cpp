@@ -81,6 +81,15 @@ void merge(settings& s, const json& j) {
             }
         }
     }
+    if (j.contains("mcpServers") && j["mcpServers"].is_object()) {
+        // Merge MCP server configs (later definitions override earlier)
+        if (s.mcp_servers.is_null()) {
+            s.mcp_servers = json::object();
+        }
+        for (const auto& [name, config] : j["mcpServers"].items()) {
+            s.mcp_servers[name] = config;
+        }
+    }
 }
 
 void merge_file(settings& s, const fs::path& path) {

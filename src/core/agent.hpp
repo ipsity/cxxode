@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/config.hpp"
 #include "core/permission.hpp"
 #include "core/session.hpp"
 #include "provider/provider.hpp"
@@ -33,7 +34,8 @@ struct turn_result {
 
 class agent {
 public:
-    agent(provider& model_provider, std::vector<tool> tools, permission_rules& rules, fs::path root);
+    agent(provider& model_provider, std::vector<tool> tools, permission_rules& rules, fs::path root,
+          std::vector<hook_config> hooks = {});
 
     std::string model;
     std::string system;
@@ -67,6 +69,7 @@ private:
     std::vector<turn_backup> backups_;
     std::map<fs::path, file_stamp> seen_;
     std::string pending_note_;
+    std::vector<hook_config> hooks_;
 };
 
 std::string build_system_prompt(const fs::path& root, std::string_view shell,

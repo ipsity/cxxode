@@ -1,0 +1,46 @@
+{
+  "model": "opus",
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(git *)",
+      "Bash(cmake *)",
+      "Bash(ctest *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "command": "node",
+        "args": ["hooks/validate-tool.js"],
+        "cwd": ""
+      }
+    ],
+    "PostToolUse": [
+      {
+        "command": "node",
+        "args": ["hooks/log-tool.js"]
+      }
+    ],
+    "Stop": [
+      {
+        "command": "node",
+        "args": ["hooks/on-stop.js"]
+      }
+    ]
+  },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": {}
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
