@@ -1,0 +1,173 @@
+#include "config/config.hpp"
+#include "core/session.hpp"
+#include "tools/tool.hpp"
+
+#include <cstdlib>
+#include <memory>
+
+#ifdef _WIN32
+#include "platform/text.hpp"
+#include <wincred.h>
+#endif
+
+namespace lay {
+namespace {
+
+std::string env(const std::string& name) {
+    if (name.empty()) return {};
+    const char* v = std::getenv(name.c_str());
+    return v ? v : "";
+}
+
+fs::path user_home() { return lay_home().parent_path(); }
+
+void merge(settings& s, const json& j) {
+    if (j.contains("provider") && j["provider"].is_string()) s.provider = j["provider"];
+    if (j.contains("model") && j["model"].is_string()) s.model = j["model"];
+    if (j.contains("env") && j["env"].is_object()) {
+        for (const auto& [k, v] : j["env"].items()) {
+            if (!v.is_string()) continue;
+#ifdef _WIN32
+            _putenv_s(k.c_str(), v.get<std::string>().c_str());
+#else
+            setenv(k.c_str(), v.get<std::string>().c_str(), 1);
+#endif
+        }
+    }
+    if (j.contains("providers") && j["providers"].is_object()) {
+        for (const auto& [name, p] : j["providers"].items()) {
+            auto& e = s.providers[name];
+            e.name = name;
+            if (auto k = parse_protocol(p.value("protocol", ""))) e.kind = *k;
+            e.base_url = p.value("base_url", e.base_url);
+            e.api_key_env = p.value("api_key_env", e.api_key_env);
+            e.default_model = p.value("model", e.default_model);
+        }
+    }
+    if (j.contains("permissions") && j["permissions"].is_object()) {
+        const auto& p = j["permissions"];
+        for (const auto& key : {"allow", "deny"}) {
+            if (!p.contains(key) || !p[key].is_array()) continue;
+            auto& list = std::string_view(key) == "allow" ? s.permissions.allow : s.permissions.deny;
+            for (const auto& r : p[key]) if (r.is_string()) list.push_back(r);
+        }
+        if (auto m = parse_mode(p.value("defaultMode", ""))) s.permissions.mode = *m;
+    }
+}
+
+void merge_file(settings& s, const fs::path& path) {
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return;
+    const auto text = read_file(path);
+    auto j = json::parse(text.value_or(""), nullptr, false, true);
+    if (j.is_discarded() || !j.is_object()) {
+        s.warnings.push_back("Ignored invalid JSON in " + path.string());
+        return;
+    }
+    merge(s, j);
+    s.loaded_files.push_back(path);
+}
+
+} // namespace
+
+std::optional<protocol> parse_protocol(std::string_view text) {
+    if (text == "anthropic" || text == "messages") return protocol::anthropic;
+    if (text == "openai-chat" || text == "chat-completions" || text == "chat") return protocol::openai_chat;
+    if (text == "openai-responses" || text == "responses" || text == "openai") return protocol::openai_responses;
+    return std::nullopt;
+}
+
+settings load_settings(const fs::path& workspace) {
+    settings s;
+    s.providers["anthropic"] = {"anthropic", protocol::anthropic,
+                                env("ANTHROPIC_BASE_URL").empty() ? "https://api.anthropic.com" : env("ANTHROPIC_BASE_URL"),
+                                "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "claude-sonnet-4-6"};
+    s.providers["openai"] = {"openai", protocol::openai_responses,
+                             env("OPENAI_BASE_URL").empty() ? "https://api.openai.com/v1" : env("OPENAI_BASE_URL"),
+                             "OPENAI_API_KEY", "", "gpt-5"};
+    // Claude Code's own model variables, so an existing gateway setup works unchanged.
+    for (const auto* var : {"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_MODEL"}) {
+        if (!env(var).empty()) s.providers["anthropic"].default_model = env(var);
+    }
+    const auto home = user_home();
+    merge_file(s, home / ".claude" / "settings.json");
+    merge_file(s, lay_home() / "settings.json");
+    merge_file(s, workspace / ".claude" / "settings.json");
+    merge_file(s, workspace / ".claude" / "settings.local.json");
+    merge_file(s, workspace / ".lay" / "settings.json");
+    if (s.providers.contains(s.provider) == false) {
+        s.warnings.push_back("Unknown provider '" + s.provider + "'; using anthropic.");
+        s.provider = "anthropic";
+    }
+    return s;
+}
+
+std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out) {
+    const auto it = s.providers.find(name);
+    if (it == s.providers.end()) return "Unknown provider: " + name;
+    const auto& e = it->second;
+    out.name = e.name;
+    out.kind = e.kind;
+    out.base_url = e.base_url;
+    if (!env(e.api_key_env).empty()) {
+        out.api_key = env(e.api_key_env);
+        return std::nullopt;
+    }
+    if (!env(e.auth_token_env).empty()) {
+        out.api_key = env(e.auth_token_env);
+        out.bearer = true;
+        return std::nullopt;
+    }
+#ifdef _WIN32
+    PCREDENTIALW cred = nullptr;
+    const auto target = widen("lay/" + name);
+    if (CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &cred)) {
+        std::unique_ptr<CREDENTIALW, decltype(&CredFree)> owner(cred, CredFree);
+        out.api_key.assign(reinterpret_cast<const char*>(cred->CredentialBlob), cred->CredentialBlobSize);
+        return std::nullopt;
+    }
+#endif
+    if (e.api_key_env.empty()) return std::nullopt;  // unauthenticated local server
+    return "No API key for " + name + ". Set " + e.api_key_env + " or run: lay login " + name;
+}
+
+bool save_credential(const std::string& provider, const std::string& key) {
+#ifdef _WIN32
+    auto target = widen("lay/" + provider);
+    CREDENTIALW cred{};
+    cred.Type = CRED_TYPE_GENERIC;
+    cred.TargetName = target.data();
+    cred.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char*>(key.data()));
+    cred.CredentialBlobSize = static_cast<DWORD>(key.size());
+    cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    return CredWriteW(&cred, 0) != 0;
+#else
+    (void)provider;
+    (void)key;
+    return false;
+#endif
+}
+
+std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& workspace) {
+    std::vector<std::pair<fs::path, std::string>> out;
+    const auto add = [&](const fs::path& p) {
+        std::error_code ec;
+        if (!fs::is_regular_file(p, ec)) return;
+        if (auto text = read_file(p); text && !text->empty()) out.emplace_back(p, clip(*text, 40000));
+    };
+    add(user_home() / ".claude" / "CLAUDE.md");
+    add(lay_home() / "LAY.md");
+    // Ancestors first so the nearest file has the last word.
+    std::vector<fs::path> dirs;
+    for (auto d = workspace; ; d = d.parent_path()) {
+        dirs.push_back(d);
+        if (d == d.parent_path() || fs::exists(d / ".git")) break;
+    }
+    for (auto it = dirs.rbegin(); it != dirs.rend(); ++it) {
+        for (const auto* name : {"CLAUDE.md", "AGENTS.md", "LAY.md", "CLAUDE.local.md"}) add(*it / name);
+        add(*it / ".claude" / "CLAUDE.md");
+    }
+    return out;
+}
+
+} // namespace lay

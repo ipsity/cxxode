@@ -1,0 +1,45 @@
+#pragma once
+
+#include "core/permission.hpp"
+#include "provider/provider.hpp"
+
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace lay {
+
+struct provider_entry {
+    std::string name;
+    protocol kind = protocol::anthropic;
+    std::string base_url;
+    std::string api_key_env;     // environment variable holding the key
+    std::string auth_token_env;  // Anthropic bearer token variable
+    std::string default_model;
+};
+
+struct settings {
+    std::string provider = "anthropic";
+    std::string model;
+    std::map<std::string, provider_entry> providers;
+    permission_rules permissions;
+    std::vector<std::filesystem::path> loaded_files;
+    std::vector<std::string> warnings;
+};
+
+// Merges ~/.lay, ~/.claude and the workspace's .claude/.lay settings files.
+settings load_settings(const std::filesystem::path& workspace);
+
+// Resolves the API key: environment variable first, then Windows Credential Manager.
+// Returns an error message on failure.
+std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out);
+bool save_credential(const std::string& provider, const std::string& key);
+
+std::optional<protocol> parse_protocol(std::string_view text);
+
+// CLAUDE.md, AGENTS.md and LAY.md files that apply to the workspace, user level first.
+std::vector<std::pair<std::filesystem::path, std::string>> load_memory(const std::filesystem::path& workspace);
+
+} // namespace lay

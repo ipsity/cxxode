@@ -11,9 +11,35 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-add_library(lay_core STATIC src/core/version.cpp)
+set(LAY_PLATFORM_SOURCES)
+if(WIN32)
+    list(APPEND LAY_PLATFORM_SOURCES src/platform/http_winhttp.cpp src/platform/process_windows.cpp)
+endif()
+
+add_library(lay_core STATIC
+    src/core/version.cpp
+    src/core/message.cpp
+    src/core/permission.cpp
+    src/core/session.cpp
+    src/core/agent.cpp
+    src/core/prompt.cpp
+    src/config/config.cpp
+    src/provider/provider.cpp
+    src/provider/anthropic.cpp
+    src/provider/openai_chat.cpp
+    src/provider/openai_responses.cpp
+    src/tools/files.cpp
+    src/tools/edit_tools.cpp
+    src/tools/search_tools.cpp
+    src/tools/bash_tool.cpp
+    ${LAY_PLATFORM_SOURCES})
 target_include_directories(lay_core PUBLIC src)
+target_include_directories(lay_core SYSTEM PUBLIC third_party)
 target_compile_definitions(lay_core PUBLIC LAY_VERSION="${PROJECT_VERSION}")
+if(WIN32)
+    target_compile_definitions(lay_core PUBLIC UNICODE _UNICODE)
+    target_link_libraries(lay_core PUBLIC winhttp advapi32)
+endif()
 
 add_executable(lay src/main.cpp)
 target_link_libraries(lay PRIVATE lay_core)
@@ -23,9 +49,17 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(lay_tests tests/main.cpp tests/version_test.cpp)
-    target_include_directories(lay_tests PRIVATE third_party/doctest)
+    add_executable(lay_tests
+        tests/main.cpp
+        tests/core/version_test.cpp
+        tests/core/agent_test.cpp
+        tests/provider/provider_test.cpp
+        tests/tools/tools_test.cpp)
+    target_include_directories(lay_tests SYSTEM PRIVATE third_party/doctest)
     target_link_libraries(lay_tests PRIVATE lay_core)
+    if(MINGW)
+        target_link_options(lay_tests PRIVATE -static)
+    endif()
     add_test(NAME unit COMMAND lay_tests)
     add_test(NAME cli.version COMMAND lay --version)
     set_tests_properties(cli.version PROPERTIES PASS_REGULAR_EXPRESSION "^lay ${PROJECT_VERSION}")
