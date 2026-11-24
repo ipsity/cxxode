@@ -143,6 +143,36 @@ bool interactive_ui::command(const std::string& line) {
             start_turn("Commit changes with message: " + arg);
         }
     }
+    else if (name == "/lint" || name == "/l") {
+        // /lint [file] - 代码检查
+        if (arg.empty()) {
+            note("工作流: 检查所有代码", tone::dim);
+            start_turn("Run linter on all files and show issues");
+        } else {
+            note("工作流: 检查 " + arg, tone::dim);
+            start_turn("Run linter on " + arg + " and suggest fixes");
+        }
+    }
+    else if (name == "/format" || name == "/fmt") {
+        // /format [file] - 代码格式化
+        if (arg.empty()) {
+            note("工作流: 格式化所有代码", tone::dim);
+            start_turn("Format all code files according to style guide");
+        } else {
+            note("工作流: 格式化 " + arg, tone::dim);
+            start_turn("Format " + arg + " according to style guide");
+        }
+    }
+    else if (name == "/doc" || name == "/d") {
+        // /doc [file] - 生成文档
+        if (arg.empty()) {
+            note("工作流: 生成项目文档", tone::dim);
+            start_turn("Generate or update project documentation");
+        } else {
+            note("工作流: 为 " + arg + " 生成文档", tone::dim);
+            start_turn("Generate or update documentation for " + arg);
+        }
+    }
     else if (name == "/clear") {
         core.messages.clear();
         core.total = {};
