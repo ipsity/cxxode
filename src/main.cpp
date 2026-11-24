@@ -22,7 +22,7 @@ using namespace lay;
 namespace {
 
 constexpr const char* usage_text =
-    "lay — a terminal coding agent\n"
+    "ode — a terminal coding agent\n"
     "\n"
     "  lay [prompt]              interactive session in the current directory\n"
     "  lay -p \"prompt\"           print mode: answer to stdout, tool calls to stderr\n"
@@ -36,7 +36,7 @@ constexpr const char* usage_text =
     "  --no-color                plain output (also NO_COLOR=1)\n"
     "  -v, --version\n"
     "\n"
-    "Settings: ~/.lay/settings.json, .claude/settings.json, .lay/settings.json\n";
+    "Settings: ~/.ode/settings.json, .claude/settings.json, .ode/settings.json\n";
 
 std::vector<std::string> utf8_args(int argc, char** argv) {
 #ifdef _WIN32
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
         };
         try {
             if (a == "-v" || a == "--version") {
-                ui::write_stream(false, "lay " + std::string(version()) + "\n");
+                ui::write_stream(false, "ode " + std::string(version()) + "\n");
                 return 0;
             } else if (a == "-h" || a == "--help") {
                 ui::write_stream(false, usage_text);
@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
         ui::write_stream(true, "\n");
         if (key.empty()) return fail("no key entered");
         if (!save_credential(name, key)) return fail("could not save the key");
-        ui::write_stream(true, "Saved to Windows Credential Manager as lay/" + name + "\n");
+        ui::write_stream(true, "Saved to Windows Credential Manager as ode/" + name + "\n");
         return 0;
     }
     if (!mode_text.empty()) {

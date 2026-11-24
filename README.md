@@ -10,19 +10,19 @@ V1（P0–P28）的最后状态保存在 tag `v1-final` 和分支 `archive/v1-p2
 
 ```bash
 # 交互模式
-lay
+ode
 
 # 带初始提示
-lay "解释 main.cpp 的流程"
+ode "解释 main.cpp 的流程"
 
 # 无头模式（输出到 stdout）
-lay -p "README.md 里的构建步骤过时了吗？"
+ode -p "README.md 里的构建步骤过时了吗？"
 
 # 继续最近的会话
-lay -c
+ode -c
 
 # 登录（保存 API key）
-lay login anthropic
+ode login anthropic
 ```
 
 ## 功能
@@ -39,7 +39,7 @@ lay login anthropic
 - 工具：Read/Write/Edit/Bash/Grep/Glob，支持并行读取
 - 权限系统：plan/default/yolo 三档，allow/deny 规则，Shift+Tab 切换
 - 会话：JSONL 日志，自动压缩（85% 上下文触发）
-- 配置：多级 settings.json（~/.claude, ~/.lay, .claude, .lay）
+- 配置：多级 settings.json（~/.claude, ~/.ode, .claude, .ode）
 - 模型别名：opus/sonnet/haiku/fable → 通过 `ANTHROPIC_DEFAULT_*_MODEL` 解析
 
 **按键**
@@ -62,5 +62,5 @@ lay login anthropic
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
-./build/dev/lay.exe --version
+./build/dev/ode.exe --version
 ```
