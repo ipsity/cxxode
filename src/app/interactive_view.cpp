@@ -220,22 +220,25 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     const int status_line_height = 1;
     const int reserved_bottom = input_box_height + status_line_height;
 
-    // Calculate available space for content (ensure at least some space)
-    const int min_content_rows = 5;  // Minimum rows for content
-    const int available_rows = std::max(min_content_rows, size_.rows - reserved_bottom);
+    // Calculate available space for content
+    const int available_rows = size_.rows - reserved_bottom;
 
-    // Only trim if we have too much content
+    // Trim or pad content to fit exactly in available space
     if (static_cast<int>(rows.size()) > available_rows) {
-        // Keep the most recent content
+        // Too much content - remove from top
         const int to_remove = static_cast<int>(rows.size()) - available_rows;
         rows.erase(rows.begin(), rows.begin() + to_remove);
+    } else {
+        // Not enough content - add padding to push input to bottom
+        while (static_cast<int>(rows.size()) < available_rows) {
+            rows.push_back("");
+        }
     }
 
-    // Don't add extra padding - let content flow naturally
     const int content_end = static_cast<int>(rows.size());
 
-    // Draw input box with borders
-    // Top border (can move up with more input lines)
+    // Draw input box with borders (now guaranteed at bottom)
+    // Top border
     std::string top_border;
     for (int i = 0; i < columns; ++i) top_border += "─";
     rows.push_back(paint(tone::dim, top_border));
@@ -254,7 +257,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
-    // Bottom border (fixed at bottom)
+    // Bottom border
     std::string bottom_border;
     for (int i = 0; i < columns; ++i) bottom_border += "─";
     rows.push_back(paint(tone::dim, bottom_border));
@@ -263,7 +266,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     rows.push_back(status_line(columns));
 
     // Calculate cursor position
-    cursor_row = ask_ ? -1 : content_end + 1 + l.cursor_row;  // +1 for top border
+    cursor_row = ask_ || selection_ ? -1 : content_end + 1 + l.cursor_row;  // +1 for top border
     cursor_col = l.cursor_column + 2;  // +2 for "› " width
 
     return rows;
