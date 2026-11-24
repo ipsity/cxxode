@@ -45,6 +45,6 @@ struct hook_config {
 hook_result execute_hook(const hook_config& config, const hook_context& ctx, cancel_token& cancel);
 
 // Load hooks from settings
-std::vector<hook_config> load_hooks(const settings& config);
+std::vector<hook_config> load_hooks(const settings&);
 
 } // namespace lay
