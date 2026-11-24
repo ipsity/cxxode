@@ -168,3 +168,41 @@ theme load_theme(const std::string& name) {
     auto themes = available_themes();
     auto it = themes.find(name);
     if (it != themes.end()) return it->second;
+    return dark_theme();
+}
+
+bool save_theme_selection(const std::string& theme_name) {
+    const auto home = std::getenv("HOME");
+    if (!home) return false;
+
+    const std::filesystem::path ode_dir = std::filesystem::path(home) / ".ode";
+    std::filesystem::create_directories(ode_dir);
+
+    const auto theme_file = ode_dir / "theme";
+    std::ofstream out(theme_file);
+    if (!out) return false;
+
+    out << theme_name << "\n";
+    return true;
+}
+
+std::string load_theme_selection() {
+    const auto home = std::getenv("HOME");
+    if (!home) return "dark";
+
+    const std::filesystem::path theme_file = std::filesystem::path(home) / ".ode" / "theme";
+    std::ifstream in(theme_file);
+    if (!in) return "dark";
+
+    std::string theme_name;
+    std::getline(in, theme_name);
+
+    auto themes = available_themes();
+    if (themes.find(theme_name) != themes.end()) {
+        return theme_name;
+    }
+
+    return "dark";
+}
+
+} // namespace ode
