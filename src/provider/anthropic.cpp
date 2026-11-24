@@ -63,7 +63,7 @@ public:
                 const auto text = delta.value("thinking", "");
                 b.text += text;
                 if (events_.thinking) {
-                    const auto sig = block.value("signature", std::string{});
+                    const std::string sig = block.value("signature", "");
                     events_.thinking(text, sig);
                 }
             } else if (kind == "signature_delta") {
