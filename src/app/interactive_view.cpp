@@ -335,9 +335,6 @@ std::vector<std::string> interactive_ui::palette_rows(int columns) {
     return rows;
 }
 
-    return rows;
-}
-
 std::string interactive_ui::status_line(int columns) const {
     const auto mode = app_.core ? app_.config.permissions.mode() : permission_mode::normal;
     std::string right = std::string(mode_name(mode)) + " · " + app_.core->model;
