@@ -83,13 +83,31 @@ void interactive_ui::apply(ev_thinking& e) {
 void interactive_ui::apply(ev_tool_start& e) {
     thinking_ = false;
     flush_stream(true);
-    running_.push_back({e.name, e.label, steady::now()});
+    running_.push_back({e.name, e.label, steady::now(), -1, "", 0, 0, 0, 0});
     progress_tail_.clear();
 }
 
 void interactive_ui::apply(ev_progress& e) {
-    progress_tail_ += e.text;
-    if (progress_tail_.size() > 4096) progress_tail_.erase(0, progress_tail_.size() - 4096);
+    // 处理传统文本进度（兼容）
+    if (!e.text.empty()) {
+        progress_tail_ += e.text;
+        if (progress_tail_.size() > 4096) progress_tail_.erase(0, progress_tail_.size() - 4096);
+    }
+
+    // 更新详细进度信息到对应的 running_tool
+    if (e.percent >= 0 && !e.tool_name.empty()) {
+        for (auto& tool : running_) {
+            if (tool.name == e.tool_name) {
+                tool.percent = e.percent;
+                tool.current_step = e.current_step;
+                tool.elapsed_ms = e.elapsed_ms;
+                tool.estimated_ms = e.estimated_ms;
+                tool.bytes_io = e.bytes_io;
+                tool.memory_kb = e.memory_kb;
+                break;
+            }
+        }
+    }
 }
 
 void interactive_ui::apply(ev_tool_done& e) {
