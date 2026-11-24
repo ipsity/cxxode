@@ -43,6 +43,7 @@ void merge(settings& s, const json& j) {
             e.base_url = p.value("base_url", e.base_url);
             e.api_key_env = p.value("api_key_env", e.api_key_env);
             e.default_model = p.value("model", e.default_model);
+            e.api_key = p.value("api_key", e.api_key);  // Parse direct API key
         }
     }
     if (j.contains("permissions") && j["permissions"].is_object()) {
@@ -182,15 +183,27 @@ std::optional<std::string> resolve_provider(const settings& s, const std::string
     out.name = e.name;
     out.kind = e.kind;
     out.base_url = e.base_url;
-    if (!env(e.api_key_env).empty()) {
+
+    // Priority 1: Direct API key in config file
+    if (!e.api_key.empty()) {
+        out.api_key = e.api_key;
+        return std::nullopt;
+    }
+
+    // Priority 2: Environment variable
+    if (!e.api_key_env.empty() && !env(e.api_key_env).empty()) {
         out.api_key = env(e.api_key_env);
         return std::nullopt;
     }
-    if (!env(e.auth_token_env).empty()) {
+
+    // Priority 3: Auth token environment variable
+    if (!e.auth_token_env.empty() && !env(e.auth_token_env).empty()) {
         out.api_key = env(e.auth_token_env);
         out.bearer = true;
         return std::nullopt;
     }
+
+    // Priority 4: Windows Credential Manager
 #ifdef _WIN32
     PCREDENTIALW cred = nullptr;
     const auto target = widen("ode/" + name);
@@ -200,7 +213,11 @@ std::optional<std::string> resolve_provider(const settings& s, const std::string
         return std::nullopt;
     }
 #endif
-    if (e.api_key_env.empty()) return std::nullopt;  // unauthenticated local server
+
+    // Priority 5: Unauthenticated (for local servers)
+    if (e.api_key_env.empty() && e.api_key.empty()) return std::nullopt;
+
+    // No API key found
     return "No API key for " + name + ". Set " + e.api_key_env + " or run: ode login " + name;
 }
 
