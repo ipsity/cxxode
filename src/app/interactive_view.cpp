@@ -289,16 +289,51 @@ std::vector<std::string> interactive_ui::palette_rows(int columns) {
     if (items.empty()) return rows;
     if (palette_index_ >= items.size()) palette_index_ = 0;
 
-    for (std::size_t i = 0; i < items.size() && i < 8; ++i) {
-        const bool on = i == palette_index_;
+    // 🎨 Pi 风格：固定显示数量，滚动窗口
+    constexpr size_t MAX_VISIBLE = 6;  // 固定显示 6 个命令
+
+    // 计算滚动窗口的起始位置
+    size_t start_index = 0;
+    if (items.size() > MAX_VISIBLE && palette_index_ >= MAX_VISIBLE - 1) {
+        // 当选中项在第 6 个或之后，窗口开始滚动
+        // 保持选中项在窗口底部
+        start_index = palette_index_ - (MAX_VISIBLE - 1);
+        // 但不要超出列表末尾
+        if (start_index + MAX_VISIBLE > items.size()) {
+            start_index = items.size() - MAX_VISIBLE;
+        }
+    }
+
+    size_t visible_count = std::min(MAX_VISIBLE, items.size() - start_index);
+
+    // 渲染可见的命令
+    for (std::size_t i = 0; i < visible_count; ++i) {
+        const std::size_t item_index = start_index + i;
+        const bool on = item_index == palette_index_;
+
         // Split by tab
-        const auto tab = items[i].find('\t');
-        const auto name = items[i].substr(0, tab);
-        const auto desc = tab != std::string::npos ? items[i].substr(tab + 1) : std::string{};
+        const auto tab = items[item_index].find('\t');
+        const auto name = items[item_index].substr(0, tab);
+        const auto desc = tab != std::string::npos ? items[item_index].substr(tab + 1) : std::string{};
+
+        // Pi 风格：选中项用 ▶ 标记
+        std::string prefix = on ? "▶ " : "  ";
 
         auto padded_name = name;
         padded_name.resize(std::max<std::size_t>(padded_name.size(), 10), ' ');
-        auto row = "  " + paint(on ? tone::accent_bold : tone::normal, padded_name) + "  " + paint(tone::dim, desc);
+        auto row = prefix + paint(on ? tone::accent_bold : tone::normal, padded_name) + "  " + paint(tone::dim, desc);
+        rows.push_back(text::width(padded_name) + 4 > columns ? text::keep_head(row, columns) : row);
+    }
+
+    // 显示滚动指示器（有更多内容时）
+    if (items.size() > MAX_VISIBLE) {
+        std::string indicator = "  " + paint(tone::dim,
+            "[" + std::to_string(palette_index_ + 1) + "/" + std::to_string(items.size()) + "]");
+        rows.push_back(indicator);
+    }
+
+    return rows;
+}
         rows.push_back(text::width(padded_name) + 4 > columns ? text::keep_head(row, columns) : row);
     }
     return rows;
