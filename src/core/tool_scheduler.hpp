@@ -2,10 +2,12 @@
 
 #include "core/tool_access.hpp"
 #include <vector>
+#include <map>
 #include <memory>
 #include <functional>
 #include <future>
 #include <chrono>
+#include <mutex>
 
 namespace ode {
 
