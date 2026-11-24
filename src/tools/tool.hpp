@@ -2,6 +2,7 @@
 
 #include "core/cancel.hpp"
 #include "core/message.hpp"
+#include "core/tool_access.hpp"  // 新增：四维权限系统
 
 #include <filesystem>
 #include <functional>
