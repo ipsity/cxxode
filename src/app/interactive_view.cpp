@@ -16,9 +16,17 @@ struct palette_item {
 };
 
 const std::pair<const char*, const char*> builtin_commands[] = {
-    {"/help", "快捷键与命令"},       {"/compact", "压缩上下文"},   {"/model", "查看或切换模型"},
-    {"/mode", "切换权限档 plan/default/yolo"}, {"/resume", "恢复本目录的会话"}, {"/undo", "撤销上一轮的文件改动"},
-    {"/clear", "开始新会话"},         {"/cost", "本会话 token 用量"}, {"/exit", "退出"},
+    {"/help", "快捷键与命令"},
+    {"/compact", "压缩上下文"},
+    {"/model", "查看或切换模型"},
+    {"/login", "登录 provider"},
+    {"/logout", "查看当前 provider"},
+    {"/mode", "切换权限档 plan/default/yolo"},
+    {"/resume", "恢复本目录的会话"},
+    {"/undo", "撤销上一轮的文件改动"},
+    {"/clear", "开始新会话"},
+    {"/cost", "本会话 token 用量"},
+    {"/exit", "退出"},
 };
 
 std::string spinner(steady::time_point since) {
