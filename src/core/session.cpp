@@ -14,11 +14,15 @@ namespace lay {
 
 namespace fs = std::filesystem;
 
-session_log::~session_log() {
+session_log::~session_log() { close(); }
+
+void session_log::close() {
     if (file_) std::fclose(file_);
+    file_ = nullptr;
 }
 
 bool session_log::open(const fs::path& path) {
+    close();
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
 #ifdef _WIN32

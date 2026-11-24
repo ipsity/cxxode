@@ -94,7 +94,7 @@ TEST_CASE("incomplete reply dispatches nothing") {
     p.replies.push_back(reply({block::make_tool_use("1", "Write", {{"file_path", "x.txt"}, {"content", "x"}})},
                               stop_reason::error, false));
     permission_rules rules;
-    rules.mode = permission_mode::yolo;
+    rules.set_mode(permission_mode::yolo);
     agent a(p, builtin_tools(), rules, dir.path);
     agent_events ev;
     cancel_token cancel;
@@ -160,10 +160,10 @@ TEST_CASE("permission rules") {
     CHECK(r.check(bash, {{"command", "cmake --build build/dev"}}, root) == verdict::allow);
     CHECK(r.check(bash, {{"command", "cmake --build build && rm x"}}, root) == verdict::ask);
     r.deny.push_back("Bash(git push:*)");
-    r.mode = permission_mode::yolo;
+    r.set_mode(permission_mode::yolo);
     CHECK(r.check(bash, {{"command", "git push origin main"}}, root) == verdict::deny);
     CHECK(r.check(bash, {{"command", "rm -rf build"}}, root) == verdict::allow);
-    r.mode = permission_mode::plan;
+    r.set_mode(permission_mode::plan);
     CHECK(r.check(edit, {{"file_path", "x"}}, root) == verdict::deny);
     CHECK(r.check(read, {{"file_path", "x"}}, root) == verdict::allow);
     CHECK(command_segments("a 'b;c' | d && e") == std::vector<std::string>{"a 'b;c'", "d", "e"});

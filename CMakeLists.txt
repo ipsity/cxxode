@@ -13,7 +13,7 @@ endif()
 
 set(LAY_PLATFORM_SOURCES)
 if(WIN32)
-    list(APPEND LAY_PLATFORM_SOURCES src/platform/http_winhttp.cpp src/platform/process_windows.cpp)
+    list(APPEND LAY_PLATFORM_SOURCES src/platform/http_winhttp.cpp src/platform/process_windows.cpp src/ui/term_windows.cpp)
 endif()
 
 add_library(lay_core STATIC
@@ -32,16 +32,24 @@ add_library(lay_core STATIC
     src/tools/edit_tools.cpp
     src/tools/search_tools.cpp
     src/tools/bash_tool.cpp
+    src/ui/render.cpp
     ${LAY_PLATFORM_SOURCES})
 target_include_directories(lay_core PUBLIC src)
 target_include_directories(lay_core SYSTEM PUBLIC third_party)
 target_compile_definitions(lay_core PUBLIC LAY_VERSION="${PROJECT_VERSION}")
 if(WIN32)
     target_compile_definitions(lay_core PUBLIC UNICODE _UNICODE)
-    target_link_libraries(lay_core PUBLIC winhttp advapi32)
+    target_link_libraries(lay_core PUBLIC winhttp advapi32 shell32)
 endif()
 
-add_executable(lay src/main.cpp)
+add_executable(lay src/main.cpp
+    src/app/app.cpp
+    src/app/format.cpp
+    src/app/commands.cpp
+    src/app/interactive.cpp
+    src/app/interactive_events.cpp
+    src/app/interactive_input.cpp
+    src/app/interactive_view.cpp)
 target_link_libraries(lay PRIVATE lay_core)
 if(MINGW)
     target_link_options(lay PRIVATE -static)
@@ -54,7 +62,8 @@ if(BUILD_TESTING)
         tests/core/version_test.cpp
         tests/core/agent_test.cpp
         tests/provider/provider_test.cpp
-        tests/tools/tools_test.cpp)
+        tests/tools/tools_test.cpp
+        tests/ui/ui_test.cpp)
     target_include_directories(lay_tests SYSTEM PRIVATE third_party/doctest)
     target_link_libraries(lay_tests PRIVATE lay_core)
     if(MINGW)

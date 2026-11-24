@@ -110,6 +110,7 @@ verdict permission_rules::check(const tool& t, const json& input, const fs::path
         if (rule_matches(r, t, input)) return verdict::deny;
     }
     if (t.access == tool_access::read) return verdict::allow;
+    const auto mode = this->mode();
     if (mode == permission_mode::plan) return verdict::deny;
     if (mode == permission_mode::yolo) return verdict::allow;
     for (const auto& r : allow) {

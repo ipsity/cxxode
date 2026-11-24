@@ -51,7 +51,7 @@ void merge(settings& s, const json& j) {
             auto& list = std::string_view(key) == "allow" ? s.permissions.allow : s.permissions.deny;
             for (const auto& r : p[key]) if (r.is_string()) list.push_back(r);
         }
-        if (auto m = parse_mode(p.value("defaultMode", ""))) s.permissions.mode = *m;
+        if (auto m = parse_mode(p.value("defaultMode", ""))) s.permissions.set_mode(*m);
     }
 }
 
@@ -75,6 +75,26 @@ std::optional<protocol> parse_protocol(std::string_view text) {
     if (text == "openai-chat" || text == "chat-completions" || text == "chat") return protocol::openai_chat;
     if (text == "openai-responses" || text == "responses" || text == "openai") return protocol::openai_responses;
     return std::nullopt;
+}
+
+std::string resolve_model_alias(const std::string& model) {
+    struct alias { const char* name; const char* variable; const char* fallback; };
+    static constexpr alias aliases[] = {
+        {"opus", "ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-4-8"},
+        {"sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6"},
+        {"haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-haiku-4-5-20251001"},
+        {"fable", "ANTHROPIC_DEFAULT_FABLE_MODEL", "claude-fable-5"},
+    };
+    // "opus[1m]" keeps its window suffix after resolution.
+    const auto bracket = model.find('[');
+    const auto base = model.substr(0, bracket);
+    const auto suffix = bracket == std::string::npos ? std::string{} : model.substr(bracket);
+    for (const auto& a : aliases) {
+        if (base != a.name) continue;
+        const auto mapped = env(a.variable);
+        return (mapped.empty() ? std::string(a.fallback) : mapped) + suffix;
+    }
+    return model;
 }
 
 settings load_settings(const fs::path& workspace) {

@@ -1,0 +1,108 @@
+#pragma once
+
+#include "app/app.hpp"
+#include "app/screen.hpp"
+#include "ui/editor.hpp"
+#include "ui/render.hpp"
+
+#include <chrono>
+#include <deque>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <variant>
+
+namespace lay {
+
+using steady = std::chrono::steady_clock;
+
+// Events travel from the agent thread to the UI thread through this queue.
+struct ev_text { std::string text; };
+struct ev_thinking {};
+struct ev_request {};
+struct ev_tool_start { std::string name, label; };
+struct ev_progress { std::string text; };
+struct ev_tool_done { std::string name, label, summary, detail, full; bool error = false; };
+struct ev_ask { std::string name, label, rule; std::shared_ptr<std::promise<answer>> reply; };
+struct ev_usage { std::size_t context = 0, input = 0, output = 0; };
+struct ev_done { turn_result result; bool compact = false; };
+using ui_event = std::variant<ev_text, ev_thinking, ev_request, ev_tool_start, ev_progress, ev_tool_done, ev_ask,
+                              ev_usage, ev_done>;
+
+struct running_tool {
+    std::string name, label;
+    steady::time_point started;
+};
+
+class interactive_ui {
+public:
+    interactive_ui(app& a, ui::terminal& term);
+    ~interactive_ui();
+    int run(std::string first_prompt);
+
+    // Output helpers used by the slash commands.
+    void blank();
+    void note(std::string_view text, ui::tone tone = ui::tone::dim);
+    void print_markdown(std::string_view text);
+    bool command(const std::string& line);  // false: exit requested
+
+private:
+    void handle(const ui::key& k);
+    void submit();
+    void start_turn(std::string text);
+    void start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact);
+    void drain();
+    void apply(ev_text&);
+    void apply(ev_thinking&) { thinking_ = true; }
+    void apply(ev_request&) { thinking_ = true; }
+    void apply(ev_tool_start&);
+    void apply(ev_progress&);
+    void apply(ev_tool_done&);
+    void apply(ev_ask&);
+    void apply(ev_usage& u) { usage_ = u; }
+    void apply(ev_done&);
+    void section(std::string_view kind);
+    void flush_stream(bool all);
+    void answer_ask(answer a);
+    void cancel();
+    std::vector<std::string> live(int& cursor_row, int& cursor_col);
+    std::vector<std::string> palette_rows(int columns);
+    std::vector<std::pair<std::string, std::string>> palette_matches() const;
+    std::string status_line(int columns) const;
+    void push(ui_event e);
+    agent_events make_events();
+
+    app& app_;
+    ui::terminal& term_;
+    screen screen_;
+    ui::editor editor_;
+    ui::size size_;
+
+    std::mutex mutex_;
+    std::deque<ui_event> queue_;
+    std::vector<std::string> steering_;  // guarded by mutex_
+    std::thread worker_;
+    cancel_token cancel_;
+
+    bool busy_ = false;
+    bool thinking_ = false;
+    bool quit_ = false;
+    steady::time_point ctrl_c_at_{};    // first Ctrl+C on an empty draft
+    std::string hint_;                  // one-off line above the input box
+    steady::time_point hint_at_{};
+    ev_usage usage_;
+    steady::time_point busy_since_;
+    std::string stream_;               // assistant text not yet committed
+    ui::markdown_state md_;
+    std::vector<running_tool> running_;
+    std::string progress_tail_;        // live command output
+    std::optional<ev_ask> ask_;
+    std::string last_tool_full_;       // for Ctrl+O
+    std::string last_section_;         // "user", "assistant" or "tool"
+    std::size_t palette_index_ = 0;
+    std::string branch_;
+};
+
+} // namespace lay

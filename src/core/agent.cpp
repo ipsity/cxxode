@@ -1,6 +1,7 @@
 #include "core/agent.hpp"
 
 #include <future>
+#include <mutex>
 
 namespace lay {
 namespace {
@@ -131,11 +132,26 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
             results.blocks.push_back(block::make_tool_result(calls[i]->id, std::move(out.text), out.is_error));
         } else {
             // Each parallel read records file stamps privately; they are merged afterwards.
+            // Callbacks are serialised so event consumers never see concurrent calls.
+            std::mutex callback_mutex;
+            agent_events serial = events;
+            if (events.tool_started) serial.tool_started = [&](const tool& t, const json& in) {
+                std::lock_guard lock(callback_mutex);
+                events.tool_started(t, in);
+            };
+            if (events.tool_finished) serial.tool_finished = [&](const tool& t, const json& in, const tool_output& o) {
+                std::lock_guard lock(callback_mutex);
+                events.tool_finished(t, in, o);
+            };
+            if (events.tool_progress) serial.tool_progress = [&](std::string_view s) {
+                std::lock_guard lock(callback_mutex);
+                events.tool_progress(s);
+            };
             std::vector<std::map<fs::path, file_stamp>> stamps(end - i);
             std::vector<std::future<tool_output>> pending;
             for (std::size_t k = i; k < end; ++k) {
                 pending.push_back(std::async(std::launch::async, [&, k] {
-                    return run_one(*calls[k], events, cancel, backup, stamps[k - i]);
+                    return run_one(*calls[k], serial, cancel, backup, stamps[k - i]);
                 }));
             }
             for (std::size_t k = i; k < end; ++k) {
@@ -156,7 +172,7 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
     tool_output out;
     switch (rules_.check(*t, call.input, root_)) {
         case verdict::deny:
-            out = {rules_.mode == permission_mode::plan
+            out = {rules_.mode() == permission_mode::plan
                        ? "Plan mode is read-only. Describe the change instead; the user can switch modes with Shift+Tab."
                        : "Denied by a permission rule.",
                    true, "已拒绝", {}};

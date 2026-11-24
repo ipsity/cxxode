@@ -20,6 +20,7 @@ public:
     session_log& operator=(const session_log&) = delete;
 
     bool open(const std::filesystem::path& path);
+    void close();
     bool is_open() const { return file_ != nullptr; }
     const std::filesystem::path& path() const { return path_; }
     void append(const json& line);

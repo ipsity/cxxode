@@ -39,6 +39,10 @@ bool save_credential(const std::string& provider, const std::string& key);
 
 std::optional<protocol> parse_protocol(std::string_view text);
 
+// Claude Code aliases: opus, sonnet, haiku, fable. ANTHROPIC_DEFAULT_<NAME>_MODEL overrides
+// the built-in id, so a gateway mapping set up for Claude Code applies unchanged.
+std::string resolve_model_alias(const std::string& model);
+
 // CLAUDE.md, AGENTS.md and LAY.md files that apply to the workspace, user level first.
 std::vector<std::pair<std::filesystem::path, std::string>> load_memory(const std::filesystem::path& workspace);
 

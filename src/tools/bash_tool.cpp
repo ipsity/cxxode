@@ -22,9 +22,11 @@ const shell& detect_shell() {
         }
         std::vector<fs::path> candidates;
         if (auto git = find_on_path("git")) {
-            const auto top = git->parent_path().parent_path();  // <git>/cmd/git.exe or <git>/bin/git.exe
-            candidates.push_back(top / "bin" / "bash.exe");
-            candidates.push_back(top / "usr" / "bin" / "bash.exe");
+            // git.exe lives in <git>/cmd, <git>/bin or <git>/mingw64/bin; bash in <git>/bin.
+            for (auto dir = git->parent_path(); dir.has_relative_path(); dir = dir.parent_path()) {
+                candidates.push_back(dir / "bin" / "bash.exe");
+                if (dir == dir.parent_path()) break;
+            }
         }
         for (const char* env : {"ProgramFiles", "ProgramW6432", "LOCALAPPDATA"}) {
             if (const char* dir = std::getenv(env)) {
