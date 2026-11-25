@@ -35,7 +35,7 @@ Windows 原生终端 coding agent，C++20，单个静态链接的 `ode.exe`。
 
 ```
 app        TUI / print / rpc 前端，斜杠命令实现
-ext        hooks skills commands agents plugins mcp
+ext        hooks skills commands agents plugins mcp lua
 core       message session permission compact agent-loop
 tools      Read Write Edit Bash Grep Glob
 provider   anthropic openai_chat openai_responses sse
@@ -66,7 +66,7 @@ src/config/     settings  credential  models(别名)
 src/provider/   provider anthropic openai_chat openai_responses sse
 src/tools/      tool files edit search bash
 src/core/       message session permission agent compact
-src/ext/        hooks skills commands agents plugins mcp
+src/ext/        hooks skills commands agents plugins mcp lua
 src/app/        interactive(拆分若干 cpp) print rpc slash_commands
 tests/          与 src 同构；tests/fixtures/ 放录制的 SSE 和 MCP 会话
 ```
@@ -106,21 +106,52 @@ user text
 | Subagents | `agents/*.md`，frontmatter 包含 `name`、`description`、`tools`、`model`。通过 `Task` 工具调用，子 agent 只返回最终文本 |
 | Plugins | `.claude-plugin/plugin.json` 所在目录，里面包含上面几类文件。安装就是解压到 `~/.ode/plugins/<name>/` |
 
-## 6. 不做的事
+## 6. Lua 扩展
+
+Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows 上每次都启动 Git Bash 子进程太慢）和不想另装 Node/Python 的自定义工具或 TUI 定制。Agent Core 不迁移到 Lua。
+
+**位置**。脚本只有两处：`~/.ode/init.lua`（用户配置），以及插件目录里的 `ode/init.lua`。插件仍然使用 Claude Code 格式，`.claude-plugin/plugin.json` 不变，其他工具会忽略 `ode/` 目录。cxxode 不定义自己的插件 manifest。
+
+**信任模型**。Lua 插件属于可信代码，安装插件这一步就是信任决定，不做 manifest 权限声明，也不做授权流程。不可信的扩展用 MCP，靠进程隔离。
+
+**受控 API**。移除 `io`、`os`、`package.loadlib`、`debug`。这样做是为了正确性，不是为了安全：Lua 自带的 `io.open` 走 ANSI 版 `fopen`，遇到中文路径会失败；另外文件和进程操作必须经过权限引擎，`/undo` 的备份和 mtime 检查才能生效。替代接口是 `ode.fs.*`、`ode.exec`，它们经过和内置工具相同的权限检查。
+
+**介入点**。只开放以下这些，每一个在 C++ 里都有默认行为，Lua 出错时退回默认行为并给出提示：
+
+| 介入点 | 用途 |
+|---|---|
+| `ode.on("pre_tool" / "post_tool" / "prompt" / "stop", fn)` | 与 Claude Code hooks 语义相同，在进程内执行 |
+| `ode.tool{ name, description, schema, access, run }` | 注册给模型调用的工具，进入统一的工具注册表 |
+| `ode.command(name, fn)` | 斜杠命令 |
+| `ode.ui.set_status(text)`、`ode.keymap(key, fn)` | 状态栏和键位 |
+
+**执行模型**：
+
+- 单独一个 Lua 线程持有唯一的 VM，所有调用都以消息的形式投递给它。
+- API 一律是同步风格（`local r = ode.exec("git status")`），在 Lua 线程上阻塞执行。以后如果需要并发，在 C++ 侧改用 `lua_yield`/`lua_resume`，脚本不用改。不做回调式的异步 API。
+- 渲染路径上 C++ 永远不同步等待 Lua。UI 相关的状态由 Lua 推送给 C++，C++ 不按帧调用 Lua。
+- 用 `lua_sethook` 做指令计数，用来响应取消和限制单次调用的执行时间；用自定义 `lua_Alloc` 限制内存。
+- Lua 源码按 C++ 编译，`lua_error` 走 C++ 异常，绑定代码里的 RAII 对象能正常析构。
+- 边界上的数据转换（JSON 和 Lua table 互转）只在 `ext/lua` 里做。
+
+**生命周期**。启动时如果找不到任何 `init.lua`，就不创建 VM。`/reload` 会销毁整个 VM 并重新加载所有脚本，不做单个插件的热加载。版本只用一个 `ode.api_version` 整数表示，不兼容的改动就加 1。
+
+**预算**。exe 体积增加不超过 400 KB。没有脚本时，启动时间和内存与纯 C++ 版本相同。
+
+## 7. 不做的事
 
 - 跨平台。代码里不保留 `#else` 的 POSIX 分支，Windows 以外的平台以后另行讨论。
 - 自研插件 ABI、DLL 插件。需要原生能力的扩展写成 MCP server，靠进程隔离。
-- 嵌入脚本语言（Lua 等）。重新讨论的条件是：出现 hook 和 MCP 都做不到的进程内定制需求（比如键位、状态栏、面板行为）。届时只开放给 `ui`/`app` 层使用，不进入 `core`。
 - 没有调用方的"智能"模块：工具推荐、模式学习、对象池、线程池、自适应调度。真正需要时，带着测量数据再加。
 - IDE 插件、云同步、多人协作。
 
-## 7. 测试
+## 8. 测试
 
 - 只用 doctest。provider 通过录制的 SSE 夹具回放测试，MCP 用测试内启动的假 server（`ode.exe` 自身的隐藏子命令）测试，hooks 用 `cmd /c exit 2` 一类命令测试。
 - 不允许访问网络。所有测试加起来必须在 60 s 内跑完。
 - 每修一个 bug 都要补一条能复现它的测试。
 
-## 8. 开箱即用
+## 9. 开箱即用
 
 目标：推送到 remote 后，另一台没有任何本机状态的 Windows 10 1809+/11 x64 机器有两种方式可以用：
 
@@ -130,7 +161,7 @@ user text
 约束：
 
 - exe 只能依赖系统自带的 DLL：KERNEL32、ADVAPI32、SHELL32、WINHTTP，以及 Win10 起系统自带的 UCRT `api-ms-win-crt-*`。不允许依赖 libstdc++、libgcc、libwinpthread 等 MinGW DLL。CI 用 `objdump -p` 检查导入表，出现白名单以外的 DLL 就失败。
-- 第三方依赖只能以单头文件形式放在 `third_party/`，构建时不联网下载。
+- 第三方依赖放在 `third_party/`，随仓库提交，构建时不联网下载。除 `third_party/lua/`（Lua 5.4 源码）外只允许单头文件。
 - 源码、测试、配置里不允许出现本机路径或用户名。运行时状态（会话、命令历史、主题选择）只写到 `%USERPROFILE%\.ode\`，不写进工作区，也不进 git。
 - 首次运行时没有任何配置文件也必须能启动。缺少密钥时给出一行可操作的提示，并以退出码 2 退出（2026-11-25 已用空 `USERPROFILE` 验证过）。
 - Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。
@@ -142,7 +173,7 @@ user text
 - CI 只上传构建产物（artifact），没有打 tag 时自动生成 Release zip 的流程。
 - 两个 remote 的历史不一致：`origin`（lay-code）可以直接快进推送。`cxxode` 上只有一个无关的"初始提交"，推送需要覆盖它。推送前要确定用哪个 remote。
 
-## 9. 迁移计划
+## 10. 迁移计划
 
 按顺序执行，每一步都是一次独立提交，并且满足 CLAUDE.md 的完成定义。
 
@@ -155,7 +186,12 @@ user text
 | R4 | Hooks 改为 Claude Code 格式（matcher、字段名、JSON 输出） | 原样复制一份 Claude Code 的 hooks 配置就能生效 |
 | R5 | 自动压缩 | 夹具测试：超过阈值时自动触发压缩 |
 | R6 | Subagent frontmatter 中的 `tools`/`model`、斜杠命令参数 | 装一个 Claude Code 插件，它的 skill、命令、agent 都能用 |
-| R7 | 补齐第 8 节的缺口：命令历史改到 `~/.ode/`，CI 加 DLL 白名单检查和空 HOME 冒烟测试，打 tag 时生成 Release zip | CI 在干净的 `windows-latest` 上全部通过，下载的 zip 解压后可直接运行 |
-| R8 | 推送到 remote，打第一个 tag | 第 8 节两种方式都能走通 |
+| R7 | 补齐第 9 节的缺口：命令历史改到 `~/.ode/`，CI 加 DLL 白名单检查和空 HOME 冒烟测试，打 tag 时生成 Release zip | CI 在干净的 `windows-latest` 上全部通过，下载的 zip 解压后可直接运行 |
+| R8 | 推送到 remote，打第一个 tag | 第 9 节两种方式都能走通 |
+| L1 | `third_party/lua/` 引入 Lua 5.4 源码并按 C++ 编译；建立 `ext/lua` 宿主：Lua 线程、移除标准库、指令和内存限制、`/reload` | 没有脚本时 VM 不创建；死循环脚本会被中止；exe 体积增加 ≤ 400 KB |
+| L2 | 实现 `ode.fs`、`ode.exec`、`ode.on`、`ode.tool`、`ode.command`，全部接入权限引擎和统一的工具注册表 | 用 Lua 写的 pre_tool hook 能阻止 Bash 调用；Lua 工具可以被模型调用 |
+| L3 | 读取插件里的 `ode/init.lua`，实现 `ode.ui.set_status`、`ode.keymap` | 装一个带 `ode/init.lua` 的 Claude Code 插件，它的 skill 和 Lua 部分都能用 |
+
+R 系列先完成并发布纯 C++ 版本，L 系列在其后。这样 Lua 宿主可以直接放在 R2 拆好的 `ext` 层里，移植问题也不会和 Lua 的问题混在一起。
 
 `archive/` 只读：保留历史，不参与构建，也不再更新。需要旧内容时搬到 `docs/` 并改写。
