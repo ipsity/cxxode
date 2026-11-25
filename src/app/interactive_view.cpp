@@ -146,6 +146,9 @@ std::vector<std::string> interactive_ui::palette_items() {
     auto fuzzy_match = [](std::string_view query, std::string_view target) -> int {
         if (query.empty()) return 100;  // Empty query matches everything
 
+        // Boost exact prefix match significantly
+        if (target.starts_with(query)) return 1000;
+
         size_t qi = 0, ti = 0;
         int score = 0;
         while (qi < query.size() && ti < target.size()) {
@@ -397,24 +400,23 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
             const bool is_selected = i == selection_->selected_index;
             const auto item_color = is_selected ? tone::accent_bold : tone::normal;
 
-            std::string line = "  " + std::to_string(i + 1) + ". " + selection_->items[i];
+            std::string line = std::to_string(i + 1) + ". " + selection_->items[i];
             if (i < selection_->details.size() && !selection_->details[i].empty()) {
                 line += "  " + selection_->details[i];
             }
-            if (is_selected) {
-                line += " ←";  // Arrow on the right for selected item
-            }
 
-            rows.push_back(" " + paint(item_color, line));
+            std::string prefix = is_selected ? "→ " : "  ";
+            rows.push_back(" " + paint(item_color, prefix + line));
         }
 
         rows.push_back("");
         rows.push_back(" " + paint(tone::dim, "Use ↑↓ to select, Enter to confirm, Esc to cancel"));
     }
 
-    for (auto& r : palette_rows(columns)) rows.push_back(std::move(r));
+    // Prepare bottom UI elements (but don't add to rows yet)
+    auto palette = palette_rows(columns);
 
-    // File completion palette
+    std::vector<std::string> file_completion;
     const auto files = file_items();
     if (!files.empty()) {
         const std::size_t show = std::min<std::size_t>(files.size(), 8);
@@ -422,50 +424,44 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
             const bool on = i == palette_index_ % files.size();
             auto name = files[i];
             if (text::width(name) > columns - 6) name = text::keep_tail(name, columns - 6);
-            rows.push_back("  " + paint(on ? tone::accent : tone::dim, name));
+            file_completion.push_back("  " + paint(on ? tone::accent : tone::dim, name));
         }
     }
 
-    // Smart hints with priority: validation > suggestions
-    // Only show one type at a time to avoid clutter
+    std::vector<std::string> hints;
     if (!editor_.text().empty() && !busy_ && !ask_) {
-        // Priority 1: Input validation (errors/warnings)
         auto validation = app_.validator.validate(editor_.text());
         if (validation.type != ode::input_validator::issue_type::none) {
             const auto icon = validation.is_warning ? "⚠️  " : "❌ ";
             const auto color = validation.is_warning ? tone::dim : tone::error;
-            rows.push_back("  " + paint(color, icon + validation.message));
-        }
-        // Priority 2: Tool suggestions (only if no validation issues and no other completions)
-        else if (palette_rows(columns).empty() && files.empty() && editor_.text().size() > 3) {
+            hints.push_back("  " + paint(color, icon + validation.message));
+        } else if (palette.empty() && file_completion.empty() && editor_.text().size() > 3) {
             const auto suggestions = suggestion_items();
             if (!suggestions.empty()) {
-                // Max 2 suggestions (not 3) for cleaner display
                 const std::size_t show = std::min<std::size_t>(suggestions.size(), 2);
                 for (std::size_t i = 0; i < show; ++i) {
-                    rows.push_back("  " + paint(tone::dim, suggestions[i]));
+                    hints.push_back("  " + paint(tone::dim, suggestions[i]));
                 }
             }
         }
     }
 
-    // Fixed bottom input box design
+    // Calculate input box dimensions
     const int inner = columns - 4;
     const auto l = editor_.arrange(inner);
-
-    // Calculate how many rows to reserve for input box and status
-    const int max_input_lines = 10;  // Maximum input height
+    const int max_input_lines = 10;
     const int actual_input_lines = std::min(static_cast<int>(l.rows.size()), max_input_lines);
-    const int input_box_height = actual_input_lines + 2;  // +2 for top and bottom borders
-    const int status_line_height = 1;
-    const int reserved_bottom = input_box_height + status_line_height;
+    const int input_box_height = actual_input_lines + 2;  // +2 for borders
 
-    // Calculate available space for content
+    // Reserve space for: input box + palette + file completion + hints + status
+    const int reserved_bottom = input_box_height +
+                               static_cast<int>(palette.size()) +
+                               static_cast<int>(file_completion.size()) +
+                               static_cast<int>(hints.size()) +
+                               1;  // status line
+
+    // Calculate available space for content and trim if needed
     const int available_rows = size_.rows - reserved_bottom;
-
-    // No padding: committed history sits directly above the live area, so padding
-    // would push the newest messages off the top of the viewport. Trimming is still
-    // needed because the live area must fit on screen to be erasable on the next frame.
     if (static_cast<int>(rows.size()) > available_rows) {
         const int to_remove = static_cast<int>(rows.size()) - std::max(0, available_rows);
         rows.erase(rows.begin(), rows.begin() + to_remove);
@@ -473,10 +469,9 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
 
     const int content_end = static_cast<int>(rows.size());
 
-    // Draw input box with borders (now guaranteed at bottom)
-    // Top border - use cached theme color with BOLD
+    // Draw input box with borders
     std::string top_border;
-    top_border.reserve(columns + 20);  // Preallocate
+    top_border.reserve(columns + 20);
     for (int i = 0; i < columns; ++i) top_border += "─";
     rows.push_back(app_.current_theme.border_fg + "\033[1m" + top_border + "\033[0m");
 
@@ -488,25 +483,28 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
 
         if (i == 0) {
-            // Use cached theme color for input prompt - BOLD
             rows.push_back(app_.current_theme.prompt_fg + "\033[1m› \033[0m" +
                           app_.current_theme.prompt_fg + "\033[1m" + shown + "\033[0m");
         } else {
-            // Continuation lines also bold
             rows.push_back(app_.current_theme.prompt_fg + "\033[1m  " + shown + "\033[0m");
         }
     }
 
-    // Bottom border - use cached color with BOLD
+    // Bottom border
     std::string bottom_border;
-    bottom_border.reserve(columns + 20);  // Preallocate
+    bottom_border.reserve(columns + 20);
     for (int i = 0; i < columns; ++i) bottom_border += "─";
     rows.push_back(app_.current_theme.border_fg + "\033[1m" + bottom_border + "\033[0m");
 
-    // Status line (fixed at very bottom)
+    // Now add palette, file completion, and hints below the input box
+    for (auto& r : palette) rows.push_back(std::move(r));
+    for (auto& r : file_completion) rows.push_back(std::move(r));
+    for (auto& r : hints) rows.push_back(std::move(r));
+
+    // Status line at very bottom
     rows.push_back(status_line(columns));
 
-    // Calculate cursor position
+    // Calculate cursor position (input box is now at content_end)
     cursor_row = ask_ || selection_ ? -1 : content_end + 1 + l.cursor_row;  // +1 for top border
     cursor_col = l.cursor_column + 2;  // +2 for "› " width
 
