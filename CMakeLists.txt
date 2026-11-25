@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(cxxode VERSION 0.3.0 LANGUAGES CXX)
+project(cxxode VERSION 0.3.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,6 +103,10 @@ target_link_libraries(ode_provider PUBLIC ode_config ode_platform)
 target_link_libraries(ode_tools PUBLIC ode_base ode_platform)
 target_link_libraries(ode_core PUBLIC ode_provider ode_tools)
 target_link_libraries(ode_ext PUBLIC ode_core ode_platform PRIVATE ode_lua)
+if(MINGW)
+    target_compile_options(ode_ext PRIVATE $<$<CONFIG:Release>:-Os>)
+    target_compile_options(ode_app PRIVATE $<$<CONFIG:Release>:-Os>)
+endif()
 target_link_libraries(ode_app PUBLIC ode_ext ode_ui)
 
 add_executable(ode src/main.cpp)
