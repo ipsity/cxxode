@@ -118,6 +118,14 @@ json encode_responses(const model_request& request) {
     }
     json body{{"model", request.model}, {"stream", true}, {"input", input}, {"store", false},
               {"max_output_tokens", request.max_tokens}, {"include", json::array({"reasoning.encrypted_content"})}};
+    std::string_view model = request.model;
+    model.remove_prefix(model.find_last_of('/') + 1);
+    // Gateways may expose non-reasoning models through the same endpoint.
+    if (request.thinking && (model == "o3" || model.starts_with("o3-") ||
+                             model == "o4-mini" || model.starts_with("o4-mini-") ||
+                             model.starts_with("gpt-5") || model.starts_with("gpt-6"))) {
+        body["reasoning"] = {{"summary", "auto"}};
+    }
     if (!request.system.empty()) body["instructions"] = request.system;
     if (!tools.empty()) body["tools"] = tools;
     return body;

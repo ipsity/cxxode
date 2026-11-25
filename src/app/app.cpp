@@ -38,14 +38,34 @@ int run_interactive(app& a, std::string first_prompt) {
 
 int run_print(app& a, std::string prompt) {
     agent_events ev;
-    ev.text = [](std::string_view t) { ui::write_stream(false, t); };
+    bool thinking = false;
+    bool thinking_line_ended = false;
+    const auto finish_thinking = [&] {
+        if (thinking && !thinking_line_ended) ui::write_stream(true, "\n");
+        thinking = false;
+    };
+    ev.request_started = finish_thinking;
+    ev.thinking = [&](std::string_view t, std::string_view) {
+        if (t.empty()) return;
+        if (!thinking) ui::write_stream(true, "✻ 思考\n");
+        ui::write_stream(true, t);
+        thinking = true;
+        thinking_line_ended = t.ends_with('\n');
+    };
+    ev.text = [&](std::string_view t) {
+        if (t.empty()) return;
+        finish_thinking();
+        ui::write_stream(false, t);
+    };
     ev.tool_started = [&](const tool& t, const json& in) {
+        finish_thinking();
         ui::write_stream(true, "● " + t.name + " " + tool_label(t, in, a.root) + "\n");
     };
     // Headless runs cannot ask; anything that would need a prompt is declined.
     ev.ask = [](const tool&, const json&) { return answer::no; };
     cancel_token cancel;
     const auto r = a.core->run(std::move(prompt), ev, cancel);
+    finish_thinking();
     ui::write_stream(false, "\n");
     if (r.stop == stop_reason::error || r.stop == stop_reason::cancelled) {
         ui::write_stream(true, "ode: " + (r.error.empty() ? std::string("stopped") : r.error) + "\n");

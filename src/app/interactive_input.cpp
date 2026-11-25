@@ -242,11 +242,10 @@ void interactive_ui::handle(const ui::key& k) {
                 }
                 case 'l': screen_.clear_screen(); break;
                 case 't':
-                    // Ctrl+T: toggle thinking block expansion
-                    if (!thinking_blocks_.empty()) {
-                        // Toggle the most recent thinking block
-                        thinking_blocks_.back().second = !thinking_blocks_.back().second;
-                    }
+                    flush_thinking(true);
+                    show_thinking_ = !show_thinking_;
+                    hint_ = show_thinking_ ? "后续显示思考正文" : "后续只显示思考字数";
+                    hint_at_ = steady::now();
                     break;
                 case 'o':
                     if (!last_tool_full_.empty()) {

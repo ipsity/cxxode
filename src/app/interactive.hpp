@@ -20,7 +20,7 @@ using steady = std::chrono::steady_clock;
 
 // Events travel from the agent thread to the UI thread through this queue.
 struct ev_text { std::string text; };
-struct ev_thinking { std::string text; std::string signature; };
+struct ev_thinking { std::string text; };
 struct ev_request {};
 struct ev_tool_start { std::string name, label; };
 struct ev_progress { std::string text; };
@@ -57,7 +57,7 @@ private:
     void drain();
     void apply(ev_text&);
     void apply(ev_thinking& e);
-    void apply(ev_request&) { thinking_ = true; }
+    void apply(ev_request&) { flush_thinking(true); thinking_ = true; }
     void apply(ev_tool_start&);
     void apply(ev_progress&);
     void apply(ev_tool_done&);
@@ -66,6 +66,8 @@ private:
     void apply(ev_done&);
     void section(std::string_view kind);
     void flush_stream(bool all);
+    void flush_thinking(bool all);
+    std::vector<std::string> thinking_rows(std::string_view line, int columns) const;
     void answer_ask(answer a);
     void cancel();
     std::vector<std::string> live(int& cursor_row, int& cursor_col);
@@ -128,6 +130,10 @@ private:
     ev_usage usage_;
     steady::time_point busy_since_;
     std::string stream_;               // assistant text not yet committed
+    std::string think_stream_;
+    std::size_t hidden_thinking_chars_ = 0;
+    bool show_thinking_ = true;
+    bool think_started_ = false;
     ui::markdown_state md_;
     std::vector<running_tool> running_;
     std::string progress_tail_;        // live command output
@@ -137,8 +143,6 @@ private:
     std::size_t palette_index_ = 0;
     std::string branch_;
 
-    // Thinking block tracking
-    std::vector<std::pair<std::string, bool>> thinking_blocks_;  // (signature, expanded)
     bool welcome_shown_ = false;
 };
 

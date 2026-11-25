@@ -96,8 +96,15 @@ http_result http_send(const http_request& request, const http_sink& sink, cancel
 
     char buffer[16384];
     while (!cancel.cancelled()) {
+        // Waiting on a full read can hold the first SSE deltas until the reply ends.
+        DWORD available = 0;
+        if (!WinHttpQueryDataAvailable(raw, &available)) {
+            if (!cancel.cancelled()) result.error = last_error("Checking response data");
+            break;
+        }
+        if (available == 0) break;
         DWORD received = 0;
-        if (!WinHttpReadData(raw, buffer, sizeof(buffer), &received)) {
+        if (!WinHttpReadData(raw, buffer, std::min(available, static_cast<DWORD>(sizeof(buffer))), &received)) {
             if (!cancel.cancelled()) result.error = last_error("Reading the response");
             break;
         }

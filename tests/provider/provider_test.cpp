@@ -87,12 +87,18 @@ TEST_CASE("chat stream with broken arguments is not dispatchable") {
 
 TEST_CASE("responses stream") {
     const char* s =
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"First \"}\n\n"
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"step.\"}\n\n"
         "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"he\"}\n\n"
         "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"r1\",\"encrypted_content\":\"x\"}}\n\n"
         "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n\n"
         "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"f1\",\"name\":\"glob\",\"arguments\":\"{\\\"pattern\\\":\\\"*.cpp\\\"}\"}}\n\n"
         "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4}}}\n\n";
-    auto r = decode_stream(protocol::openai_responses, s);
+    std::vector<std::string> thinking;
+    stream_events events;
+    events.thinking = [&](std::string_view text, std::string_view) { thinking.emplace_back(text); };
+    auto r = decode_stream(protocol::openai_responses, s, events);
+    CHECK(thinking == std::vector<std::string>{"First ", "step."});
     CHECK(r.complete);
     CHECK(r.stop == stop_reason::tool_use);
     CHECK(r.content.plain_text() == "hello");
@@ -105,6 +111,49 @@ TEST_CASE("responses stream") {
     auto body = encode_request(protocol::openai_responses, req);
     CHECK(body["input"][0]["type"] == "reasoning");
     CHECK(body["input"][2]["type"] == "function_call");
+}
+
+TEST_CASE("reasoning summaries are requested for compatible provider models") {
+    model_request req;
+    req.model = "power/claude-opus-5-5";
+    const auto anthropic = encode_request(protocol::anthropic, req);
+    REQUIRE(anthropic.contains("thinking"));
+    CHECK(anthropic["thinking"]["type"] == "adaptive");
+    CHECK(anthropic["thinking"]["display"] == "summarized");
+    CHECK_FALSE(anthropic["thinking"].contains("budget_tokens"));
+
+    req.model = "power/claude-haiku-4-5-20251001";
+    CHECK_FALSE(encode_request(protocol::anthropic, req).contains("thinking"));
+
+    req.model = "gpt-6.2-sol";
+    const auto responses = encode_request(protocol::openai_responses, req);
+    REQUIRE(responses.contains("reasoning"));
+    CHECK(responses["reasoning"]["summary"] == "auto");
+
+    req.model = "gpt-4o";
+    CHECK_FALSE(encode_request(protocol::openai_responses, req).contains("reasoning"));
+    req.thinking = false;
+    req.model = "gpt-6.2-sol";
+    CHECK_FALSE(encode_request(protocol::openai_responses, req).contains("reasoning"));
+}
+
+TEST_CASE("anthropic streams thinking text in order and preserves the signature") {
+    const char* s =
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"First \"}}\n\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"step.\"}}\n\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed\"}}\n\n"
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+        "data: {\"type\":\"message_stop\"}\n\n";
+    std::vector<std::string> thinking;
+    stream_events events;
+    events.thinking = [&](std::string_view text, std::string_view) { thinking.emplace_back(text); };
+    auto r = decode_stream(protocol::anthropic, s, events);
+    CHECK(r.complete);
+    CHECK(thinking == std::vector<std::string>{"First ", "step."});
+    REQUIRE(r.content.blocks.size() == 1);
+    CHECK(r.content.blocks[0].text == "First step.");
+    CHECK(r.content.blocks[0].signature == "signed");
 }
 
 TEST_CASE("anthropic request encoding pairs tool use and result") {

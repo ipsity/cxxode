@@ -3,6 +3,15 @@
 namespace ode {
 namespace {
 
+bool supports_adaptive_thinking(std::string_view model) {
+    model.remove_prefix(model.find_last_of('/') + 1);
+    // Claude 4.5 and earlier reject adaptive thinking.
+    return model.starts_with("claude-opus-4-6") || model.starts_with("claude-opus-4-7") ||
+           model.starts_with("claude-opus-4-8") || model.starts_with("claude-sonnet-4-6") ||
+           model.starts_with("claude-opus-5") || model.starts_with("claude-sonnet-5") ||
+           model.starts_with("claude-fable-5") || model.starts_with("claude-mythos-");
+}
+
 json encode_block(const block& b) {
     switch (b.type) {
         case block::kind::text: return {{"type", "text"}, {"text", b.text}};
@@ -141,6 +150,9 @@ json encode_anthropic(const model_request& request) {
     }
     if (!tools.empty()) tools.back()["cache_control"] = ephemeral;
     json body{{"model", request.model}, {"max_tokens", request.max_tokens}, {"stream", true}, {"messages", messages}};
+    if (request.thinking && supports_adaptive_thinking(request.model)) {
+        body["thinking"] = {{"type", "adaptive"}, {"display", "summarized"}};
+    }
     if (!request.system.empty()) {
         body["system"] = json::array({{{"type", "text"}, {"text", request.system}, {"cache_control", ephemeral}}});
     }

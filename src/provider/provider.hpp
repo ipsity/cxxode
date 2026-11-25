@@ -23,6 +23,7 @@ struct model_request {
     std::vector<message> messages;
     std::vector<tool_schema> tools;
     std::size_t max_tokens = 16384;
+    bool thinking = true;
 };
 
 enum class stop_reason { end_turn, tool_use, max_tokens, refusal, error, cancelled };

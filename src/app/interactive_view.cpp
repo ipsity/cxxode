@@ -294,6 +294,9 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     rows.reserve(size_.rows);  // Preallocate for performance
     const int columns = std::max(20, size_.columns - 1);
 
+    if (!think_stream_.empty()) {
+        for (auto& r : thinking_rows(think_stream_, columns)) rows.push_back(std::move(r));
+    }
     // Unfinished streamed line.
     if (!stream_.empty()) {
         auto state = md_;

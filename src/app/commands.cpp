@@ -39,7 +39,7 @@ constexpr const char* help_text =
     "- `Ctrl+C` 中断或清空，连按两次退出\n"
     "- `Ctrl+L` 清屏\n"
     "- `Ctrl+O` 展开最近一次工具的完整输出\n"
-    "- `Ctrl+T` 切换思考块展开/折叠\n"
+    "- `Ctrl+T` 切换后续思考的显示方式（正文或字数）\n"
     "- `Shift+Tab` 切换权限档：plan → default → yolo\n"
     "- 需要确认时：`Enter` 允许，`Esc` 拒绝，`a` 总是允许\n"
     "\n"

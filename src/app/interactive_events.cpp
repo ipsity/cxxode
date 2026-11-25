@@ -51,6 +51,8 @@ void interactive_ui::flush_stream(bool all) {
 }
 
 void interactive_ui::apply(ev_text& e) {
+    if (e.text.empty()) return;
+    flush_thinking(true);
     thinking_ = false;
     // Skip leading blank lines so the reply starts right under the tool list.
     if (stream_.empty() && last_section_ != "assistant") {
@@ -62,26 +64,52 @@ void interactive_ui::apply(ev_text& e) {
     flush_stream(false);
 }
 
-void interactive_ui::apply(ev_thinking& e) {
-    flush_stream(true);
-    // Track thinking block - collapsed by default
-    thinking_blocks_.push_back({e.signature, false});
-    section("assistant");
+std::vector<std::string> interactive_ui::thinking_rows(std::string_view line, int columns) const {
+    const ui::prefix prefix{paint(tone::dim, "  ┊ "), text::width("  ┊ ")};
+    return ui::layout({{std::string(line), tone::dim}}, columns, prefix, prefix);
+}
 
-    if (thinking_blocks_.back().second) {
-        // Expanded: show full text
-        for (auto& row : ui::layout({{e.text, ui::tone::dim}}, size_.columns - 1, {"  💭 ", 4}, {"    ", 4})) {
-            screen_.commit(row);
-        }
+void interactive_ui::flush_thinking(bool all) {
+    std::size_t start = 0;
+    while (true) {
+        const auto end = think_stream_.find('\n', start);
+        if (end == std::string::npos) break;
+        screen_.commit(thinking_rows(std::string_view(think_stream_).substr(start, end - start), size_.columns - 1));
+        start = end + 1;
+    }
+    think_stream_.erase(0, start);
+    if (!all) return;
+    if (!think_stream_.empty()) {
+        screen_.commit(thinking_rows(think_stream_, size_.columns - 1));
+        think_stream_.clear();
+    }
+    if (hidden_thinking_chars_ != 0) {
+        note("✻ 思考 " + std::to_string(hidden_thinking_chars_) + " 字");
+        hidden_thinking_chars_ = 0;
+    }
+    think_started_ = false;
+}
+
+void interactive_ui::apply(ev_thinking& e) {
+    if (!think_started_) {
+        flush_stream(true);
+        section("assistant");
+        if (show_thinking_) note("✻ 思考");
+        think_started_ = true;
+    }
+    if (show_thinking_) {
+        think_stream_ += e.text;
+        flush_thinking(false);
     } else {
-        // Collapsed: show summary
-        const auto summary = text::keep_head(ui::one_line(e.text), size_.columns - 20);
-        screen_.commit("  " + paint(ui::tone::dim, "💭 " + summary + " ⋯ Ctrl+T 展开"));
+        hidden_thinking_chars_ += std::count_if(e.text.begin(), e.text.end(), [](unsigned char byte) {
+            return (byte & 0xc0) != 0x80;
+        });
     }
 }
 
 void interactive_ui::apply(ev_tool_start& e) {
     thinking_ = false;
+    flush_thinking(true);
     flush_stream(true);
     running_.push_back({e.name, e.label, steady::now()});
     progress_tail_.clear();
@@ -163,6 +191,7 @@ void interactive_ui::apply(ev_tool_done& e) {
 }
 
 void interactive_ui::apply(ev_ask& e) {
+    flush_thinking(true);
     flush_stream(true);
 
     // Check if this exact request was recently processed (within 10 seconds)
@@ -213,6 +242,7 @@ void interactive_ui::answer_ask(answer a) {
 }
 
 void interactive_ui::apply(ev_done& e) {
+    flush_thinking(true);
     flush_stream(true);
     running_.clear();
     progress_tail_.clear();
