@@ -1,5 +1,8 @@
 #include "app/command_history.hpp"
+#include "platform/file_lock.hpp"
+
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 
 namespace ode {
@@ -13,7 +16,7 @@ bool command_history::should_add(std::string_view command) const {
     if (command.empty()) return false;
 
     // 不添加纯空白命令
-    if (std::all_of(command.begin(), command.end(), ::isspace)) return false;
+    if (std::ranges::all_of(command, [](unsigned char c) { return std::isspace(c); })) return false;
 
     // 不添加过长的命令
     if (command.size() > max_command_length) return false;
@@ -26,23 +29,16 @@ bool command_history::should_add(std::string_view command) const {
 
 void command_history::add(std::string_view command) {
     if (!should_add(command)) return;
-
-    // 移除历史中的重复项（保持最新的位置）
-    auto it = std::find(history_.begin(), history_.end(), command);
-    if (it != history_.end()) {
-        history_.erase(it);
-    }
-
-    // 添加到历史末尾（最新）
-    history_.push_back(std::string(command));
-
-    // 限制历史大小
-    if (history_.size() > max_history_size) {
-        history_.pop_front();
-    }
-
-    // 重置浏览位置
+    remember(pending_, command);
+    remember(history_, command);
     reset_position();
+}
+
+void command_history::remember(std::deque<std::string>& entries, std::string_view command) {
+    const auto existing = std::ranges::find(entries, command);
+    if (existing != entries.end()) entries.erase(existing);
+    entries.emplace_back(command);
+    if (entries.size() > max_history_size) entries.pop_front();
 }
 
 void command_history::reset_position() {
@@ -112,15 +108,29 @@ std::string command_history::search(std::string_view prefix) {
 
 void command_history::clear() {
     history_.clear();
+    pending_.clear();
+    cleared_ = true;
     reset_position();
 }
 
-void command_history::save(const fs::path& path) const {
-    std::ofstream file(path);
+void command_history::save(const fs::path& path) {
+    if (pending_.empty() && !cleared_) return;
+    auto lock_path = path;
+    lock_path += L".lock";
+    const file_lock lock(lock_path);
+    if (!lock) return;
+
+    // Another workspace may have saved history since this instance loaded it.
+    command_history merged;
+    if (!cleared_) merged.read(path);
+    for (const auto& command : pending_) remember(merged.history_, command);
+
+    auto temporary = path;
+    temporary += L".tmp";
+    std::ofstream file(temporary);
     if (!file) return;
 
-    // 保存最近的命令（最多 max_history_size 条）
-    for (const auto& cmd : history_) {
+    for (const auto& cmd : merged.history_) {
         // 转义换行符
         std::string escaped;
         for (char c : cmd) {
@@ -134,9 +144,30 @@ void command_history::save(const fs::path& path) const {
         }
         file << escaped << '\n';
     }
+    file.close();
+    std::error_code error;
+    if (file) {
+        fs::rename(temporary, path, error);
+        if (!error) {
+            pending_.clear();
+            cleared_ = false;
+            return;
+        }
+    }
+    fs::remove(temporary, error);
 }
 
 void command_history::load(const fs::path& path) {
+    auto lock_path = path;
+    lock_path += L".lock";
+    const file_lock lock(lock_path);
+    if (!lock) return;
+    read(path);
+    pending_.clear();
+    cleared_ = false;
+}
+
+void command_history::read(const fs::path& path) {
     std::ifstream file(path);
     if (!file) return;
 

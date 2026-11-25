@@ -9,16 +9,14 @@ interactive_ui::interactive_ui(app& a, ui::terminal& term) : app_(a), term_(term
     size_ = term_.dimensions();
     branch_ = git_branch(app_.root);
 
-    // Day 10: Load command history
-    const auto history_path = app_.root / ".claude" / "command_history.txt";
+    const auto history_path = ode_home() / "command_history.txt";
     if (fs::exists(history_path)) {
         app_.history.load(history_path);
     }
 }
 
 interactive_ui::~interactive_ui() {
-    // Day 10: Save command history
-    const auto history_path = app_.root / ".claude" / "command_history.txt";
+    const auto history_path = ode_home() / "command_history.txt";
     try {
         fs::create_directories(history_path.parent_path());
         app_.history.save(history_path);

@@ -163,14 +163,13 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 
 - exe 只能依赖系统自带的 DLL：KERNEL32、ADVAPI32、SHELL32、WINHTTP，以及 Win10 起系统自带的 UCRT `api-ms-win-crt-*`。不允许依赖 libstdc++、libgcc、libwinpthread 等 MinGW DLL。CI 用 `objdump -p` 检查导入表，出现白名单以外的 DLL 就失败。
 - 第三方依赖放在 `third_party/`，随仓库提交，构建时不联网下载。除 `third_party/lua/`（Lua 5.4 源码）外只允许单头文件。
-- 源码、测试、配置里不允许出现本机路径或用户名。运行时状态（会话、命令历史、主题选择）只写到 `%USERPROFILE%\.ode\`，不写进工作区，也不进 git。
+- 源码、测试、配置里不允许出现本机路径或用户名。运行时状态（会话、命令历史、主题选择）只写到 `%USERPROFILE%\.ode\`，不写进工作区，也不进 git。各工作区共用 `command_history.txt`。
 - 首次运行时没有任何配置文件也必须能启动。缺少密钥时给出一行可操作的提示，并以退出码 2 退出（2026-11-25 已用空 `USERPROFILE` 验证过）。
 - Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。
 - 用 CI 的 `windows-latest` 干净镜像代替"另一台机器"做验证，不搭虚拟机。
 
 已知缺口：
 
-- `.claude/command_history.txt` 写在工作区里，并且被 git 跟踪，会把个人输入历史推送到 remote。改为写到 `~/.ode/`，并从仓库删除。
 - CI 只上传构建产物（artifact），没有打 tag 时自动生成 Release zip 的流程。
 - 两个 remote 的历史不一致：`origin`（lay-code）可以直接快进推送。`cxxode` 上只有一个无关的"初始提交"，推送需要覆盖它。推送前要确定用哪个 remote。
 

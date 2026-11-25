@@ -1,10 +1,32 @@
+#include "app/command_history.hpp"
 #include "ui/editor.hpp"
 #include "ui/render.hpp"
 #include "ui/text.hpp"
 
 #include <doctest.h>
 
+#include <random>
+
 using namespace ode;
+
+TEST_CASE("saving shared command history keeps entries from other workspaces") {
+    const auto dir = fs::temp_directory_path() / ("ode-history-" + std::to_string(std::random_device{}()));
+    fs::create_directories(dir);
+    const auto path = dir / "command_history.txt";
+    command_history first, second, merged;
+    first.add(R"(read C:\work)");
+    first.save(path);
+    second.load(path);
+    first.add("first workspace");
+    second.add("second\nworkspace");
+    first.save(path);
+    second.save(path);
+    merged.load(path);
+    CHECK(merged.previous() == "second\nworkspace");
+    CHECK(merged.previous() == "first workspace");
+    CHECK(merged.previous() == R"(read C:\work)");
+    fs::remove_all(dir);
+}
 
 TEST_CASE("display width counts CJK and emoji as two columns") {
     CHECK(text::width("abc") == 3);

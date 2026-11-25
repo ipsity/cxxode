@@ -22,3 +22,6 @@ Thumbs.db
 
 # Local scripts that may hold secrets
 *.bat
+
+# Local command history from older versions
+.claude/command_history.txt

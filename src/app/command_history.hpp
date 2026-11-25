@@ -49,11 +49,13 @@ public:
     void clear();
 
     // 持久化
-    void save(const fs::path& path) const;
+    void save(const fs::path& path);
     void load(const fs::path& path);
 
 private:
     std::deque<std::string> history_;
+    std::deque<std::string> pending_;
+    bool cleared_ = false;
     size_t position_ = 0;              // 当前浏览位置（0 = 最新）
     std::string draft_;                // 用户正在输入的草稿（浏览历史时保存）
 
@@ -62,6 +64,8 @@ private:
 
     // 判断命令是否应该添加到历史
     bool should_add(std::string_view command) const;
+    static void remember(std::deque<std::string>& entries, std::string_view command);
+    void read(const fs::path& path);
 };
 
 } // namespace ode
