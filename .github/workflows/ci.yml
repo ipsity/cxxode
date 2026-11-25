@@ -59,6 +59,8 @@ jobs:
           } finally {
             Pop-Location
           }
+          # The runner propagates ode's exit code unless the verified step exits explicitly.
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: ode-windows-x64
