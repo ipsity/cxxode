@@ -19,9 +19,18 @@ std::string error_text(std::string_view what) {
 std::optional<std::filesystem::path> find_on_path(std::string_view name) {
     wchar_t buffer[MAX_PATH * 4];
     const auto wide = widen(name);
-    const DWORD n = SearchPathW(nullptr, wide.c_str(), L".exe", static_cast<DWORD>(std::size(buffer)), buffer, nullptr);
-    if (n == 0 || n >= std::size(buffer)) return std::nullopt;
-    return std::filesystem::path(buffer);
+    const auto search = [&](const wchar_t* ext) -> std::optional<std::filesystem::path> {
+        const DWORD n = SearchPathW(nullptr, wide.c_str(), ext, static_cast<DWORD>(std::size(buffer)), buffer, nullptr);
+        if (n == 0 || n >= std::size(buffer)) return std::nullopt;
+        return std::filesystem::path(buffer);
+    };
+    // A bare command such as "npx" is backed by npx.cmd on Windows, not npx.exe, so a shell
+    // tries each PATHEXT entry. Skip that when the caller already gave an extension.
+    if (std::filesystem::path(wide).has_extension()) return search(nullptr);
+    for (const wchar_t* ext : {L".com", L".exe", L".bat", L".cmd"}) {
+        if (auto found = search(ext)) return found;
+    }
+    return std::nullopt;
 }
 
 process_result run_process(const process_request& request, cancel_token& cancel,
