@@ -2,6 +2,7 @@
 
 #include "ui/term.hpp"
 
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -21,58 +22,44 @@ public:
 
     // Replaces the live area. cursor_row < 0 hides the cursor.
     void draw(const std::vector<std::string>& live, int cursor_row, int cursor_column) {
+        if (drawn_ && pending_.empty() && live == last_live_ && cursor_row == last_cursor_row_ &&
+            cursor_column == last_cursor_column_)
+            return;
+
         std::string out = "\x1b[?2026h\x1b[?25l";
-        erase(out);
-        for (const auto& line : pending_) out += line + "\x1b[0m\x1b[K\r\n";
-        pending_.clear();
-
-        // Differential rendering: only update changed lines
-        bool use_differential = !last_live_.empty() && last_live_.size() == live.size();
-
-        if (use_differential) {
-            // Position cursor at start of live area
+        if (drawn_ && pending_.empty() && live.size() == last_live_.size()) {
+            // Same height and nothing scrolls in: overwrite changed rows in place. Erasing
+            // first would blank the rows we skip.
             out += "\r";
+            if (up_ > 0) out += "\x1b[" + std::to_string(up_) + "A";
             for (std::size_t i = 0; i < live.size(); ++i) {
-                if (i < last_live_.size() && live[i] == last_live_[i]) {
-                    // Line unchanged, skip to next
-                    if (i + 1 < live.size()) out += "\x1b[B\r";  // Down + CR
-                } else {
-                    // Line changed, redraw it
-                    out += live[i] + "\x1b[0m\x1b[K";
-                    if (i + 1 < live.size()) out += "\r\n";
-                }
-            }
-            // Move back up to cursor position
-            const int last = static_cast<int>(live.size()) - 1;
-            if (cursor_row >= 0 && cursor_row <= last) {
-                if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
-                out += "\r";
-                if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
-                out += "\x1b[?25h";
-                up_ = cursor_row;
-            } else {
-                up_ = last < 0 ? 0 : last;
+                if (live[i] != last_live_[i]) out += live[i] + "\x1b[0m\x1b[K";
+                if (i + 1 < live.size()) out += "\r\n";
             }
         } else {
-            // Full redraw
+            erase(out);
+            flush_pending(out);
             for (std::size_t i = 0; i < live.size(); ++i) {
                 out += live[i] + "\x1b[0m\x1b[K";
                 if (i + 1 < live.size()) out += "\r\n";
             }
-            const int last = static_cast<int>(live.size()) - 1;
-            if (cursor_row >= 0 && cursor_row <= last) {
-                if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
-                out += "\r";
-                if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
-                out += "\x1b[?25h";
-                up_ = cursor_row;
-            } else {
-                up_ = last < 0 ? 0 : last;
-            }
+        }
+
+        const int last = static_cast<int>(live.size()) - 1;
+        if (cursor_row >= 0 && cursor_row <= last) {
+            if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
+            out += "\r";
+            if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
+            out += "\x1b[?25h";
+            up_ = cursor_row;
+        } else {
+            up_ = last < 0 ? 0 : last;
         }
 
         drawn_ = !live.empty();
-        last_live_ = live;  // Cache for next differential update
+        last_live_ = live;
+        last_cursor_row_ = cursor_row;
+        last_cursor_column_ = cursor_column;
         out += "\x1b[?2026l";
         term_.write(out);
     }
@@ -81,27 +68,27 @@ public:
     void finish() {
         std::string out;
         erase(out);
-        for (const auto& line : pending_) out += line + "\x1b[0m\r\n";
-        pending_.clear();
+        flush_pending(out);
         out += "\x1b[?25h";
-        drawn_ = false;
         term_.write(out);
     }
 
     void clear_screen() {
         term_.write("\x1b[2J\x1b[3J\x1b[H");
+        history_.clear();
         drawn_ = false;
         up_ = 0;
     }
 
-    // After a width change the old live rows cannot be located; clear the viewport only.
+    // After a width change the terminal has re-wrapped everything, so the old live rows
+    // cannot be located. Wipe the scrollback (otherwise stale live areas show up as
+    // duplicates) and replay the committed history so the conversation is not lost.
     void reset_view() {
-        // Complete reset - clear everything including scroll buffer
         std::string out = "\x1b[2J\x1b[3J\x1b[H\x1b[0m";
+        for (const auto& line : history_) out += line + "\x1b[0m\x1b[K\r\n";
         term_.write(out);
         drawn_ = false;
         up_ = 0;
-        pending_.clear();  // Critical: prevent duplicates
     }
 
 private:
@@ -113,9 +100,24 @@ private:
         drawn_ = false;
     }
 
+    void flush_pending(std::string& out) {
+        for (auto& line : pending_) {
+            out += line + "\x1b[0m\x1b[K\r\n";
+            history_.push_back(std::move(line));
+        }
+        pending_.clear();
+        while (history_.size() > max_history) history_.pop_front();
+    }
+
+    // Bounds the replay on resize; older lines are rarely scrolled back to.
+    static constexpr std::size_t max_history = 5000;
+
     ui::terminal& term_;
     std::vector<std::string> pending_;
-    std::vector<std::string> last_live_;  // Cache for differential rendering
+    std::deque<std::string> history_;
+    std::vector<std::string> last_live_;
+    int last_cursor_row_ = -1;
+    int last_cursor_column_ = 0;
     int up_ = 0;
     bool drawn_ = false;
 };

@@ -137,7 +137,6 @@ int interactive_ui::run(std::string first_prompt) {
     if (!first_prompt.empty()) start_turn(std::move(first_prompt));
     auto last_draw = steady::time_point{};
     bool dirty = true;
-    std::vector<std::string> last_rows;  // Cache for dirty checking
     while (!quit_) {
         auto keys = term_.read(busy_ ? 16 : 33);  // 60fps when busy, 30fps when idle
         if (!keys) break;
@@ -171,12 +170,10 @@ int interactive_ui::run(std::string first_prompt) {
         }
         if (dirty) {
             int row = -1, column = 0;
-            auto rows = live(row, column);
-            // Only redraw if content actually changed
-            if (rows != last_rows) {
-                screen_.draw(rows, row, column);
-                last_rows = rows;  // Update cache
-            }
+            // screen skips the write itself when nothing changed; checking rows here
+            // would also hold back committed lines that are waiting to be flushed.
+            const auto rows = live(row, column);
+            screen_.draw(rows, row, column);
             last_draw = now;
             dirty = false;
         }

@@ -16,52 +16,38 @@ struct palette_item {
     int score = 0;  // For fuzzy search ranking
 };
 
+// Aliases (/b, /c, ...) still work when typed but are left out so each command appears once.
 const std::pair<const char*, const char*> builtin_commands[] = {
-    {"/help", "📖 快捷键与命令"},
-    // 🚀 快捷工作流命令
-    {"/ref", "🔄 快速查看编辑 (Read→Edit→Write)"},
-    {"/search", "🔍 搜索并查看 (Grep→Read)"},
-    {"/s", "🔍 搜索快捷方式"},
-    {"/fix", "🔧 智能检查修复"},
-    {"/test", "🧪 运行测试"},
-    {"/t", "🧪 测试快捷方式"},
-    {"/build", "🏗️  构建项目"},
-    {"/b", "🏗️  构建快捷方式"},
-    {"/run", "▶️  运行程序"},
-    {"/r", "▶️  运行快捷方式"},
-    {"/commit", "💾 智能提交"},
-    {"/c", "💾 提交快捷方式"},
-    {"/lint", "✨ 代码检查"},
-    {"/l", "✨ 检查快捷方式"},
-    {"/format", "📐 代码格式化"},
-    {"/fmt", "📐 格式化快捷方式"},
-    {"/doc", "📝 生成文档"},
-    {"/d", "📝 文档快捷方式"},
-    {"/goal", "🎯 设置工作目标"},  // 🆕 Goal 功能
-    // 核心命令
-    {"/compact", "📦 压缩上下文"},
-    {"/model", "🤖 查看或切换模型"},
-    {"/theme", "🎨 切换主题配色"},
-    {"/mode", "🔐 切换权限档"},
-    {"/resume", "⏮️  恢复会话"},
-    {"/undo", "↩️  撤销改动"},
-    {"/clear", "🆕 开始新会话"},
-    {"/cost", "💰 查看用量"},
-    {"/exit", "👋 退出"},
+    {"/help", "快捷键与命令"},
+    {"/ref", "快速查看编辑 (Read→Edit→Write)"},
+    {"/search", "搜索并查看 (Grep→Read)"},
+    {"/fix", "智能检查修复"},
+    {"/test", "运行测试"},
+    {"/build", "构建项目"},
+    {"/run", "运行程序"},
+    {"/commit", "智能提交"},
+    {"/lint", "代码检查"},
+    {"/format", "代码格式化"},
+    {"/doc", "生成文档"},
+    {"/goal", "设置工作目标"},
+    {"/compact", "压缩上下文"},
+    {"/model", "查看或切换模型"},
+    {"/theme", "切换主题配色"},
+    {"/mode", "切换权限档"},
+    {"/resume", "恢复会话"},
+    {"/undo", "撤销改动"},
+    {"/clear", "开始新会话"},
+    {"/cost", "查看用量"},
+    {"/exit", "退出"},
 };
 
 // 命令快捷键映射（用于在面板中显示）
 const std::pair<const char*, const char*> command_shortcuts[] = {
     {"/search", "Alt+S"},
-    {"/s", "Alt+S"},
     {"/test", "Alt+T"},
-    {"/t", "Alt+T"},
     {"/build", "Alt+B"},
-    {"/b", "Alt+B"},
     {"/run", "Alt+R"},
-    {"/r", "Alt+R"},
     {"/commit", "Alt+C"},
-    {"/c", "Alt+C"},
     {"/help", "F1"},
     {"/clear", "Ctrl+N"},
 };
@@ -214,32 +200,9 @@ std::vector<std::string> interactive_ui::palette_items() {
         return a.name < b.name;
     });
 
-    // Format output with categories
+    // Format output: each row is "name\tdescription [shortcut]"
     std::vector<std::string> result;
-    command_kind last_kind = command_kind::builtin;
-
-    // 🆕 显示最近使用（如果有匹配）
-    bool has_recent = false;
     for (const auto& item : items) {
-        auto it = std::find(recent_commands_.begin(), recent_commands_.end(), item.name);
-        if (it != recent_commands_.end() && std::distance(recent_commands_.begin(), it) < 3) {
-            if (!has_recent) {
-                result.push_back("── 最近使用 ──");
-                has_recent = true;
-            }
-        }
-    }
-
-    for (const auto& item : items) {
-        // Add category header when kind changes
-        if (items.size() > 3 && item.kind != last_kind) {
-            const char* category = item.kind == command_kind::skill ? "── Skills ──" :
-                                  item.kind == command_kind::user_command ? "── User Commands ──" : "── Commands ──";
-            result.push_back(std::string(category));
-            last_kind = item.kind;
-        }
-
-        // 🆕 查找快捷键
         std::string shortcut;
         for (const auto& [cmd, key] : command_shortcuts) {
             if (cmd == item.name) {
@@ -248,15 +211,9 @@ std::vector<std::string> interactive_ui::palette_items() {
             }
         }
 
-        // Format: /name - description [shortcut]
         std::string line = item.name + "\t" + item.description;
-        if (!shortcut.empty()) {
-            line += " [" + shortcut + "]";
-        }
+        if (!shortcut.empty()) line += " [" + shortcut + "]";
         result.push_back(line);
-
-        // Limit to avoid overwhelming display
-        if (result.size() >= 15) break;
     }
 
     return result;
@@ -506,18 +463,13 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     // Calculate available space for content
     const int available_rows = size_.rows - reserved_bottom;
 
-    // 🔧 修复：输入框固定在底部，内容区域固定高度
-    // 策略：新内容在底部出现（贴着输入框），旧内容向上滚动
-    if (static_cast<int>(rows.size()) < available_rows) {
-        // 内容不够时，在顶部添加空行，保持输入框在底部
-        int to_add = available_rows - static_cast<int>(rows.size());
-        rows.insert(rows.begin(), to_add, "");
-    } else if (static_cast<int>(rows.size()) > available_rows) {
-        // 内容太多时，保留底部（最新），移除顶部（旧）
-        int to_remove = static_cast<int>(rows.size()) - available_rows;
+    // No padding: committed history sits directly above the live area, so padding
+    // would push the newest messages off the top of the viewport. Trimming is still
+    // needed because the live area must fit on screen to be erasable on the next frame.
+    if (static_cast<int>(rows.size()) > available_rows) {
+        const int to_remove = static_cast<int>(rows.size()) - std::max(0, available_rows);
         rows.erase(rows.begin(), rows.begin() + to_remove);
     }
-    // ✅ 内容区域固定，输入框固定，新内容贴着输入框
 
     const int content_end = static_cast<int>(rows.size());
 
