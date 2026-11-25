@@ -104,6 +104,22 @@ void merge_file(settings& s, const fs::path& path) {
     s.loaded_files.push_back(path);
 }
 
+// Claude Code keeps MCP servers in .mcp.json, not settings.json. The file is either the
+// server map itself or {"mcpServers": {...}}; both shapes appear in the wild.
+void merge_mcp_file(settings& s, const fs::path& path) {
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return;
+    const auto text = read_file(path);
+    auto j = json::parse(text.value_or(""), nullptr, false, true);
+    if (j.is_discarded() || !j.is_object()) {
+        s.warnings.push_back("Ignored invalid JSON in " + path.string());
+        return;
+    }
+    if (j.contains("mcpServers")) merge(s, j);
+    else merge(s, json{{"mcpServers", j}});
+    s.loaded_files.push_back(path);
+}
+
 } // namespace
 
 std::string resolve_model_alias(const std::string& model) {
@@ -155,11 +171,17 @@ settings load_settings(const fs::path& workspace) {
         if (!env(var).empty()) s.providers["anthropic"].default_model = env(var);
     }
     const auto home = user_home();
+    // Later files override earlier ones. .mcp.json is Claude Code's server list and is
+    // read at each of the same scopes, after that scope's settings.json.
     merge_file(s, home / ".claude" / "settings.json");
+    merge_mcp_file(s, home / ".claude" / ".mcp.json");
     merge_file(s, ode_home() / "settings.json");
+    merge_mcp_file(s, ode_home() / ".mcp.json");
     merge_file(s, workspace / ".claude" / "settings.json");
     merge_file(s, workspace / ".claude" / "settings.local.json");
+    merge_mcp_file(s, workspace / ".mcp.json");
     merge_file(s, workspace / ".ode" / "settings.json");
+    merge_mcp_file(s, workspace / ".ode" / ".mcp.json");
     if (s.providers.contains(s.provider) == false) {
         s.warnings.push_back("Unknown provider '" + s.provider + "'; using anthropic.");
         s.provider = "anthropic";

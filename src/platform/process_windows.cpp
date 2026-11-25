@@ -1,5 +1,5 @@
 #include "platform/process.hpp"
-#include "base/utf.hpp"
+#include "platform/win_util.hpp"
 
 #include <mutex>
 #include <thread>
@@ -7,39 +7,8 @@
 namespace ode {
 namespace {
 
-class handle {
-public:
-    explicit handle(HANDLE h = nullptr) : h_(h) {}
-    ~handle() { reset(); }
-    handle(const handle&) = delete;
-    handle& operator=(const handle&) = delete;
-    HANDLE get() const { return h_; }
-    explicit operator bool() const { return h_ && h_ != INVALID_HANDLE_VALUE; }
-    void reset(HANDLE h = nullptr) {
-        if (*this) CloseHandle(h_);
-        h_ = h;
-    }
-private:
-    HANDLE h_;
-};
-
-std::wstring quote(std::wstring_view argument) {
-    if (!argument.empty() && argument.find_first_of(L" \t\"") == std::wstring_view::npos) return std::wstring(argument);
-    std::wstring result(1, L'"');
-    std::size_t slashes = 0;
-    for (const auto c : argument) {
-        if (c == L'\\') {
-            ++slashes;
-            continue;
-        }
-        result.append(c == L'"' ? slashes * 2 + 1 : slashes, L'\\');
-        result += c;
-        slashes = 0;
-    }
-    result.append(slashes * 2, L'\\');
-    result += L'"';
-    return result;
-}
+using win::handle;
+using win::quote;
 
 std::string error_text(std::string_view what) {
     return std::string(what) + " (Windows error " + std::to_string(GetLastError()) + ")";

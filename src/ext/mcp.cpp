@@ -1,66 +1,91 @@
 #include "ext/mcp.hpp"
+#include "base/utf.hpp"
+#include "core/version.hpp"
 
-#include <sstream>
+#include <iostream>
+#include <stdexcept>
 
 namespace ode {
+namespace {
 
-mcp_client::mcp_client(const server_config& config) : config_(config) {}
+constexpr std::size_t max_message = 16 * 1024 * 1024;
 
-mcp_client::~mcp_client() {
-    if (process_ && process_->is_running()) {
-        // Send shutdown notification (best effort)
-        try {
-            json shutdown_msg = {
-                {"jsonrpc", "2.0"},
-                {"method", "shutdown"},
-                {"id", ++request_id_}
-            };
-            write_message(shutdown_msg.dump());
-        } catch (...) {}
+// The spec allows the server to write logging and other notifications at any time, so a reply
+// is whichever line carries the id we asked for, not simply the next line.
+json take_response(std::string& buffer, int id) {
+    while (true) {
+        const auto end = buffer.find('\n');
+        if (end == std::string::npos) return {};
+        std::string line = buffer.substr(0, end);
+        buffer.erase(0, end + 1);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        if (line.size() > max_message) throw std::runtime_error("MCP message exceeds 16 MB");
+
+        auto message = json::parse(line, nullptr, false);
+        if (message.is_discarded() || !message.is_object()) continue;
+        if (!message.contains("id") || !message["id"].is_number_integer() || message["id"].get<int>() != id) continue;
+        return message;
     }
 }
 
-bool mcp_client::initialize() {
-    // Start the MCP server process
-    interactive_process::options opts;
-    opts.env = config_.env;
+} // namespace
 
-    process_ = std::make_unique<interactive_process>(config_.command, config_.args, opts);
-    if (!process_->is_running()) return false;
+mcp_client::mcp_client(server_config config) : config_(std::move(config)) {}
+
+mcp_client::~mcp_client() = default;
+
+bool mcp_client::initialize(std::chrono::milliseconds timeout) {
+    error_.clear();
+    try {
+        interactive_process::options opts;
+        opts.env = config_.env;
+        opts.working_dir = config_.working_dir;
+        process_ = std::make_unique<interactive_process>(config_.command, config_.args, opts);
+    } catch (const std::exception& e) {
+        error_ = e.what();
+        return false;
+    }
 
     try {
-        // Send initialize request
-        json init_params = {
+        const json params = {
             {"protocolVersion", "2024-11-05"},
             {"capabilities", json::object()},
-            {"clientInfo", {
-                {"name", "cxxode"},
-                {"version", "0.2.0"}
-            }}
+            {"clientInfo", {{"name", "ode"}, {"version", std::string(version())}}},
         };
-
-        auto response = send_request("initialize", init_params);
-        if (!response.contains("result")) return false;
-
-        // Send initialized notification
-        json initialized_msg = {
-            {"jsonrpc", "2.0"},
-            {"method", "initialized"}
-        };
-        write_message(initialized_msg.dump());
-
+        const auto response = send_request("initialize", params, timeout);
+        if (response.contains("error")) {
+            error_ = response["error"].value("message", "initialize rejected");
+            process_.reset();
+            return false;
+        }
+        if (!response.contains("result")) {
+            error_ = "initialize returned no result";
+            process_.reset();
+            return false;
+        }
+        // A notification, so it has no id and expects no reply.
+        write_message({{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}});
         return true;
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        error_ = e.what();
+        process_.reset();
         return false;
     }
 }
 
 std::vector<mcp_client::mcp_tool_info> mcp_client::list_tools() {
     std::vector<mcp_tool_info> tools;
-    try {
-        auto response = send_request("tools/list", json::object());
-        if (response.contains("result") && response["result"].contains("tools")) {
-            for (const auto& tool_json : response["result"]["tools"]) {
+    json cursor;
+    // tools/list is paginated; an absent nextCursor is the last page.
+    for (int page = 0; page < 64; ++page) {
+        json params = json::object();
+        if (!cursor.is_null()) params["cursor"] = cursor;
+        const auto response = send_request("tools/list", params, std::chrono::seconds(30));
+        if (response.contains("error") || !response.contains("result")) break;
+        const auto& result = response["result"];
+        if (result.contains("tools") && result["tools"].is_array()) {
+            for (const auto& tool_json : result["tools"]) {
                 mcp_tool_info info;
                 info.name = tool_json.value("name", "");
                 info.description = tool_json.value("description", "");
@@ -68,167 +93,144 @@ std::vector<mcp_client::mcp_tool_info> mcp_client::list_tools() {
                 if (!info.name.empty()) tools.push_back(std::move(info));
             }
         }
-    } catch (const std::exception&) {
-        // Server might not support tools/list
+        if (!result.contains("nextCursor") || !result["nextCursor"].is_string()) break;
+        cursor = result["nextCursor"];
     }
     return tools;
 }
 
 tool_output mcp_client::call_tool(const std::string& name, const json& arguments) {
     try {
-        json params = {
-            {"name", name},
-            {"arguments", arguments}
-        };
-        auto response = send_request("tools/call", params);
+        const auto response = send_request("tools/call", {{"name", name}, {"arguments", arguments}},
+                                           std::chrono::seconds(120));
+        if (response.contains("error")) {
+            const auto message = response["error"].value("message", "MCP error");
+            return {message, true, "错误", {}};
+        }
+        if (!response.contains("result")) return {"No response", true, "无响应", {}};
 
-        if (response.contains("result")) {
-            const auto& result = response["result"];
-            // MCP returns {content: [{type, text}], isError}
-            std::string text;
-            if (result.contains("content") && result["content"].is_array()) {
-                for (const auto& block : result["content"]) {
-                    if (block.contains("text")) {
-                        text += block["text"].get<std::string>();
-                    }
+        // Result content is a list of typed blocks; only text blocks have a string form.
+        const auto& result = response["result"];
+        std::string text;
+        if (result.contains("content") && result["content"].is_array()) {
+            for (const auto& block : result["content"]) {
+                if (block.value("type", "") == "text" && block.contains("text") && block["text"].is_string()) {
+                    text += block["text"].get<std::string>();
                 }
             }
-            bool is_error = result.value("isError", false);
-            return {text, is_error, is_error ? "失败" : "成功", {}};
-        } else if (response.contains("error")) {
-            const auto& error = response["error"];
-            std::string msg = error.value("message", "MCP error");
-            return {msg, true, "错误", {}};
         }
+        const bool is_error = result.value("isError", false);
+        return {text, is_error, is_error ? "失败" : "成功", {}};
     } catch (const std::exception& e) {
         return {e.what(), true, "异常", {}};
     }
-    return {"No response", true, "无响应", {}};
 }
 
-json mcp_client::send_request(const std::string& method, const json& params) {
-    json request = {
-        {"jsonrpc", "2.0"},
-        {"method", method},
-        {"params", params},
-        {"id", ++request_id_}
-    };
-
-    write_message(request.dump());
-    std::string response_str = read_message();
-    return json::parse(response_str);
+json mcp_client::send_request(const std::string& method, const json& params, std::chrono::milliseconds timeout) {
+    const int id = ++request_id_;
+    write_message({{"jsonrpc", "2.0"}, {"method", method}, {"params", params}, {"id", id}});
+    return read_response(id, timeout);
 }
 
-std::string mcp_client::read_message() {
-    // JSON-RPC over stdio uses Content-Length header
-    // Format: Content-Length: N\r\n\r\n{json}
+json mcp_client::read_response(int id, std::chrono::milliseconds timeout) {
+    if (!process_) throw std::runtime_error("MCP server is not running");
+    if (const auto ready = take_response(pending_, id); !ready.is_null()) return ready;
 
-    if (!process_ || !process_->is_running()) throw std::runtime_error("Process not running");
-
-    // Read until we find Content-Length header
-    std::string header;
-    char c;
-    while (process_->read_stdout(&c, 1) == 1) {
-        header += c;
-        if (header.size() >= 4 && header.substr(header.size() - 4) == "\r\n\r\n") break;
-    }
-
-    // Parse Content-Length
-    std::size_t length = 0;
-    const auto prefix = header.find("Content-Length:");
-    if (prefix != std::string::npos) {
-        std::istringstream ss(header.substr(prefix + 15));
-        ss >> length;
-    }
-
-    if (length == 0 || length > 10 * 1024 * 1024) {
-        throw std::runtime_error("Invalid Content-Length");
-    }
-
-    // Read the JSON body
-    std::string body(length, '\0');
-    std::size_t read = 0;
-    while (read < length) {
-        const auto n = process_->read_stdout(&body[read], length - read);
-        if (n <= 0) throw std::runtime_error("Read failed");
-        read += n;
-    }
-
-    return body;
-}
-
-void mcp_client::write_message(const std::string& message) {
-    if (!process_ || !process_->is_running()) throw std::runtime_error("Process not running");
-
-    std::ostringstream header;
-    header << "Content-Length: " << message.size() << "\r\n\r\n";
-
-    const auto header_str = header.str();
-    process_->write_stdin(header_str.data(), header_str.size());
-    process_->write_stdin(message.data(), message.size());
-}
-
-std::vector<mcp_client::server_config> load_mcp_servers(const fs::path& workspace) {
-    std::vector<mcp_client::server_config> servers;
-
-    // Try .mcp.json in workspace
-    const auto mcp_json = workspace / ".mcp.json";
-    if (fs::exists(mcp_json)) {
-        try {
-            const auto content = read_file(mcp_json);
-            if (content) {
-                auto config = json::parse(*content);
-                if (config.contains("mcpServers") && config["mcpServers"].is_object()) {
-                    for (const auto& [name, server] : config["mcpServers"].items()) {
-                        mcp_client::server_config cfg;
-                        cfg.name = name;
-                        cfg.command = server.value("command", "");
-                        cfg.args = server.value("args", std::vector<std::string>{});
-                        if (server.contains("env") && server["env"].is_object()) {
-                            for (const auto& [k, v] : server["env"].items()) {
-                                cfg.env[k] = v.get<std::string>();
-                            }
-                        }
-                        if (!cfg.command.empty()) servers.push_back(cfg);
-                    }
-                }
-            }
-        } catch (const std::exception&) {
-            // Invalid .mcp.json, skip
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    char buffer[8192];
+    while (true) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+        if (left.count() <= 0) throw std::runtime_error("MCP server timed out");
+        const auto n = process_->read_stdout(buffer, sizeof(buffer), left);
+        if (n == 0) {
+            throw std::runtime_error(process_->is_running() ? "MCP server timed out" : "MCP server exited");
         }
+        pending_.append(buffer, n);
+        if (pending_.size() > max_message) throw std::runtime_error("MCP message exceeds 16 MB");
+        if (const auto ready = take_response(pending_, id); !ready.is_null()) return ready;
     }
-
-    return servers;
 }
 
-// Wraps MCP tools as cxxode tools
-std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>& mcp_clients) {
+void mcp_client::write_message(const json& message) {
+    if (!process_ || !process_->is_running()) throw std::runtime_error("MCP server is not running");
+    // Embedded newlines would split one message into several, so they must not survive dump().
+    auto line = message.dump();
+    line.push_back('\n');
+    std::size_t sent = 0;
+    while (sent < line.size()) {
+        const auto n = process_->write_stdin(line.data() + sent, line.size() - sent);
+        if (n == 0) throw std::runtime_error("MCP write failed");
+        sent += n;
+    }
+}
+
+std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>& clients) {
     std::vector<tool> tools;
-
-    for (const auto& client : mcp_clients) {
+    for (const auto& client : clients) {
         if (!client || !client->is_running()) continue;
-
-        const auto mcp_tools = client->list_tools();
-        for (const auto& mcp_tool : mcp_tools) {
+        for (const auto& mcp_tool : client->list_tools()) {
             tool t;
-            // Name format: mcp__servername__toolname
             t.name = "mcp__" + client->server_name() + "__" + mcp_tool.name;
-            t.description = mcp_tool.description + " (via MCP server: " + client->server_name() + ")";
-            t.schema = mcp_tool.schema;
-            t.access = tool_access::execute;  // MCP tools can do anything
+            t.description = mcp_tool.description;
+            if (!client->server_name().empty()) t.description += " (MCP server: " + client->server_name() + ")";
+            t.schema = mcp_tool.schema.is_object() ? mcp_tool.schema : json::object();
+            t.access = tool_access::execute;
+            t.label = [name = mcp_tool.name](const json&) { return name; };
 
-            // Capture client and original tool name
-            auto client_ptr = client;
-            auto original_name = mcp_tool.name;
-            t.run = [client_ptr, original_name](const json& input, tool_context&) -> tool_output {
-                return client_ptr->call_tool(original_name, input);
-            };
-
+            const auto original_name = mcp_tool.name;
+            t.run = [client, original_name](const json& input, tool_context&) { return client->call_tool(original_name, input); };
             tools.push_back(std::move(t));
         }
     }
-
     return tools;
+}
+
+int run_mcp_test_server() {
+    // cin blocks in 4 KB units on a pipe, so the server would never see a short request
+    // until the client closed stdin. ReadFile returns as soon as a line is available.
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+    std::string buffer;
+    char chunk[1024];
+    DWORD got = 0;
+    while (ReadFile(in, chunk, sizeof(chunk), &got, nullptr) && got > 0) {
+        buffer.append(chunk, got);
+        std::size_t end = 0;
+        while ((end = buffer.find('\n')) != std::string::npos) {
+            std::string line = buffer.substr(0, end);
+            buffer.erase(0, end + 1);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty()) continue;
+            const auto message = json::parse(line, nullptr, false);
+            if (message.is_discarded() || !message.is_object() || !message.contains("id")) continue;
+
+            const auto method = message.value("method", "");
+            json result;
+            if (method == "initialize") {
+                result = {{"protocolVersion", "2024-11-05"},
+                          {"capabilities", {{"tools", json::object()}}},
+                          {"serverInfo", {{"name", "ode-test"}, {"version", "0"}}}};
+            } else if (method == "tools/list") {
+                json echo = {{"name", "echo"},
+                             {"description", "Echoes its argument"},
+                             {"inputSchema", {{"type", "object"}}}};
+                result = {{"tools", json::array({echo})}};
+            } else if (method == "tools/call") {
+                const auto args = message.value("params", json::object()).value("arguments", json::object());
+                result = {{"content", json::array({{{"type", "text"}, {"text", args.dump()}}})},
+                          {"isError", false}};
+            } else {
+                std::cout << json{{"jsonrpc", "2.0"},
+                                  {"id", message["id"]},
+                                  {"error", {{"code", -32601}, {"message", "unknown method"}}}}
+                                 .dump()
+                          << '\n'
+                          << std::flush;
+                continue;
+            }
+            std::cout << json{{"jsonrpc", "2.0"}, {"id", message["id"]}, {"result", result}}.dump() << '\n' << std::flush;
+        }
+    }
+    return 0;
 }
 
 } // namespace ode

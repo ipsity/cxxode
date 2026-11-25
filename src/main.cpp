@@ -89,6 +89,10 @@ std::string read_secret() {
 
 int main(int argc, char** argv) {
     const auto args = utf8_args(argc, argv);
+    // Hidden command the MCP tests launch. It must not touch the console or load settings:
+    // both would race with the client that owns its stdin.
+    if (!args.empty() && args[0] == "--mcp-test-server") return run_mcp_test_server();
+
     std::string prompt, model, provider_name, mode_text;
     fs::path workspace = fs::current_path();
     bool print = false, cont = false, login = false, rpc_mode = false, list_models = false;
@@ -200,6 +204,7 @@ int main(int argc, char** argv) {
                     if (v.is_string()) cfg.env[k] = v;
                 }
             }
+            cfg.working_dir = config.value("cwd", "");
             auto client = std::make_shared<mcp_client>(cfg);
             if (client->initialize()) {
                 a.mcp_clients.push_back(std::move(client));
