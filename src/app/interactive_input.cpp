@@ -59,6 +59,11 @@ void interactive_ui::submit() {
 }
 
 void interactive_ui::handle(const ui::key& k, bool allow_lua) {
+    if (k.kind == key_kind::page_up || k.kind == key_kind::page_down || k.kind == key_kind::scroll) {
+        const int page = screen_.page_size();
+        screen_.scroll(k.kind == key_kind::scroll ? k.number : k.kind == key_kind::page_up ? -page : page);
+        return;
+    }
     if (login_) {
         handle_login(k);
         return;
@@ -108,7 +113,7 @@ void interactive_ui::handle(const ui::key& k, bool allow_lua) {
             return;
         }
     }
-    const int inner = std::max(4, size_.columns - 7);
+    const int inner = std::max(1, size_.columns - 5);
     const auto items = palette_items();
     const auto files = file_items();
     switch (k.kind) {

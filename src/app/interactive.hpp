@@ -76,7 +76,10 @@ private:
     std::vector<std::string> thinking_rows(std::string_view line, int columns) const;
     void answer_ask(answer a);
     void cancel();
-    std::vector<std::string> live(int& cursor_row, int& cursor_col);
+    std::vector<std::string> activity_rows() const;
+    std::vector<std::string> footer_rows(int& cursor_row, int& cursor_col);
+    void show_session_history();
+    void show_user_message(std::string_view text);
     std::vector<std::string> palette_rows(int columns);
     enum class command_kind { builtin, skill, user_command };
     struct palette_item {

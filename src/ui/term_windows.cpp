@@ -16,6 +16,7 @@ struct terminal::native {
     DWORD original_out = 0;
     UINT original_cp = 0;
     wchar_t high_surrogate = 0;
+    int wheel_delta = 0;
 };
 
 bool terminal::interactive() {
@@ -35,9 +36,9 @@ terminal::terminal() : native_(std::make_unique<native>()) {
     }
     n.original_cp = GetConsoleOutputCP();
     // Raw key events: Ctrl+C arrives as a key, and modifiers on Tab and Enter stay visible.
-    const DWORD input = (n.original_in | ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT) &
+    const DWORD input = (n.original_in | ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT) &
         ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE |
-          ENABLE_MOUSE_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT);
+          ENABLE_VIRTUAL_TERMINAL_INPUT);
     const DWORD output = n.original_out | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     SetConsoleMode(n.in, input);
     SetConsoleMode(n.out, output);
@@ -60,6 +61,36 @@ size terminal::dimensions() const {
     return {};
 }
 
+std::vector<std::string> terminal::visible_lines() const {
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (!GetConsoleScreenBufferInfo(native_->out, &info)) return {};
+
+    std::vector<std::string> lines;
+    const auto window = info.srWindow;
+    const auto columns = static_cast<SHORT>(window.Right - window.Left + 1);
+    std::vector<CHAR_INFO> cells(columns);
+    const auto last = std::clamp(info.dwCursorPosition.Y, window.Top, window.Bottom);
+    for (int y = window.Top; y <= last; ++y) {
+        const auto row = static_cast<SHORT>(y);
+        SMALL_RECT region{window.Left, row, window.Right, row};
+        if (!ReadConsoleOutputW(native_->out, cells.data(), {columns, 1}, {0, 0}, &region)) return {};
+        std::wstring line;
+        for (const auto& cell : cells) {
+            if (!(cell.Attributes & COMMON_LVB_TRAILING_BYTE)) {
+                const auto ch = cell.Char.UnicodeChar;
+                line.push_back(ch >= L' ' ? ch : L' ');
+            }
+        }
+        const auto end = line.find_last_not_of(L' ');
+        line.resize(end == std::wstring::npos ? 0 : end + 1);
+        lines.push_back(narrow(line));
+    }
+    while (!lines.empty() && lines.back().empty()) lines.pop_back();
+    const auto first = std::ranges::find_if(lines, [](const auto& line) { return !line.empty(); });
+    lines.erase(lines.begin(), first);
+    return lines;
+}
+
 std::optional<std::vector<key>> terminal::read(int wait_ms) {
     auto& n = *native_;
     std::vector<key> keys;
@@ -71,6 +102,16 @@ std::optional<std::vector<key>> terminal::read(int wait_ms) {
     if (!ReadConsoleInputW(n.in, batch, static_cast<DWORD>(std::size(batch)), &count)) return std::nullopt;
 
     for (DWORD i = 0; i < count; ++i) {
+        if (batch[i].EventType == MOUSE_EVENT) {
+            const auto& mouse = batch[i].Event.MouseEvent;
+            if (mouse.dwEventFlags == MOUSE_WHEELED) {
+                n.wheel_delta += static_cast<SHORT>(HIWORD(mouse.dwButtonState));
+                const int steps = n.wheel_delta / WHEEL_DELTA;
+                n.wheel_delta %= WHEEL_DELTA;
+                if (steps) keys.push_back({key_kind::scroll, {}, 0, -3 * steps});
+            }
+            continue;
+        }
         if (batch[i].EventType != KEY_EVENT || !batch[i].Event.KeyEvent.bKeyDown) continue;
         const auto& k = batch[i].Event.KeyEvent;
         const auto state = k.dwControlKeyState;
@@ -85,8 +126,16 @@ std::optional<std::vector<key>> terminal::read(int wait_ms) {
                 bool more = false;
                 for (DWORD j = i + 1; j < count && !more; ++j)
                     more = batch[j].EventType == KEY_EVENT && batch[j].Event.KeyEvent.bKeyDown;
-                DWORD pending = 0;
-                if (!more && GetNumberOfConsoleInputEvents(n.in, &pending)) more = pending > 0;
+                if (!more) {
+                    // Mouse movement and resize events can be queued alongside a single Enter.
+                    INPUT_RECORD queued[256];
+                    DWORD pending = 0;
+                    if (PeekConsoleInputW(n.in, queued, static_cast<DWORD>(std::size(queued)), &pending)) {
+                        more = std::any_of(queued, queued + pending, [](const INPUT_RECORD& event) {
+                            return event.EventType == KEY_EVENT && event.Event.KeyEvent.bKeyDown;
+                        });
+                    }
+                }
                 out.kind = shift || alt || ctrl || more ? key_kind::newline : key_kind::enter;
                 break;
             }

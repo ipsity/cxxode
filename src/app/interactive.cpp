@@ -104,11 +104,14 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
     });
 }
 
-void interactive_ui::start_turn(std::string text, std::vector<std::string> allowed_tools) {
+void interactive_ui::show_user_message(std::string_view text) {
     section("user");
-    // Use cached theme color for user messages
-    screen_.commit(ui::layout({{text, ui::tone::normal}}, size_.columns - 1,
+    screen_.commit(ui::layout({{std::string(text), ui::tone::normal}}, size_.columns - 1,
                               {app_.current_theme.user_message_fg + "› \033[0m", 2}, {"  ", 2}));
+}
+
+void interactive_ui::start_turn(std::string text, std::vector<std::string> allowed_tools) {
+    show_user_message(text);
     start_job([this, text = std::move(text), allowed_tools = std::move(allowed_tools)](agent_events& ev, cancel_token& c) {
         return app_.core->run(text, ev, c, {allowed_tools});
     }, false);
@@ -123,15 +126,41 @@ void interactive_ui::drain() {
     for (auto& e : events) std::visit([this](auto& v) { apply(v); }, e);
 }
 
+void interactive_ui::show_session_history() {
+    for (const auto& message : app_.core->messages) {
+        if (message.from == message::role::user) {
+            const auto text = message.plain_text();
+            if (!text.empty()) show_user_message(text);
+            continue;
+        }
+        for (const auto& block : message.blocks) {
+            if (block.type == block::kind::text && !block.text.empty()) {
+                section("assistant");
+                print_markdown(block.text);
+            } else if (block.type == block::kind::tool_use && block.name == "Bash") {
+                const auto command = block.input.find("command");
+                if (command != block.input.end() && command->is_string()) {
+                    section("tool");
+                    note("$ " + ui::one_line(command->get_ref<const std::string&>()));
+                }
+            }
+        }
+    }
+}
+
 int interactive_ui::run(std::string first_prompt) {
-    // Show welcome screen properly through screen_ (prevents duplication on resize)
-    if (ui::should_show_welcome() && first_prompt.empty() && !welcome_shown_) {
-        const auto welcome = ui::welcome_screen(size_.columns);
-        screen_.commit(welcome);
+    const bool has_shell_output = screen_.start();
+    if (ui::should_show_welcome() && first_prompt.empty() && app_.core->messages.empty() && !welcome_shown_) {
+        if (has_shell_output || size_.rows < 25 || size_.columns < 24) {
+            note("输入 /help 查看命令和快捷键");
+        } else {
+            screen_.commit(ui::welcome_screen(size_.columns));
+        }
         welcome_shown_ = true;
         ui::mark_welcome_shown();
     }
 
+    show_session_history();
     if (!first_prompt.empty()) start_turn(std::move(first_prompt));
     auto last_draw = steady::time_point{};
     bool dirty = true;
@@ -139,10 +168,7 @@ int interactive_ui::run(std::string first_prompt) {
         auto keys = term_.read(busy_ ? 16 : 33);  // 60fps when busy, 30fps when idle
         if (!keys) break;
         const auto now_size = term_.dimensions();
-        if (now_size != size_) {
-            screen_.reset_view();
-            dirty = true;
-        }
+        if (now_size != size_) dirty = true;
         size_ = now_size;
         for (const auto& k : *keys) {
             handle(k);
@@ -167,17 +193,8 @@ int interactive_ui::run(std::string first_prompt) {
         }
         if (dirty) {
             int row = -1, column = 0;
-            // screen skips the write itself when nothing changed; checking rows here
-            // would also hold back committed lines that are waiting to be flushed.
-            auto rows = live(row, column);
-            const auto overflow = std::max(0, static_cast<int>(rows.size()) - size_.rows);
-            rows.erase(rows.begin(), rows.begin() + overflow);
-            if (row >= 0) row -= overflow;
-            const auto columns = std::max(0, size_.columns - 1);
-            column = std::min(column, columns);
-            // The renderer's cursor offsets assume each entry occupies exactly one terminal row.
-            for (auto& line : rows) line = ui::clip_styled_line(line, columns);
-            screen_.draw(rows, row, column);
+            const auto footer = footer_rows(row, column);
+            screen_.draw(size_, activity_rows(), footer, row, column);
             last_draw = now;
             dirty = false;
         }

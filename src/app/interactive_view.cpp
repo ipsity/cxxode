@@ -234,10 +234,9 @@ std::string interactive_ui::status_line(int columns) const {
            paint(tone::dim, right.substr(mode_text.size()));
 }
 
-std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) {
+std::vector<std::string> interactive_ui::activity_rows() const {
     std::vector<std::string> rows;
-    rows.reserve(size_.rows);  // Preallocate for performance
-    const int columns = std::max(20, size_.columns - 1);
+    const int columns = std::max(1, size_.columns - 1);
 
     if (!think_stream_.empty()) {
         for (auto& r : thinking_rows(think_stream_, columns)) rows.push_back(std::move(r));
@@ -260,17 +259,15 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         for (std::size_t i = lines.size() > keep ? lines.size() - keep : 0; i < lines.size(); ++i)
             rows.push_back("   " + paint(tone::dim, "│ " + lines[i]));
     }
-    if (ask_) {
-        const auto head = std::string(ui::verb(ask_->name)) + " ";
-        rows.push_back(" " + paint(tone::accent_bold, "? " + head) + paint(tone::bold, text::keep_head(ask_->label, columns - 6)));
-        rows.push_back("   " + paint(tone::accent, "⏎") + paint(tone::dim, " 允许   ") + paint(tone::accent, "esc") +
-                       paint(tone::dim, " 拒绝   ") + paint(tone::accent, "a") +
-                       paint(tone::dim, " 总是允许 " + text::keep_head(ask_->rule, std::max(8, columns - 32))));
-    } else if (busy_ && running_.empty() && (thinking_ || stream_.empty())) {
+    if (!ask_ && busy_ && running_.empty() && (thinking_ || stream_.empty())) {
         rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking", app_.current_theme)) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
     }
-    if (!hint_.empty()) rows.push_back("  " + paint(tone::dim, hint_));
+    return rows;
+}
 
+std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& cursor_col) {
+    const int columns = std::max(1, size_.columns - 1);
+    std::vector<std::string> rows;
     if (login_) {
         cursor_row = -1;
         cursor_col = 0;
@@ -300,7 +297,6 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         return rows;
     }
 
-    // Prepare bottom UI elements (but don't add to rows yet)
     auto palette = palette_rows(columns);
 
     std::vector<std::string> file_completion;
@@ -343,36 +339,40 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
-    // Calculate input box dimensions
-    const int inner = columns - 4;
-    const auto l = editor_.arrange(inner);
-    const int max_input_lines = std::clamp(size_.rows - 3 - static_cast<int>(palette.size()) -
-        static_cast<int>(file_completion.size()) - static_cast<int>(hints.size()), 1, 10);
-    const int actual_input_lines = std::min(static_cast<int>(l.rows.size()), max_input_lines);
-    const int first_input_line = std::max(0, l.cursor_row - actual_input_lines + 1);
-    const int input_box_height = actual_input_lines + 2;  // +2 for borders
-
-    // Reserve space for: input box + palette + file completion + hints + status
-    const int reserved_bottom = input_box_height +
-                               static_cast<int>(palette.size()) +
-                               static_cast<int>(file_completion.size()) +
-                               static_cast<int>(hints.size()) +
-                               1;  // status line
-
-    // Calculate available space for content and trim if needed
-    const int available_rows = size_.rows - reserved_bottom;
-    if (static_cast<int>(rows.size()) > available_rows) {
-        const int to_remove = static_cast<int>(rows.size()) - std::max(0, available_rows);
-        rows.erase(rows.begin(), rows.begin() + to_remove);
+    const bool show_borders = size_.rows >= (ask_ ? 7 : 5);
+    const bool show_status = show_borders || (!ask_ && size_.rows >= 3);
+    const int chrome = (show_borders ? 2 : 0) + (show_status ? 1 : 0);
+    const auto extra_rows = static_cast<std::size_t>(std::max(0, size_.rows - chrome - 2));
+    if (ask_ && size_.rows > 1) {
+        const auto head = std::string(ui::verb(ask_->name)) + " ";
+        if (size_.rows > 2) {
+            rows.push_back(" " + paint(tone::accent_bold, "? " + head) + paint(tone::bold, text::keep_head(ask_->label, columns - 6)));
+        }
+        rows.push_back("   " + paint(tone::accent, "⏎") + paint(tone::dim, " 允许   ") + paint(tone::accent, "esc") +
+                       paint(tone::dim, " 拒绝   ") + paint(tone::accent, "a") +
+                       paint(tone::dim, " 总是允许 " + text::keep_head(ask_->rule, std::max(8, columns - 32))));
+    }
+    if (!hint_.empty() && rows.size() < extra_rows) rows.push_back("  " + paint(tone::dim, hint_));
+    for (auto* list : {&palette, &file_completion, &hints}) {
+        for (auto& line : *list) {
+            if (rows.size() >= extra_rows) break;
+            rows.push_back(std::move(line));
+        }
     }
 
-    const int content_end = static_cast<int>(rows.size());
+    const auto l = editor_.arrange(std::max(1, columns - 4));
+    const int max_input_lines = std::clamp(size_.rows - chrome - static_cast<int>(rows.size()) - 1, 1, 10);
+    const int actual_input_lines = std::min(static_cast<int>(l.rows.size()), max_input_lines);
+    const int first_input_line = std::max(0, l.cursor_row - actual_input_lines + 1);
 
-    // Draw input box with borders
-    std::string top_border;
-    top_border.reserve(columns + 20);
-    for (int i = 0; i < columns; ++i) top_border += "─";
-    rows.push_back(app_.current_theme.border_fg + "\033[1m" + top_border + "\033[0m");
+    std::string border;
+    if (show_borders) {
+        border = app_.current_theme.border_fg + "\033[1m";
+        for (int i = 0; i < columns; ++i) border += "─";
+        border += "\033[0m";
+        rows.push_back(border);
+    }
+    const auto input_start = static_cast<int>(rows.size());
 
     // Input lines
     for (int i = first_input_line; i < first_input_line + actual_input_lines; ++i) {
@@ -389,22 +389,10 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
-    // Bottom border
-    std::string bottom_border;
-    bottom_border.reserve(columns + 20);
-    for (int i = 0; i < columns; ++i) bottom_border += "─";
-    rows.push_back(app_.current_theme.border_fg + "\033[1m" + bottom_border + "\033[0m");
+    if (show_borders) rows.push_back(std::move(border));
+    if (show_status) rows.push_back(status_line(columns));
 
-    // Now add palette, file completion, and hints below the input box
-    for (auto& r : palette) rows.push_back(std::move(r));
-    for (auto& r : file_completion) rows.push_back(std::move(r));
-    for (auto& r : hints) rows.push_back(std::move(r));
-
-    // Status line at very bottom
-    rows.push_back(status_line(columns));
-
-    // Calculate cursor position (input box is now at content_end)
-    cursor_row = ask_ ? -1 : content_end + 1 + l.cursor_row - first_input_line;
+    cursor_row = ask_ ? -1 : input_start + l.cursor_row - first_input_line;
     cursor_col = l.cursor_column + 2;  // +2 for "› " width
 
     return rows;

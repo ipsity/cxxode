@@ -27,6 +27,7 @@ constexpr const char* help_text =
     "\n"
     "**导航与历史**\n"
     "- `↑` `↓` 浏览命令历史或多行移动\n"
+    "- `Page Up` / `Page Down` 或鼠标滚轮翻阅对话，翻到底部后继续跟随新输出\n"
     "- `Home` / `End` 行首/行尾\n"
     "- `←` / `→` 字符移动\n"
     "\n"
@@ -376,6 +377,7 @@ bool interactive_ui::command(const std::string& line) {
                 app_.open_session(sessions[index - 1].path);
                 usage_ = {};
                 note("已恢复 " + std::to_string(core.messages.size()) + " 条消息：" + ui::one_line(sessions[index - 1].title));
+                show_session_history();
             }
         }
     } else if (app_.lua && std::ranges::find(app_.lua->commands(), name.substr(1)) != app_.lua->commands().end()) {

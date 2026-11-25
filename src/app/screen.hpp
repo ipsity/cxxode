@@ -1,125 +1,132 @@
 #pragma once
 
+#include "ui/render.hpp"
 #include "ui/term.hpp"
 
+#include <algorithm>
 #include <deque>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ode {
 
-// Inline renderer. Finished output scrolls into the terminal's own history;
-// only the live area at the bottom (activity, input box, status) is redrawn.
 class screen {
 public:
     explicit screen(ui::terminal& term) : term_(term) {}
+    ~screen() { if (active_) term_.write("\x1b[?1049l"); }
 
-    void commit(std::string line) { pending_.push_back(std::move(line)); }
-    void commit(const std::vector<std::string>& lines) {
-        pending_.insert(pending_.end(), lines.begin(), lines.end());
+    bool start() {
+        for (auto& line : term_.visible_lines()) commit(std::move(line));
+        first_session_row_ = first_row_ + history_.size();
+        term_.write("\x1b[?1049h");
+        active_ = true;
+        return !history_.empty();
     }
-    bool has_pending() const { return !pending_.empty(); }
 
-    // Replaces the live area. cursor_row < 0 hides the cursor.
-    void draw(const std::vector<std::string>& live, int cursor_row, int cursor_column) {
-        if (drawn_ && pending_.empty() && live == last_live_ && cursor_row == last_cursor_row_ &&
-            cursor_column == last_cursor_column_)
-            return;
+    void commit(std::string line) {
+        history_.push_back(std::move(line));
+        if (history_.size() > max_history) {
+            history_.pop_front();
+            ++first_row_;
+        }
+    }
+
+    void commit(std::vector<std::string> lines) {
+        for (auto& line : lines) commit(std::move(line));
+    }
+
+    void scroll(int delta) {
+        if (delta < 0) {
+            const auto top = std::max(first_row_, anchor_.value_or(tail_top_));
+            anchor_ = top - std::min(top - first_row_, static_cast<std::size_t>(-delta));
+            if (*anchor_ >= tail_top_) anchor_.reset();
+        } else if (anchor_) {
+            *anchor_ += static_cast<std::size_t>(delta);
+            if (*anchor_ >= tail_top_) anchor_.reset();
+        }
+    }
+
+    int page_size() const { return std::max(1, visible_rows_ - 1); }
+
+    void draw(ui::size size, const std::vector<std::string>& activity,
+              const std::vector<std::string>& footer, int cursor_row, int cursor_column) {
+        const auto height = static_cast<std::size_t>(size.rows);
+        const auto footer_start = footer.size() > height ? footer.size() - height : 0;
+        const auto capacity = height - (footer.size() - footer_start);
+        visible_rows_ = static_cast<int>(capacity);
+        const auto total = history_.size() + activity.size();
+        const auto tail = total - std::min(total, capacity);
+        tail_top_ = first_row_ + tail;
+        const auto top = std::min(total, std::max(first_row_, anchor_.value_or(tail_top_)) - first_row_);
+
+        std::vector<std::string> frame;
+        frame.reserve(height);
+        for (auto i = top; i < std::min(total, top + capacity); ++i) {
+            frame.push_back(i < history_.size() ? history_[i] : activity[i - history_.size()]);
+        }
+        frame.resize(capacity);
+        frame.insert(frame.end(), footer.begin() + footer_start, footer.end());
+        if (cursor_row >= static_cast<int>(footer_start))
+            cursor_row += static_cast<int>(capacity) - static_cast<int>(footer_start);
+        else cursor_row = -1;
+
+        const auto columns = std::max(0, size.columns - 1);
+        cursor_column = std::min(cursor_column, columns);
+        for (auto& line : frame) line = ui::clip_styled_line(line, columns);
+        if (size == last_size_ && frame == last_frame_ && cursor_row == last_cursor_row_ &&
+            cursor_column == last_cursor_column_) return;
 
         std::string out = "\x1b[?2026h\x1b[?25l";
-        if (drawn_ && pending_.empty() && live.size() == last_live_.size()) {
-            // Same height and nothing scrolls in: overwrite changed rows in place. Erasing
-            // first would blank the rows we skip.
-            out += "\r";
-            if (up_ > 0) out += "\x1b[" + std::to_string(up_) + "A";
-            for (std::size_t i = 0; i < live.size(); ++i) {
-                if (live[i] != last_live_[i]) out += live[i] + "\x1b[0m\x1b[K";
-                if (i + 1 < live.size()) out += "\r\n";
-            }
-        } else {
-            erase(out);
-            flush_pending(out);
-            for (std::size_t i = 0; i < live.size(); ++i) {
-                out += live[i] + "\x1b[0m\x1b[K";
-                if (i + 1 < live.size()) out += "\r\n";
+        for (std::size_t i = 0; i < frame.size(); ++i) {
+            if (size != last_size_ || i >= last_frame_.size() || frame[i] != last_frame_[i]) {
+                out += "\x1b[" + std::to_string(i + 1) + ";1H" + frame[i] + "\x1b[0m\x1b[K";
             }
         }
-
-        const int last = static_cast<int>(live.size()) - 1;
-        if (cursor_row >= 0 && cursor_row <= last) {
-            if (last - cursor_row) out += "\x1b[" + std::to_string(last - cursor_row) + "A";
-            out += "\r";
-            if (cursor_column > 0) out += "\x1b[" + std::to_string(cursor_column) + "C";
-            out += "\x1b[?25h";
-            up_ = cursor_row;
-        } else {
-            up_ = last < 0 ? 0 : last;
+        if (cursor_row >= 0) {
+            out += "\x1b[" + std::to_string(cursor_row + 1) + ";" + std::to_string(cursor_column + 1) + "H\x1b[?25h";
         }
-
-        drawn_ = !live.empty();
-        last_live_ = live;
-        last_cursor_row_ = cursor_row;
-        last_cursor_column_ = cursor_column;
         out += "\x1b[?2026l";
         term_.write(out);
+        last_frame_ = std::move(frame);
+        last_size_ = size;
+        last_cursor_row_ = cursor_row;
+        last_cursor_column_ = cursor_column;
     }
 
-    // Removes the live area and flushes pending output, leaving the cursor on a fresh line.
     void finish() {
-        std::string out;
-        erase(out);
-        flush_pending(out);
-        out += "\x1b[?25h";
-        term_.write(out);
+        term_.write("\x1b[?1049l\x1b[0m\x1b[?25h");
+        active_ = false;
+        // Keep the new transcript available in the shell after the alternate screen closes.
+        const auto columns = std::max(0, term_.dimensions().columns - 1);
+        for (auto i = std::max(first_session_row_, first_row_) - first_row_; i < history_.size(); ++i) {
+            term_.write(ui::clip_styled_line(history_[i], columns) + "\x1b[0m\r\n");
+        }
     }
 
     void clear_screen() {
-        term_.write("\x1b[2J\x1b[3J\x1b[H");
+        first_row_ += history_.size();
         history_.clear();
-        drawn_ = false;
-        up_ = 0;
-    }
-
-    // After a width change the terminal has re-wrapped everything, so the old live rows
-    // cannot be located. Wipe the scrollback (otherwise stale live areas show up as
-    // duplicates) and replay the committed history so the conversation is not lost.
-    void reset_view() {
-        std::string out = "\x1b[2J\x1b[3J\x1b[H\x1b[0m";
-        for (const auto& line : history_) out += line + "\x1b[0m\x1b[K\r\n";
-        term_.write(out);
-        drawn_ = false;
-        up_ = 0;
+        anchor_.reset();
+        tail_top_ = first_row_;
     }
 
 private:
-    void erase(std::string& out) {
-        if (!drawn_) return;
-        out += "\r";
-        if (up_ > 0) out += "\x1b[" + std::to_string(up_) + "A";
-        out += "\x1b[J";
-        drawn_ = false;
-    }
-
-    void flush_pending(std::string& out) {
-        for (auto& line : pending_) {
-            out += line + "\x1b[0m\x1b[K\r\n";
-            history_.push_back(std::move(line));
-        }
-        pending_.clear();
-        while (history_.size() > max_history) history_.pop_front();
-    }
-
-    // Bounds the replay on resize; older lines are rarely scrolled back to.
     static constexpr std::size_t max_history = 5000;
-
     ui::terminal& term_;
-    std::vector<std::string> pending_;
     std::deque<std::string> history_;
-    std::vector<std::string> last_live_;
+    // An absolute row keeps the viewport anchored when new output arrives or old rows expire.
+    std::size_t first_row_ = 0;
+    std::size_t first_session_row_ = 0;
+    std::size_t tail_top_ = 0;
+    std::optional<std::size_t> anchor_;
+    int visible_rows_ = 0;
+    std::vector<std::string> last_frame_;
+    ui::size last_size_{};
     int last_cursor_row_ = -1;
     int last_cursor_column_ = 0;
-    int up_ = 0;
-    bool drawn_ = false;
+    bool active_ = false;
 };
 
 } // namespace ode
