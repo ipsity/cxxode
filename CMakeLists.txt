@@ -24,8 +24,6 @@ add_library(cxxode_core STATIC
     src/core/agent.cpp
     src/core/prompt.cpp
     src/core/rpc.cpp
-    src/core/tool_access.cpp
-    src/core/tool_scheduler.cpp
     src/core/tool_suggestion.cpp
     src/core/error_handler.cpp
     src/core/command_history.cpp
@@ -42,7 +40,6 @@ add_library(cxxode_core STATIC
     src/tools/bash_tool.cpp
     src/theme/theme.cpp
     src/ui/render.cpp
-    src/ui/theme.cpp
     src/ui/welcome.cpp
     src/skills/skill.cpp
     src/skills/make_tools.cpp

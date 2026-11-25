@@ -17,26 +17,11 @@ std::string stop_text(stop_reason stop) {
     }
 }
 
-// 发送详细进度事件（Day 6/7 集成）
-void send_detailed_progress(agent_events& events, const std::string& tool_name, int percent,
-                           const std::string& step, int64_t elapsed_ms, int64_t estimated_ms = 0,
-                           size_t bytes_io = 0, size_t memory_kb = 0) {
-    if (events.tool_progress_detail) {
-        events.tool_progress_detail(tool_name, percent, step, elapsed_ms, estimated_ms, bytes_io, memory_kb);
-    }
-}
-
 } // namespace
 
 agent::agent(provider& model_provider, std::vector<tool> tools, permission_rules& rules, fs::path root,
              std::vector<hook_config> hooks)
-    : provider_(model_provider), tools_(std::move(tools)), rules_(rules), root_(std::move(root)), hooks_(std::move(hooks)) {
-    // 初始化进度追踪器（Day 6/7 集成）
-    progress_tracker_ = std::make_unique<ToolProgressTracker>();
-
-    // 智能调度器暂时不初始化，保持现有简单并行逻辑
-    // 未来可通过配置启用：scheduler_ = std::make_unique<SmartToolScheduler>(...)
-}
+    : provider_(model_provider), tools_(std::move(tools)), rules_(rules), root_(std::move(root)), hooks_(std::move(hooks)) {}
 
 const tool* agent::find_tool(std::string_view name) const {
     for (const auto& t : tools_) if (t.name == name) return &t;
@@ -277,21 +262,12 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
 
     if (events.tool_started) events.tool_started(*t, call.input);
 
-    // Day 6/7: 进度追踪集成 - 开始时发送 0% 进度
-    const auto start_time = std::chrono::steady_clock::now();
-    send_detailed_progress(events, call.name, 0, "开始执行", 0, 0);
-
     tool_context ctx{root_, &cancel, t->access == tool_access::write ? &backup : nullptr, &seen, events.tool_progress};
     try {
         out = t->run(call.input, ctx);
     } catch (const std::exception& e) {
         out = {std::string("Tool failed: ") + e.what(), true, "失败", {}};
     }
-
-    // Day 6/7: 进度追踪集成 - 结束时发送 100% 进度
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_time).count();
-    send_detailed_progress(events, call.name, 100, out.is_error ? "执行失败" : "完成", elapsed, 0);
 
     if (events.tool_finished) events.tool_finished(*t, call.input, out);
 

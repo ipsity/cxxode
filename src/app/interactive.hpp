@@ -18,25 +18,12 @@ namespace ode {
 
 using steady = std::chrono::steady_clock;
 
-// Forward declaration for detailed progress
-class ToolProgressTracker;
-
 // Events travel from the agent thread to the UI thread through this queue.
 struct ev_text { std::string text; };
 struct ev_thinking { std::string text; std::string signature; };
 struct ev_request {};
 struct ev_tool_start { std::string name, label; };
-struct ev_progress {
-    std::string text;  // 兼容：简单文本进度
-    // 详细进度信息（可选）
-    std::string tool_name;
-    int percent = -1;              // -1 表示无进度条，0-100 显示进度
-    std::string current_step;      // 当前步骤描述
-    int64_t elapsed_ms = 0;        // 已用时间（毫秒）
-    int64_t estimated_ms = 0;      // 预计剩余（毫秒）
-    size_t bytes_io = 0;           // IO 字节数
-    size_t memory_kb = 0;          // 内存使用（KB）
-};
+struct ev_progress { std::string text; };
 struct ev_tool_done { std::string name, label, summary, detail, full; bool error = false; };
 struct ev_ask { std::string name, label, rule; std::shared_ptr<std::promise<answer>> reply; };
 struct ev_usage { std::size_t context = 0, input = 0, output = 0; };
@@ -47,13 +34,6 @@ using ui_event = std::variant<ev_text, ev_thinking, ev_request, ev_tool_start, e
 struct running_tool {
     std::string name, label;
     steady::time_point started;
-    // 详细进度信息（-1 表示无进度条）
-    int percent = -1;
-    std::string current_step;
-    int64_t elapsed_ms = 0;
-    int64_t estimated_ms = 0;
-    size_t bytes_io = 0;
-    size_t memory_kb = 0;
 };
 
 class interactive_ui {

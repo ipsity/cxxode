@@ -86,36 +86,6 @@ std::string seconds(steady::time_point since) {
     return s < 60 ? std::to_string(s) + "s" : std::to_string(s / 60) + "m" + std::to_string(s % 60) + "s";
 }
 
-// 渲染进度条 [████████░░] 50%
-std::string progress_bar(int percent, int width = 20) {
-    if (percent < 0) return "";
-    percent = std::clamp(percent, 0, 100);
-    const int filled = (percent * width) / 100;
-    std::string bar = "[";
-    for (int i = 0; i < width; ++i) {
-        bar += (i < filled) ? "█" : "░";
-    }
-    bar += "] " + std::to_string(percent) + "%";
-    return bar;
-}
-
-// 格式化时间（毫秒 -> 可读字符串）
-std::string format_ms(int64_t ms) {
-    if (ms <= 0) return "";
-    if (ms < 1000) return std::to_string(ms) + "ms";
-    const auto s = ms / 1000;
-    if (s < 60) return std::to_string(s) + "s";
-    return std::to_string(s / 60) + "m" + std::to_string(s % 60) + "s";
-}
-
-// 格式化字节数
-std::string format_bytes(size_t bytes) {
-    if (bytes == 0) return "";
-    if (bytes < 1024) return std::to_string(bytes) + "B";
-    if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + "KB";
-    return std::to_string(bytes / (1024 * 1024)) + "MB";
-}
-
 } // namespace
 
 std::vector<std::string> interactive_ui::palette_items() {
@@ -331,46 +301,9 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     }
     for (const auto& t : running_) {
         const auto head = spinner_with_color(t.started, t.name, app_.current_theme) + " " + std::string(ui::verb(t.name)) + " ";
-
-        // 有详细进度信息
-        if (t.percent >= 0) {
-            // 第一行：spinner + 名称 + 标签 + 进度条 + 时间
-            const auto pbar = progress_bar(t.percent, 10);  // 紧凑的 10 字符进度条
-            const auto elapsed = format_ms(t.elapsed_ms);
-            const auto estimated = t.estimated_ms > 0 ? "~" + format_ms(t.estimated_ms) : "";
-            const auto timing = elapsed + (estimated.empty() ? "" : "/" + estimated);
-
-            // 计算剩余空间
-            const int fixed_width = 4 + text::width(head) + text::width(pbar) + text::width(timing) + 4;
-            const auto label = text::keep_head(t.label, std::max(8, columns - fixed_width));
-
-            rows.push_back(" " + paint(tone::accent, head) + label + "  " +
-                          paint(tone::accent, pbar) + "  " + paint(tone::dim, timing));
-
-            // 第二行：当前步骤（如果有）
-            if (!t.current_step.empty()) {
-                const auto step_text = "  " + t.current_step;
-                rows.push_back("   " + paint(tone::dim, "│ " + text::keep_head(step_text, columns - 6)));
-            }
-
-            // 第三行：资源信息（如果显著）
-            if (t.bytes_io > 1024 * 100 || t.memory_kb > 1024) {  // 超过 100KB IO 或 1MB 内存才显示
-                std::string resources;
-                if (t.bytes_io > 0) resources += format_bytes(t.bytes_io) + " IO";
-                if (t.memory_kb > 1024) {
-                    if (!resources.empty()) resources += "  ";
-                    resources += format_bytes(t.memory_kb * 1024) + " mem";
-                }
-                if (!resources.empty()) {
-                    rows.push_back("   " + paint(tone::dim, "│ " + resources));
-                }
-            }
-        } else {
-            // 传统显示（无进度信息）
-            const auto tail = "  " + seconds(t.started);
-            const auto label = text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
-            rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
-        }
+        const auto tail = "  " + seconds(t.started);
+        const auto label = text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
+        rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
     }
     if (!progress_tail_.empty()) {
         auto lines = text::wrap(progress_tail_, columns - 6);
