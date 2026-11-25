@@ -20,8 +20,9 @@
 .DS_Store
 Thumbs.db
 
-# Local archive
+# Local archives
 /archive/
+/legacy/
 
 # Local scripts that may hold secrets
 *.bat
