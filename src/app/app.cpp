@@ -5,6 +5,12 @@
 
 namespace ode {
 
+void app::refresh_credentials() {
+    provider_config resolved;
+    credential_error = resolve_provider(config, config.provider, resolved);
+    provider_cfg = std::move(resolved);
+}
+
 bool app::open_session(const std::optional<fs::path>& resume) {
     log.close();
     if (resume) {

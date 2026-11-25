@@ -50,7 +50,8 @@ public:
     virtual model_reply send(const model_request& request, const stream_events& events, cancel_token& cancel) = 0;
 };
 
-std::unique_ptr<provider> make_provider(const provider_config& config);
+// The caller owns config and may refresh credentials between requests.
+std::unique_ptr<provider> make_provider(provider_config& config);
 
 // Exposed for offline tests: decode a recorded SSE stream into a reply.
 model_reply decode_stream(protocol kind, std::string_view sse_bytes, const stream_events& events = {});

@@ -1,5 +1,7 @@
 #include "app/interactive.hpp"
 
+#include <cctype>
+
 namespace ode {
 
 using ui::paint;
@@ -7,14 +9,11 @@ using ui::tone;
 
 namespace {
 
-enum class command_kind { builtin, skill, user_command };
+constexpr std::size_t menu_rows = 6;
 
-struct palette_item {
-    std::string name;
-    std::string description;
-    command_kind kind;
-    int score = 0;  // For fuzzy search ranking
-};
+std::size_t first_visible(std::size_t selected, std::size_t visible) {
+    return selected < visible ? 0 : selected + 1 - visible;
+}
 
 // Aliases (/b, /c, ...) still work when typed but are left out so each command appears once.
 const std::pair<const char*, const char*> builtin_commands[] = {
@@ -27,6 +26,8 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/run", "运行程序"},
     {"/commit", "智能提交"},
     {"/lint", "代码检查"},
+    {"/login", "登录或更新 API 密钥"},
+    {"/logout", "清除保存的 API 密钥"},
     {"/format", "代码格式化"},
     {"/doc", "生成文档"},
     {"/goal", "设置工作目标"},
@@ -88,111 +89,54 @@ std::string seconds(steady::time_point since) {
 
 } // namespace
 
-std::vector<std::string> interactive_ui::palette_items() {
-    std::vector<palette_item> items;
-    const auto& t = editor_.text();
-
-    // 🔧 修复：防止对话框突然消失
-    // 策略：在命令执行期间（busy_ 时），继续显示上次的命令
-    bool just_executed = false;
-    if (!last_executed_command_.empty()) {
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            steady::now() - last_executed_time_).count();
-        // 在执行后 1000ms 内，或者在 busy 状态时，继续显示
-        if (elapsed < 1000 || busy_) {
-            just_executed = true;
-        } else {
-            last_executed_command_.clear();  // 清除过期的命令
-        }
-    }
-
-    // Show palette if input starts with / OR just executed a command OR busy
-    if (!just_executed && (t.empty() || t.front() != '/')) return {};
-
-    // Extract search query (remove leading /)
-    std::string query = just_executed ? last_executed_command_.substr(1) : t.substr(1);
-
-    // Fuzzy match function (checks if all chars in query appear in target in order)
-    auto fuzzy_match = [](std::string_view query, std::string_view target) -> int {
-        if (query.empty()) return 100;  // Empty query matches everything
-
-        // Boost exact prefix match significantly
-        if (target.starts_with(query)) return 1000;
-
-        size_t qi = 0, ti = 0;
-        int score = 0;
-        while (qi < query.size() && ti < target.size()) {
-            if (std::tolower(query[qi]) == std::tolower(target[ti])) {
-                score += 10;
-                if (ti == 0 || target[ti-1] == ' ' || target[ti-1] == '/') {
-                    score += 5;  // Bonus for word start
-                }
-                qi++;
+std::vector<interactive_ui::palette_item> interactive_ui::palette_items() const {
+    const auto& draft = editor_.text();
+    if (busy_ || selection_ || login_ || !draft.starts_with('/') || draft.find_first_of(" \t\r\n") != std::string::npos) return {};
+    const auto query = std::string_view(draft).substr(1);
+    const auto score = [query](std::string_view name) -> int {
+        if (query.empty()) return 100;
+        name.remove_prefix(1);
+        if (name == query) return 1100;
+        if (name.starts_with(query)) return 1000;
+        std::size_t matched = 0;
+        int rank = 0;
+        for (std::size_t i = 0; i < name.size() && matched < query.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(name[i])) == std::tolower(static_cast<unsigned char>(query[matched]))) {
+                rank += i == 0 || name[i - 1] == ' ' ? 15 : 10;
+                ++matched;
             }
-            ti++;
         }
-        return qi == query.size() ? score : -1;  // -1 = no match
+        return matched == query.size() ? rank : -1;
     };
 
-    // Add builtin commands with fuzzy matching
+    std::vector<palette_item> items;
+    const auto add = [&](std::string name, std::string description, command_kind kind) {
+        const auto rank = score(name);
+        if (rank >= 0) items.push_back({std::move(name), std::move(description), kind, rank});
+    };
     for (const auto& [name, about] : builtin_commands) {
-        int score = fuzzy_match(query, name);
-        if (score >= 0) {
-            // 🆕 检查是否在最近使用中，提升分数
-            auto recent_it = std::find(recent_commands_.begin(), recent_commands_.end(), name);
-            if (recent_it != recent_commands_.end()) {
-                size_t recent_index = std::distance(recent_commands_.begin(), recent_it);
-                score += (10 - recent_index) * 5;  // 最近的加分更多
-            }
-            items.push_back({name, about, command_kind::builtin, score});
+        std::string description = about;
+        for (const auto& [command, key] : command_shortcuts) {
+            if (std::string_view(name) == command) description += " [" + std::string(key) + "]";
         }
+        add(name, std::move(description), command_kind::builtin);
     }
-
-    // Add skills with fuzzy matching
     for (const auto& skill : app_.skills) {
-        const auto name = "/" + skill.name;
-        int score = fuzzy_match(query, name);
-        if (score >= 0) {
-            items.push_back({name, skill.description + " (skill)", command_kind::skill, score});
-        }
+        add("/" + skill.name, skill.description + " (skill)", command_kind::skill);
     }
-
-    // Add user commands with fuzzy matching
     for (const auto& cmd : app_.commands) {
-        const auto name = "/" + cmd.name;
-        int score = fuzzy_match(query, name);
-        if (score >= 0) {
-            auto about = cmd.argument_hint;
-            if (!about.empty() && !cmd.description.empty()) about += "  ";
-            about += cmd.description;
-            items.push_back({name, std::move(about), command_kind::user_command, score});
-        }
+        auto about = cmd.argument_hint;
+        if (!about.empty() && !cmd.description.empty()) about += "  ";
+        about += cmd.description;
+        add("/" + cmd.name, std::move(about), command_kind::user_command);
     }
 
-    // Sort by score (highest first), then by kind, then by name
     std::sort(items.begin(), items.end(), [](const auto& a, const auto& b) {
         if (a.score != b.score) return a.score > b.score;
         if (a.kind != b.kind) return a.kind < b.kind;
         return a.name < b.name;
     });
-
-    // Format output: each row is "name\tdescription [shortcut]"
-    std::vector<std::string> result;
-    for (const auto& item : items) {
-        std::string shortcut;
-        for (const auto& [cmd, key] : command_shortcuts) {
-            if (cmd == item.name) {
-                shortcut = key;
-                break;
-            }
-        }
-
-        std::string line = item.name + "\t" + item.description;
-        if (!shortcut.empty()) line += " [" + shortcut + "]";
-        result.push_back(line);
-    }
-
-    return result;
+    return items;
 }
 
 std::vector<std::string> interactive_ui::suggestion_items() {
@@ -219,52 +163,30 @@ std::vector<std::string> interactive_ui::suggestion_items() {
 std::vector<std::string> interactive_ui::palette_rows(int columns) {
     std::vector<std::string> rows;
     const auto items = palette_items();
-    if (items.empty()) return rows;
+    const auto capacity = static_cast<std::size_t>(std::max(0, size_.rows - 5));
+    const auto visible = std::min({menu_rows, items.size(), capacity});
+    if (visible == 0) return rows;
     if (palette_index_ >= items.size()) palette_index_ = 0;
 
-    // 🎨 Pi 风格：固定显示数量，滚动窗口
-    constexpr size_t MAX_VISIBLE = 6;  // 固定显示 6 个命令
-
-    // 计算滚动窗口的起始位置
-    size_t start_index = 0;
-    if (items.size() > MAX_VISIBLE && palette_index_ >= MAX_VISIBLE - 1) {
-        // 当选中项在第 6 个或之后，窗口开始滚动
-        // 保持选中项在窗口底部
-        start_index = palette_index_ - (MAX_VISIBLE - 1);
-        // 但不要超出列表末尾
-        if (start_index + MAX_VISIBLE > items.size()) {
-            start_index = items.size() - MAX_VISIBLE;
-        }
+    const auto first = first_visible(palette_index_, visible);
+    constexpr std::string_view marker = "▶ ";
+    const int prefix_width = text::width(marker);
+    for (auto i = first; i < first + visible; ++i) {
+        const bool selected = i == palette_index_;
+        const auto name = text::keep_head(ui::one_line(items[i].name), columns - prefix_width);
+        const int name_width = text::width(name);
+        const int gap = std::max(2, 12 - name_width);
+        const auto description = text::keep_head(ui::one_line(items[i].description),
+                                                 columns - prefix_width - name_width - gap);
+        auto row = (selected ? std::string(marker) : std::string(prefix_width, ' ')) +
+                   paint(selected ? tone::accent_bold : tone::normal, name);
+        if (!description.empty()) row += std::string(gap, ' ') + paint(tone::dim, description);
+        rows.push_back(std::move(row));
     }
-
-    size_t visible_count = std::min(MAX_VISIBLE, items.size() - start_index);
-
-    // 渲染可见的命令
-    for (std::size_t i = 0; i < visible_count; ++i) {
-        const std::size_t item_index = start_index + i;
-        const bool on = item_index == palette_index_;
-
-        // Split by tab
-        const auto tab = items[item_index].find('\t');
-        const auto name = items[item_index].substr(0, tab);
-        const auto desc = tab != std::string::npos ? items[item_index].substr(tab + 1) : std::string{};
-
-        // Pi 风格：选中项用 ▶ 标记
-        std::string prefix = on ? "▶ " : "  ";
-
-        auto padded_name = name;
-        padded_name.resize(std::max<std::size_t>(padded_name.size(), 10), ' ');
-        auto row = prefix + paint(on ? tone::accent_bold : tone::normal, padded_name) + "  " + paint(tone::dim, desc);
-        rows.push_back(text::width(padded_name) + 4 > columns ? text::keep_head(row, columns) : row);
+    if (items.size() > visible) {
+        rows.push_back("  " + paint(tone::dim,
+            "[" + std::to_string(palette_index_ + 1) + "/" + std::to_string(items.size()) + "]"));
     }
-
-    // 显示滚动指示器（有更多内容时）
-    if (items.size() > MAX_VISIBLE) {
-        std::string indicator = "  " + paint(tone::dim,
-            "[" + std::to_string(palette_index_ + 1) + "/" + std::to_string(items.size()) + "]");
-        rows.push_back(indicator);
-    }
-
     return rows;
 }
 
@@ -329,27 +251,33 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     }
     if (!hint_.empty()) rows.push_back("  " + paint(tone::dim, hint_));
 
-    // Selection mode UI
+    if (login_) {
+        cursor_row = -1;
+        cursor_col = 0;
+        const auto visible = std::min(login_->key.size(), static_cast<std::size_t>(std::max(0, columns - 2)));
+        return {" " + paint(tone::accent_bold, "输入 API 密钥 · " + login_->provider),
+                "  " + std::string(visible, '*'),
+                " " + paint(tone::dim, "Enter 保存  Esc 取消")};
+    }
+
     if (selection_) {
-        rows.push_back("");  // Blank line
-        rows.push_back(" " + paint(tone::accent_bold, selection_->title));
-        rows.push_back("");
-
-        for (std::size_t i = 0; i < selection_->items.size(); ++i) {
-            const bool is_selected = i == selection_->selected_index;
-            const auto item_color = is_selected ? tone::accent_bold : tone::normal;
-
-            std::string line = std::to_string(i + 1) + ". " + selection_->items[i];
+        cursor_row = -1;
+        cursor_col = 0;
+        const auto capacity = static_cast<std::size_t>(std::max(1, size_.rows - 2));
+        const auto visible = std::min({menu_rows, selection_->items.size(), capacity});
+        const auto first = first_visible(selection_->selected_index, visible);
+        rows = {" " + paint(tone::accent_bold, ui::one_line(selection_->title))};
+        for (auto i = first; i < first + visible; ++i) {
+            const bool selected = i == selection_->selected_index;
+            auto label = ui::one_line(selection_->items[i]);
             if (i < selection_->details.size() && !selection_->details[i].empty()) {
-                line += "  " + selection_->details[i];
+                label += "  " + ui::one_line(selection_->details[i]);
             }
-
-            std::string prefix = is_selected ? "→ " : "  ";
-            rows.push_back(" " + paint(item_color, prefix + line));
+            rows.push_back(" " + paint(selected ? tone::accent_bold : tone::normal,
+                                       (selected ? "→ " : "  ") + label));
         }
-
-        rows.push_back("");
-        rows.push_back(" " + paint(tone::dim, "Use ↑↓ to select, Enter to confirm, Esc to cancel"));
+        rows.push_back(" " + paint(tone::dim, "↑↓ 选择  Enter 确认  Esc 取消"));
+        return rows;
     }
 
     // Prepare bottom UI elements (but don't add to rows yet)
@@ -367,8 +295,18 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
         }
     }
 
+    auto displayed = editor_.text();
+    constexpr std::string_view separators = " \t\r\n";
+    const auto command_end = displayed.find_first_of(separators);
+    const bool login_draft = std::string_view(displayed).substr(0, command_end) == "/login";
+    if (login_draft && command_end != std::string::npos) {
+        const auto provider_start = displayed.find_first_not_of(separators, command_end);
+        const auto provider_end = displayed.find_first_of(separators, provider_start);
+        if (provider_end != std::string::npos) std::fill(displayed.begin() + provider_end + 1, displayed.end(), '*');
+    }
+
     std::vector<std::string> hints;
-    if (!editor_.text().empty() && !busy_ && !ask_) {
+    if (!login_draft && !editor_.text().empty() && !busy_ && !ask_) {
         auto validation = app_.validator.validate(editor_.text());
         if (validation.type != ode::input_validator::issue_type::none) {
             const auto icon = validation.is_warning ? "⚠️  " : "❌ ";
@@ -388,8 +326,10 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     // Calculate input box dimensions
     const int inner = columns - 4;
     const auto l = editor_.arrange(inner);
-    const int max_input_lines = 10;
+    const int max_input_lines = std::clamp(size_.rows - 3 - static_cast<int>(palette.size()) -
+        static_cast<int>(file_completion.size()) - static_cast<int>(hints.size()), 1, 10);
     const int actual_input_lines = std::min(static_cast<int>(l.rows.size()), max_input_lines);
+    const int first_input_line = std::max(0, l.cursor_row - actual_input_lines + 1);
     const int input_box_height = actual_input_lines + 2;  // +2 for borders
 
     // Reserve space for: input box + palette + file completion + hints + status
@@ -415,9 +355,9 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     rows.push_back(app_.current_theme.border_fg + "\033[1m" + top_border + "\033[0m");
 
     // Input lines
-    for (std::size_t i = 0; i < l.rows.size() && i < static_cast<std::size_t>(max_input_lines); ++i) {
+    for (int i = first_input_line; i < first_input_line + actual_input_lines; ++i) {
         const auto& r = l.rows[i];
-        const auto piece = std::string_view(editor_.text()).substr(r.begin, r.end - r.begin);
+        const auto piece = std::string_view(displayed).substr(r.begin, r.end - r.begin);
         std::string shown(piece);
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
 
@@ -444,7 +384,7 @@ std::vector<std::string> interactive_ui::live(int& cursor_row, int& cursor_col) 
     rows.push_back(status_line(columns));
 
     // Calculate cursor position (input box is now at content_end)
-    cursor_row = ask_ || selection_ ? -1 : content_end + 1 + l.cursor_row;  // +1 for top border
+    cursor_row = ask_ ? -1 : content_end + 1 + l.cursor_row - first_input_line;
     cursor_col = l.cursor_column + 2;  // +2 for "› " width
 
     return rows;

@@ -57,12 +57,13 @@ constexpr const char* help_text =
     "- `/compact [重点]` 压缩上下文  `/model [名称]` 切换模型\n"
     "- `/mode [档位]` 切换权限档  `/theme` 切换主题\n"
     "- `/resume [序号]` 恢复会话  `/undo` 撤销上一轮改动\n"
+    "- `/login [provider]` 登录或更新密钥  `/logout [provider]` 清除保存的密钥\n"
     "- `/clear` 新会话  `/cost` 查看用量  `/exit` 退出";
 
 std::pair<std::string, std::string> split(const std::string& line) {
-    const auto space = line.find_first_of(" \t");
+    const auto space = line.find_first_of(" \t\r\n");
     if (space == std::string::npos) return {line, {}};
-    const auto start = line.find_first_not_of(" \t", space);
+    const auto start = line.find_first_not_of(" \t\r\n", space);
     return {line.substr(0, space), start == std::string::npos ? std::string{} : line.substr(start)};
 }
 
@@ -70,6 +71,14 @@ std::pair<std::string, std::string> split(const std::string& line) {
 
 bool interactive_ui::command(const std::string& line) {
     const auto [name, arg] = split(line);
+    if (name == "/login") {
+        login_command(arg);
+        return true;
+    }
+    if (name == "/logout") {
+        logout_command(arg);
+        return true;
+    }
     section("user");
     // Commands in accent_bold for visibility
     screen_.commit(paint(tone::accent, "› ") + paint(tone::accent_bold, line));
@@ -332,84 +341,6 @@ bool interactive_ui::command(const std::string& line) {
         const auto& t = core.total;
         note("输入 " + short_count(t.input) + "  缓存读 " + short_count(t.cache_read) + "  缓存写 " +
              short_count(t.cache_write) + "  输出 " + short_count(t.output) + "  当前上下文 " + short_count(core.context_tokens));
-    } else if (name == "/login") {
-        if (arg.empty()) {
-            // Show interactive provider selector
-            const std::vector<std::pair<std::string, std::string>> providers = {
-                {"anthropic", "Claude models from Anthropic"},
-                {"openai", "GPT models from OpenAI"},
-                {"groq", "Fast inference with Groq"},
-                {"deepseek", "DeepSeek models"},
-                {"together", "Together.ai models"},
-                {"custom", "Configure custom provider"}
-            };
-
-            std::vector<std::string> items;
-            std::vector<std::string> details;
-            for (const auto& [name, desc] : providers) {
-                items.push_back(name);
-                // Mark current provider
-                std::string detail = desc;
-                if (name == app_.config.provider) {
-                    detail += " (current)";
-                }
-                details.push_back(detail);
-            }
-
-            selection_ = {
-                items,
-                details,
-                0,
-                "Select a provider (current: " + app_.config.provider + "):",
-                [this](std::size_t index) {
-                    const std::vector<std::string> provider_names = {
-                        "anthropic", "openai", "groq", "deepseek", "together", "custom"
-                    };
-                    const auto provider = provider_names[index];
-
-                    if (provider == app_.config.provider) {
-                        note("Already using " + provider, tone::accent);
-                        note("To update API key: /login " + provider + " <new-key>");
-                    } else if (provider == "custom") {
-                        note("Custom provider setup:", tone::accent);
-                        note("1. Edit ~/.ode/settings.json");
-                        note("2. Add your provider configuration");
-                        note("3. Use /login <provider-name> <api-key>");
-                    } else {
-                        note("Selected: " + provider, tone::accent);
-                        note("To set API key:");
-                        note("  /login " + provider + " <your-api-key>");
-                        note("Then restart with: --provider " + provider);
-                    }
-                },
-                []() { /* Cancel */ }
-            };
-        } else {
-            // Direct login with provider and key
-            const auto space = arg.find(' ');
-            if (space == std::string::npos) {
-                note("Missing API key. Usage: /login <provider> <api-key>", tone::error);
-            } else {
-                const auto provider = arg.substr(0, space);
-                const auto api_key = arg.substr(space + 1);
-
-                if (save_credential(provider, api_key)) {
-                    note("✓ API key saved for " + provider);
-                    if (provider == app_.config.provider) {
-                        note("Key updated for current provider");
-                    } else {
-                        note("Restart with --provider " + provider + " to use it");
-                    }
-                } else {
-                    note("Failed to save credential", tone::error);
-                }
-            }
-        }
-    } else if (name == "/logout") {
-        note("Current provider: " + app_.config.provider);
-        note("To switch provider, restart with --provider <name>");
-        note("Credentials remain in Windows Credential Manager");
-        note("Use 'ode login <provider>' to update keys");
     } else if (name == "/resume") {
         const auto sessions = list_sessions(app_.root);
         if (sessions.empty()) {
@@ -434,6 +365,80 @@ bool interactive_ui::command(const std::string& line) {
         note("未知命令 " + name + "，/help 查看全部", tone::error);
     }
     return true;
+}
+
+void interactive_ui::login_command(std::string_view arg) {
+    if (arg.empty()) {
+        selection_state providers;
+        providers.title = "选择登录的 provider";
+        providers.items.push_back(app_.config.provider);
+        providers.details.push_back("当前 provider");
+        for (const auto& [name, entry] : app_.config.providers) {
+            if (name == app_.config.provider) continue;
+            providers.items.push_back(name);
+        }
+        providers.on_select = [this, names = providers.items](std::size_t index) {
+            login_ = login_state{names[index], {}};
+        };
+        selection_ = std::move(providers);
+        return;
+    }
+
+    const auto [name, key] = split(std::string(arg));
+    if (!app_.config.providers.contains(name)) {
+        note("未知 provider，输入 /login 查看可选项", tone::error);
+        return;
+    }
+    if (key.find_first_of("\r\n") != std::string::npos) {
+        note("API 密钥应为单行", tone::error);
+        return;
+    }
+    login_ = login_state{name, key};
+    if (!key.empty()) save_login();
+}
+
+void interactive_ui::save_login() {
+    if (login_->key.empty()) {
+        note("请输入 API 密钥", tone::error);
+        return;
+    }
+
+    auto [name, key] = std::move(*login_);
+    login_.reset();
+    if (!save_credential(name, key)) {
+        note("保存 Windows 凭据失败，请重新输入 /login", tone::error);
+        return;
+    }
+
+    note("已保存 " + name + " 的 Windows 凭据", tone::accent);
+    provider_config resolved;
+    if (!resolve_provider(app_.config, name, resolved) && resolved.api_key != key) {
+        note(name + " 仍优先使用配置文件或环境变量中的密钥");
+    }
+    if (name == app_.config.provider) app_.refresh_credentials();
+}
+
+void interactive_ui::logout_command(std::string_view arg) {
+    if (arg.find_first_of(" \t\r\n") != std::string_view::npos) {
+        note("用法 /logout [provider]", tone::error);
+        return;
+    }
+    const auto name = arg.empty() ? app_.config.provider : std::string(arg);
+    if (!delete_credential(name)) {
+        note("清除 Windows 凭据失败", tone::error);
+        return;
+    }
+
+    if (name == app_.config.provider) {
+        app_.provider_cfg.api_key.clear();
+        app_.provider_cfg.bearer = false;
+        app_.credential_error = "当前会话已退出，输入 /login 重新登录";
+    }
+    note("已清除 " + name + " 的 Windows 凭据", tone::accent);
+    provider_config resolved;
+    if (!resolve_provider(app_.config, name, resolved) && !resolved.api_key.empty()) {
+        note(name + " 的外部密钥会在重新登录或启动时加载");
+    }
 }
 
 bool interactive_ui::user_command(const std::string& line) {

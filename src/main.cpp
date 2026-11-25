@@ -34,6 +34,7 @@ constexpr const char* usage_text =
     "  ode -c                    continue the most recent session here\n"
     "  ode --rpc                 RPC mode: JSONL protocol over stdin/stdout\n"
     "  ode login [provider]      store an API key in Windows Credential Manager\n"
+    "  ode logout [provider]     remove the saved API key\n"
     "  ode models                list available models from current provider\n"
     "\n"
     "  --model NAME              model id or alias (opus, sonnet, haiku, fable)\n"
@@ -70,13 +71,13 @@ std::string read_secret() {
     const HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode = 0;
     const bool console = GetConsoleMode(in, &mode);
-    if (console) SetConsoleMode(in, mode & ~static_cast<DWORD>(ENABLE_ECHO_INPUT));
-    std::wstring line;
-    wchar_t buf[512];
+    if (console && !SetConsoleMode(in, mode & ~static_cast<DWORD>(ENABLE_ECHO_INPUT))) return {};
+    std::string key;
+    wchar_t buf[4096];
     DWORD got = 0;
-    if (console && ReadConsoleW(in, buf, 512, &got, nullptr)) line.assign(buf, got);
+    if (console && ReadConsoleW(in, buf, std::size(buf), &got, nullptr)) key = narrow({buf, got});
     if (console) SetConsoleMode(in, mode);
-    std::string key = narrow(line);
+    else std::getline(std::cin, key);
 #else
     std::string key;
     std::getline(std::cin, key);
@@ -95,7 +96,7 @@ int main(int argc, char** argv) {
 
     std::string prompt, model, provider_name, mode_text;
     fs::path workspace = fs::current_path();
-    bool print = false, cont = false, login = false, rpc_mode = false, list_models = false;
+    bool print = false, cont = false, login = false, logout = false, rpc_mode = false, list_models = false;
     if (const char* nc = std::getenv("NO_COLOR"); nc && *nc) ui::color_enabled() = false;
 
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -129,6 +130,8 @@ int main(int argc, char** argv) {
                 ui::color_enabled() = false;
             } else if (a == "login" && i == 0) {
                 login = true;
+            } else if (a == "logout" && i == 0) {
+                logout = true;
             } else if (a == "models" && i == 0) {
                 list_models = true;
             } else if (!a.empty() && a.front() == '-' && a.size() > 1) {
@@ -154,8 +157,15 @@ int main(int argc, char** argv) {
     for (const auto& w : a.config.warnings) ui::write_stream(true, "ode: " + w + "\n");
     if (!provider_name.empty()) a.config.provider = provider_name;
 
-    if (login) {
+    if (login || logout) {
         const auto name = prompt.empty() ? a.config.provider : prompt;
+        if (name.find_first_of(" \t\r\n") != std::string::npos) return fail("expected a single provider name");
+        if (logout) {
+            if (!delete_credential(name)) return fail("could not remove the saved key");
+            ui::write_stream(true, "Cleared Windows Credential Manager entry ode/" + name + "\n");
+            return 0;
+        }
+        if (!a.config.providers.contains(name)) return fail("unknown provider " + name);
         ui::write_stream(true, "API key for " + name + ": ");
         const auto key = read_secret();
         ui::write_stream(true, "\n");

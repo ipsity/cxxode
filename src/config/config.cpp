@@ -250,6 +250,7 @@ std::optional<std::string> resolve_provider(const settings& s, const std::string
 
 bool save_credential(const std::string& provider, const std::string& key) {
 #ifdef _WIN32
+    if (key.empty() || key.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE) return false;
     auto target = widen("ode/" + provider);
     CREDENTIALW cred{};
     cred.Type = CRED_TYPE_GENERIC;
@@ -263,6 +264,11 @@ bool save_credential(const std::string& provider, const std::string& key) {
     (void)key;
     return false;
 #endif
+}
+
+bool delete_credential(const std::string& provider) {
+    const auto target = widen("ode/" + provider);
+    return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != 0 || GetLastError() == ERROR_NOT_FOUND;
 }
 
 std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& workspace) {

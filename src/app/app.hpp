@@ -25,6 +25,7 @@ struct app {
     settings config;
     permission_rules permissions;
     provider_config provider_cfg;
+    std::optional<std::string> credential_error;
     std::unique_ptr<provider> model_provider;
     std::unique_ptr<agent> core;
     session_log log;
@@ -55,6 +56,7 @@ struct app {
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);
     void set_model(const std::string& requested);
+    void refresh_credentials();
 };
 
 int run_interactive(app& a, std::string first_prompt);

@@ -204,8 +204,37 @@ std::string_view verb(std::string_view tool) {
 
 std::string one_line(std::string_view s) {
     std::string out;
-    for (const char c : s) out += c == '\n' || c == '\r' || c == '\t' ? ' ' : c;
+    for (const unsigned char c : s) out += c < 0x20 || c == 0x7f ? ' ' : static_cast<char>(c);
     return out;
+}
+
+std::string clip_styled_line(std::string_view line, int columns) {
+    if (columns <= 0) return {};
+    if (line.find('\x1b') == std::string_view::npos) return text::keep_head(one_line(line), columns);
+
+    std::string plain;
+    std::string styled;
+    std::vector<std::size_t> ends;
+    for (std::size_t i = 0; i < line.size();) {
+        if (line.substr(i).starts_with("\x1b[")) {
+            const auto end = line.find_first_not_of("0123456789;:", i + 2);
+            if (end != std::string_view::npos && line[end] == 'm') {
+                styled += line.substr(i, end + 1 - i);
+                i = end + 1;
+                continue;
+            }
+        }
+        const auto c = static_cast<unsigned char>(line[i++]);
+        const char visible = c < 0x20 || c == 0x7f ? ' ' : static_cast<char>(c);
+        plain += visible;
+        styled += visible;
+        ends.push_back(styled.size());
+    }
+    const auto clipped = text::keep_head(plain, columns);
+    if (clipped == plain) return styled;
+    if (clipped.empty()) return {};
+    const auto kept = clipped.size() - std::string_view("…").size();
+    return styled.substr(0, kept ? ends[kept - 1] : 0) + "…\x1b[0m";
 }
 
 } // namespace ode::ui

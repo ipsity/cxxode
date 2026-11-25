@@ -153,9 +153,12 @@ inline std::vector<std::string> wrap(std::string_view s, int columns) {
 
 // Keeps the end of s within `columns`, replacing the head with an ellipsis.
 inline std::string keep_tail(std::string_view s, int columns) {
+    if (columns <= 0) return {};
     if (width(s) <= columns) return std::string(s);
+    const int marker_width = width("…");
+    if (marker_width > columns) return {};
     const auto cs = cells(s);
-    int used = 1;
+    int used = marker_width;
     std::size_t i = cs.size();
     while (i > 0 && used + cs[i - 1].width <= columns) used += cs[--i].width;
     return "…" + std::string(s.substr(i < cs.size() ? cs[i].offset : s.size()));
@@ -163,8 +166,10 @@ inline std::string keep_tail(std::string_view s, int columns) {
 
 // Keeps the start of s within `columns`, ending with an ellipsis.
 inline std::string keep_head(std::string_view s, int columns) {
+    if (columns <= 0) return {};
     if (width(s) <= columns) return std::string(s);
-    int used = 1;
+    int used = width("…");
+    if (used > columns) return {};
     std::size_t end = 0;
     const auto cs = cells(s);
     for (std::size_t i = 0; i < cs.size(); ++i) {

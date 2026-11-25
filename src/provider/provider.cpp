@@ -31,7 +31,7 @@ std::string error_message(const http_result& r) {
 
 class http_provider final : public provider {
 public:
-    explicit http_provider(provider_config config) : config_(std::move(config)) {}
+    explicit http_provider(const provider_config& config) : config_(config) {}
 
     model_reply send(const model_request& request, const stream_events& events, cancel_token& cancel) override {
         http_request http;
@@ -94,7 +94,7 @@ public:
     }
 
 private:
-    provider_config config_;
+    const provider_config& config_;
 };
 
 } // namespace
@@ -125,7 +125,7 @@ model_reply decode_stream(protocol kind, std::string_view sse_bytes, const strea
     return parser->finish();
 }
 
-std::unique_ptr<provider> make_provider(const provider_config& config) {
+std::unique_ptr<provider> make_provider(provider_config& config) {
     return std::make_unique<http_provider>(config);
 }
 

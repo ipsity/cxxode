@@ -53,6 +53,10 @@ public:
 private:
     void handle(const ui::key& k);
     void submit();
+    void handle_login(const ui::key& k);
+    void login_command(std::string_view arg);
+    void logout_command(std::string_view arg);
+    void save_login();
     void start_turn(std::string text, std::vector<std::string> allowed_tools = {});
     void start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact);
     void drain();
@@ -74,7 +78,14 @@ private:
     void cancel();
     std::vector<std::string> live(int& cursor_row, int& cursor_col);
     std::vector<std::string> palette_rows(int columns);
-    std::vector<std::string> palette_items();  // All available commands/skills/user commands
+    enum class command_kind { builtin, skill, user_command };
+    struct palette_item {
+        std::string name;
+        std::string description;
+        command_kind kind;
+        int score;
+    };
+    std::vector<palette_item> palette_items() const;
     std::vector<std::string> file_items();     // File completion candidates
     std::vector<std::string> suggestion_items();  // Day 8: Tool suggestions based on input
     std::string status_line(int columns) const;
@@ -100,14 +111,11 @@ private:
         std::function<void()> on_cancel;       // Callback when cancelled
     };
     std::optional<selection_state> selection_;
-
-    // 🆕 最近使用的命令（用于智能排序）
-    std::deque<std::string> recent_commands_;  // 最近使用的命令，最新的在前
-    static constexpr size_t MAX_RECENT_COMMANDS = 10;
-
-    // 🆕 最近执行的命令（用于防止对话框突然消失）
-    std::string last_executed_command_;
-    steady::time_point last_executed_time_;
+    struct login_state {
+        std::string provider;
+        std::string key;
+    };
+    std::optional<login_state> login_;
 
     app& app_;
     ui::terminal& term_;

@@ -83,6 +83,10 @@ agent_events interactive_ui::make_events() {
 }
 
 void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact) {
+    if (app_.credential_error) {
+        note(*app_.credential_error, ui::tone::error);
+        return;
+    }
     if (worker_.joinable()) worker_.join();
     cancel_.reset();
     busy_ = true;
@@ -135,8 +139,7 @@ int interactive_ui::run(std::string first_prompt) {
         auto keys = term_.read(busy_ ? 16 : 33);  // 60fps when busy, 30fps when idle
         if (!keys) break;
         const auto now_size = term_.dimensions();
-        if (now_size.columns != size_.columns) {
-            // Rows already drawn were re-wrapped by the terminal; start the live area afresh.
+        if (now_size != size_) {
             screen_.reset_view();
             dirty = true;
         }
@@ -166,7 +169,14 @@ int interactive_ui::run(std::string first_prompt) {
             int row = -1, column = 0;
             // screen skips the write itself when nothing changed; checking rows here
             // would also hold back committed lines that are waiting to be flushed.
-            const auto rows = live(row, column);
+            auto rows = live(row, column);
+            const auto overflow = std::max(0, static_cast<int>(rows.size()) - size_.rows);
+            rows.erase(rows.begin(), rows.begin() + overflow);
+            if (row >= 0) row -= overflow;
+            const auto columns = std::max(0, size_.columns - 1);
+            column = std::min(column, columns);
+            // The renderer's cursor offsets assume each entry occupies exactly one terminal row.
+            for (auto& line : rows) line = ui::clip_styled_line(line, columns);
             screen_.draw(rows, row, column);
             last_draw = now;
             dirty = false;

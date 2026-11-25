@@ -62,6 +62,7 @@ settings load_settings(const std::filesystem::path& workspace);
 // Returns an error message on failure.
 std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out);
 bool save_credential(const std::string& provider, const std::string& key);
+bool delete_credential(const std::string& provider);
 
 // Claude Code aliases: opus, sonnet, haiku, fable. ANTHROPIC_DEFAULT_<NAME>_MODEL overrides
 // the built-in id, so a gateway mapping set up for Claude Code applies unchanged.

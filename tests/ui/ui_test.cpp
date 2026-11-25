@@ -41,6 +41,17 @@ TEST_CASE("truncation keeps whole graphemes") {
     CHECK(text::keep_head("short", 10) == "short");
 }
 
+TEST_CASE("live rows fit the console without counting color escapes") {
+    const std::string colored = "\x1b[1m/命令\x1b[0m  \x1b[90m很长的描述\r\n下一行";
+    const auto prefix = std::string("/命令  ");
+    const int columns = text::width(prefix + "很…");
+    CHECK(ui::clip_styled_line(colored, columns) ==
+          "\x1b[1m/命令\x1b[0m  \x1b[90m很…\x1b[0m");
+    CHECK(ui::clip_styled_line("first\r\nsecond\tthird", 30) == "first  second third");
+    CHECK(ui::clip_styled_line("\x1b[90mabcdef\x1b[0m", 6) == "\x1b[90mabcdef\x1b[0m");
+    CHECK(ui::clip_styled_line(colored, 0).empty());
+}
+
 TEST_CASE("layout wraps between words and inside CJK runs") {
     ui::color_enabled() = false;
     auto rows = ui::layout({{"hello world again", ui::tone::normal}}, 11, {"", 0}, {"", 0});

@@ -21,25 +21,16 @@ void interactive_ui::submit() {
     const auto items = palette_items();
 
     if (!items.empty() && text.front() == '/' && text.find_first_of(" \t\r\n") == std::string::npos) {
-        // When navigating palette, always use the selected item
         if (palette_index_ < items.size()) {
-            text = items[palette_index_];
-            const auto tab = text.find('\t');
-            if (tab != std::string::npos) {
-                text = text.substr(0, tab);  // Extract command name before tab
-            }
+            text = items[palette_index_].name;
         }
     }
 
-    // Day 10: Add to command history for persistence
-    app_.history.add(text);
-
-    editor_.remember(text);
-
-    // 🆕 保存执行的命令和时间（防止对话框突然消失）
-    if (!text.empty() && text.front() == '/') {
-        last_executed_command_ = text;
-        last_executed_time_ = steady::now();
+    const auto name = std::string_view(text).substr(0, text.find_first_of(" \t\r\n"));
+    const bool credentials = name == "/login" || name == "/logout";
+    if (!credentials) {
+        app_.history.add(text);
+        editor_.remember(text);
     }
 
     editor_.clear();
@@ -52,7 +43,7 @@ void interactive_ui::submit() {
             return;
         }
         // Try user commands first, then builtin
-        if (!user_command(text) && !command(text)) quit_ = true;
+        if ((credentials || !user_command(text)) && !command(text)) quit_ = true;
         return;
     }
     if (busy_) {
@@ -67,6 +58,10 @@ void interactive_ui::submit() {
 }
 
 void interactive_ui::handle(const ui::key& k) {
+    if (login_) {
+        handle_login(k);
+        return;
+    }
     // Selection mode takes priority
     if (selection_) {
         if (k.kind == key_kind::up) {
@@ -130,7 +125,7 @@ void interactive_ui::handle(const ui::key& k) {
             break;
         case key_kind::tab:
             if (!items.empty()) {
-                if (palette_index_ < items.size()) editor_.set(items[palette_index_] + " ");
+                if (palette_index_ < items.size()) editor_.set(items[palette_index_].name + " ");
             } else if (!files.empty()) {
                 // Replace the @mention with the selected file
                 const auto mention = editor_.at_mention();
@@ -259,6 +254,18 @@ void interactive_ui::handle(const ui::key& k) {
             }
             break;
         default: break;
+    }
+}
+
+void interactive_ui::handle_login(const ui::key& k) {
+    if (k.kind == key_kind::escape || (k.kind == key_kind::ctrl && k.letter == 'c')) {
+        login_.reset();
+    } else if (k.kind == key_kind::enter) {
+        save_login();
+    } else if (k.kind == key_kind::character) {
+        login_->key += k.text;
+    } else if (k.kind == key_kind::backspace && !login_->key.empty()) {
+        login_->key.erase(text::prev_boundary(login_->key, login_->key.size()));
     }
 }
 

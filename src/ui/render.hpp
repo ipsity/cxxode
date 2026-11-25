@@ -40,5 +40,6 @@ std::vector<std::string> markdown_line(std::string_view line, markdown_state& st
 std::string_view verb(std::string_view tool);
 // Single-line form of a label: newlines become spaces.
 std::string one_line(std::string_view s);
+std::string clip_styled_line(std::string_view line, int columns);
 
 } // namespace ode::ui
