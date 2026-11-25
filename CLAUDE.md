@@ -1,10 +1,14 @@
-# cxxode V2
+# cxxode
 
-原生 C++20 终端 coding agent。设计依据：`docs/BLUEPRINT_V2.md`。有冲突可以提出修改，蓝图不是不可讨论的。
+Windows 原生 C++20 终端 coding agent，命令 `ode`。设计依据：`docs/ARCHITECTURE.md`，它是唯一有效的设计文档。有冲突先讨论，再改文档或代码。`archive/` 是旧文档和旧脚本，只读，不作为依据。
+
+## 平台
+
+只支持 Windows x64。不写 POSIX 分支，不做其他系统验证。
 
 ## 构建与测试
 
-Windows 用 MSYS2 UCRT64 的 g++，cmake/ninja 可用 `py -m pip install --user cmake ninja` 安装。
+MSYS2 UCRT64 的 g++，cmake/ninja 可用 `py -m pip install --user cmake ninja` 安装。
 
 ```
 cmake --preset dev
@@ -12,22 +16,11 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-发布构建把 `dev` 换成 `release`。构建目录只有 `build/dev` 和 `build/release` 两个。
+发布构建把 `dev` 换成 `release`。构建目录只有 `build/dev` 和 `build/release`。
 
 ## 目录
 
-```
-src/main.cpp     参数解析与前端分发
-src/core/        loop、context、permission、session(jsonl)、compact
-src/provider/    http(libcurl)、anthropic、openai
-src/tools/       read write edit bash grep glob
-src/ext/         skills commands hooks mcp agents plugins
-src/ui/          term render input unicode
-src/config/      settings.json、凭据
-tests/           doctest 单元测试 + 回放夹具
-third_party/     单头文件依赖
-legacy/          V1 源码，只用于回收代码，不参与构建
-```
+见 `docs/ARCHITECTURE.md` 第 3 节。分层：`base → platform → ui/config → provider → tools → core → ext → app`，只能向下依赖，同层互不依赖，`main.cpp` 负责装配。
 
 ## 完成定义
 
@@ -39,19 +32,22 @@ legacy/          V1 源码，只用于回收代码，不参与构建
 
 ## 不要做
 
+- 不要写阶段报告、进度文档、完成声明（DAY/WEEK/PHASE/COMPLETE 之类）。设计变化直接改 `docs/ARCHITECTURE.md`。
 - 不要创建验收 JSON、人工验收手册、RC 编号。
-- 不要为改动启动虚拟机、WSL、讲述人或多窗口尺寸人工矩阵。
+- 不要写安装脚本。发布物就是单个 `ode.exe`。
+- 不要加没有调用方的模块，"以后会用"不算调用方。
 - 不要在 `build/` 下为每个阶段新建目录。
-- 不要往 `legacy/` 里加东西。从 legacy 搬代码时，搬到 `src/` 下对应模块后再改。
+- 不要往 `legacy/`、`archive/` 里加东西。需要旧代码时搬到 `src/` 对应模块再改。
 - 不要新增 Python 测试，测试统一用 C++ + doctest。
+- 不要把密钥写进任何被跟踪的文件或提交。
 
 ## 代码风格
 
-- 命名空间 `ode`，`snake_case` 函数和变量，类型也用 `snake_case`，与 V1 一致。
+- 命名空间 `ode`，函数、变量、类型都用 `snake_case`。
 - 头文件用 `#pragma once`。
-- 只在必要的边界引入抽象。JSON 类型不出协议层。
-- 注释写"为什么"，不写"做了什么"。
+- 只在必要的边界引入抽象。JSON 类型不出协议层（见架构文档第 3 节）。
+- 注释写"为什么"，不写"做了什么"。注释里不写 emoji、"新增"、"Day N"。
 
 ## 提交
 
-Conventional Commits：`feat:`、`fix:`、`test:`、`chore:`、`docs:`。一次提交只做一件事。
+Conventional Commits：`feat:`、`fix:`、`refactor:`、`test:`、`chore:`、`docs:`。一次提交只做一件事。
