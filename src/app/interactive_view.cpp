@@ -32,6 +32,7 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/doc", "生成文档"},
     {"/goal", "设置工作目标"},
     {"/compact", "压缩上下文"},
+    {"/reload", "重新加载 Lua 扩展"},
     {"/model", "查看或切换模型"},
     {"/theme", "切换主题配色"},
     {"/mode", "切换权限档"},

@@ -34,6 +34,7 @@ struct app {
     std::vector<user_command> commands;
     std::vector<std::shared_ptr<mcp_client>> mcp_clients;
     std::vector<agent_config> agents;
+    std::function<std::vector<std::string>(cancel_token&)> reload_lua;
 
     // Current theme
     theme current_theme = dark_theme();

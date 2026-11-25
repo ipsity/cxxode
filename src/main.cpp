@@ -5,6 +5,7 @@
 #include "core/version.hpp"
 #include "ext/agents.hpp"
 #include "ext/hooks.hpp"
+#include "ext/lua/host.hpp"
 #include "ext/mcp.hpp"
 #include "ext/skills.hpp"
 #include "tools/tool.hpp"
@@ -148,7 +149,9 @@ int main(int argc, char** argv) {
     workspace = fs::weakly_canonical(fs::absolute(workspace), ec);
     if (!fs::is_directory(workspace, ec)) return fail("not a directory: " + workspace.string());
 
+    lua_host lua;
     app a;
+    a.reload_lua = [&lua](cancel_token& cancel) { return lua.reload({ode_home() / "init.lua"}, cancel); };
     a.root = workspace;
     a.config = load_settings(workspace);
     a.permissions.allow = a.config.permission_allow;
@@ -265,6 +268,9 @@ int main(int argc, char** argv) {
         resume = sessions.front().path;
     }
     a.open_session(resume);
+
+    cancel_token startup;
+    for (const auto& warning : a.reload_lua(startup)) ui::write_stream(true, "ode: " + warning + "\n");
 
     if (rpc_mode) {
         // RPC mode: JSONL protocol over stdin/stdout

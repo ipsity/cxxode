@@ -57,6 +57,7 @@ constexpr const char* help_text =
     "- `/compact [重点]` 压缩上下文  `/model [名称]` 切换模型\n"
     "- `/mode [档位]` 切换权限档  `/theme` 切换主题\n"
     "- `/resume [序号]` 恢复会话  `/undo` 撤销上一轮改动\n"
+    "- `/reload` 重新加载 Lua 扩展\n"
     "- `/login [provider]` 登录或更新密钥  `/logout [provider]` 清除保存的密钥\n"
     "- `/clear` 新会话  `/cost` 查看用量  `/exit` 退出";
 
@@ -214,6 +215,13 @@ bool interactive_ui::command(const std::string& line) {
         app_.open_session(std::nullopt);
         screen_.clear_screen();
         note("新会话 " + app_.session_id);
+    } else if (name == "/reload") {
+        start_job([this](agent_events& events, cancel_token& cancel) {
+            for (const auto& warning : app_.reload_lua(cancel)) events.notice(warning);
+            if (cancel.cancelled()) return turn_result{stop_reason::cancelled, "Cancelled."};
+            events.notice("已重新读取 Lua 配置");
+            return turn_result{};
+        }, false, false);
     } else if (name == "/compact") {
         if (core.messages.empty()) {
             note("没有可压缩的内容");

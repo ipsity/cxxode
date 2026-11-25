@@ -82,8 +82,8 @@ agent_events interactive_ui::make_events() {
     return ev;
 }
 
-void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact) {
-    if (app_.credential_error) {
+void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact, bool needs_provider) {
+    if (needs_provider && app_.credential_error) {
         note(*app_.credential_error, ui::tone::error);
         return;
     }

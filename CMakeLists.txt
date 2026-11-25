@@ -11,6 +11,20 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Lua 5.4.9 from lua.org. C++ mode lets errors unwind native RAII objects.
+set(LUA_SOURCES
+    lapi.c lauxlib.c lbaselib.c lcode.c lctype.c ldebug.c ldo.c ldump.c lfunc.c lgc.c
+    llex.c lmathlib.c lmem.c lobject.c lopcodes.c lparser.c lstate.c lstring.c
+    lstrlib.c ltable.c ltablib.c ltm.c lundump.c lutf8lib.c lvm.c lzio.c)
+list(TRANSFORM LUA_SOURCES PREPEND "third_party/lua/")
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+add_library(ode_lua STATIC ${LUA_SOURCES})
+target_include_directories(ode_lua SYSTEM PUBLIC third_party/lua)
+target_compile_definitions(ode_lua PRIVATE LUA_USE_JUMPTABLE=0)
+if(MINGW)
+    target_compile_options(ode_lua PRIVATE $<$<CONFIG:Release>:-Os>)
+endif()
+
 # One static library per layer. Each links only the layers below it, so a reversed
 # dependency fails at link time instead of compiling silently.
 add_library(ode_base STATIC
@@ -51,6 +65,7 @@ add_library(ode_ext STATIC
     src/ext/skills.cpp
     src/ext/commands.cpp
     src/ext/hooks.cpp
+    src/ext/lua/host.cpp
     src/ext/mcp.cpp
     src/ext/agents.cpp)
 add_library(ode_app STATIC
@@ -85,7 +100,7 @@ target_link_libraries(ode_config PUBLIC ode_base)
 target_link_libraries(ode_provider PUBLIC ode_config ode_platform)
 target_link_libraries(ode_tools PUBLIC ode_base ode_platform)
 target_link_libraries(ode_core PUBLIC ode_provider ode_tools)
-target_link_libraries(ode_ext PUBLIC ode_core ode_platform)
+target_link_libraries(ode_ext PUBLIC ode_core ode_platform PRIVATE ode_lua)
 target_link_libraries(ode_app PUBLIC ode_ext ode_ui)
 
 add_executable(ode src/main.cpp)
@@ -107,6 +122,7 @@ if(BUILD_TESTING)
         tests/ext/skills_test.cpp
         tests/ext/commands_test.cpp
         tests/ext/hooks_test.cpp
+        tests/ext/lua_test.cpp
         tests/ext/mcp_test.cpp)
     target_include_directories(cxxode_tests SYSTEM PRIVATE third_party/doctest)
     target_link_libraries(cxxode_tests PRIVATE ode_app)
