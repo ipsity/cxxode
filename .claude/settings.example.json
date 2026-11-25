@@ -11,21 +11,19 @@
   "hooks": {
     "PreToolUse": [
       {
-        "command": "node",
-        "args": ["hooks/validate-tool.js"],
-        "cwd": ""
+        "matcher": "Bash|Edit",
+        "hooks": [{ "type": "command", "command": "node hooks/validate-tool.js", "timeout": 30 }]
       }
     ],
     "PostToolUse": [
       {
-        "command": "node",
-        "args": ["hooks/log-tool.js"]
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node hooks/log-tool.js" }]
       }
     ],
     "Stop": [
       {
-        "command": "node",
-        "args": ["hooks/on-stop.js"]
+        "hooks": [{ "type": "command", "command": "node hooks/on-stop.js" }]
       }
     ]
   },

@@ -57,6 +57,7 @@ struct tool {
 std::vector<tool> builtin_tools();
 // Shell the Bash tool uses on this machine: "bash" or "powershell".
 std::string shell_name();
+std::optional<fs::path> git_bash();
 
 // Helpers shared by the tools and tests.
 fs::path resolve(const fs::path& root, std::string_view path);

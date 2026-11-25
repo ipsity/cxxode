@@ -232,7 +232,7 @@ int main(int argc, char** argv) {
         std::move(tools),
         a.permissions,
         workspace,
-        make_agent_hooks(a.config.hooks)
+        make_agent_hooks(a.config.hooks, [&a] { return hook_session{a.session_id, a.log.path(), a.root}; })
     );
 
     const auto& entry = a.config.providers.at(a.config.provider);

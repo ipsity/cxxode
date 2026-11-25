@@ -143,6 +143,38 @@ TEST_CASE("steering typed during work reaches the next request") {
     CHECK(last.blocks.back().text.find("also check tests") != std::string::npos);
 }
 
+TEST_CASE("hooks block tools before asking and can continue a finished reply") {
+    temp_dir dir;
+    scripted_provider p;
+    p.replies.push_back(reply({block::make_tool_use("1", "Bash", {{"command", "echo hi"}})}, stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("done")}, stop_reason::end_turn));
+    p.replies.push_back(reply({block::make_text("checked")}, stop_reason::end_turn));
+    auto tools = builtin_tools();
+    permission_rules rules;
+    agent_hooks hooks;
+    hooks.prompt = [](std::string_view, cancel_token&) {
+        hook_verdict result;
+        result.additional_context = "context from hook";
+        return result;
+    };
+    hooks.pre_tool = [](const tool&, const json&, cancel_token&) { return hook_verdict{false, "blocked by fixture"}; };
+    std::vector<bool> active;
+    hooks.stop = [&](bool continued, cancel_token&) {
+        active.push_back(continued);
+        return continued ? hook_verdict{} : hook_verdict{false, "check again"};
+    };
+    agent a(p, std::move(tools), rules, dir.path, std::move(hooks));
+    agent_events ev;
+    ev.ask = [](const tool&, const json&) { FAIL("A hook already blocked the tool"); return answer::no; };
+    cancel_token cancel;
+    CHECK(a.run("go", ev, cancel).stop == stop_reason::end_turn);
+    REQUIRE(p.requests.size() == 3);
+    CHECK(p.requests[0].messages.back().blocks.back().text == "context from hook");
+    CHECK(p.requests[1].messages.back().blocks.front().text == "blocked by fixture");
+    CHECK(p.requests[2].messages.back().plain_text() == "check again");
+    CHECK(active == std::vector<bool>{false, true});
+}
+
 TEST_CASE("permission rules") {
     const auto tools = builtin_tools();
     const auto& bash = find(tools, "Bash");

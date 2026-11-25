@@ -1,94 +1,158 @@
 #include "ext/hooks.hpp"
+#include "base/utf.hpp"
 #include "platform/process.hpp"
 
 #include <memory>
 
 namespace ode {
+namespace {
 
-hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, cancel_token& cancel) {
-    json input = {
-        {"type", [&]() {
-            switch (ctx.type) {
-                case hook_type::pre_tool_use: return "PreToolUse";
-                case hook_type::post_tool_use: return "PostToolUse";
-                case hook_type::user_prompt_submit: return "UserPromptSubmit";
-                case hook_type::stop: return "Stop";
-            }
-            return "Unknown";
-        }()}
-    };
+const char* event_name(hook_type type) {
+    switch (type) {
+        case hook_type::pre_tool_use: return "PreToolUse";
+        case hook_type::post_tool_use: return "PostToolUse";
+        case hook_type::user_prompt_submit: return "UserPromptSubmit";
+        case hook_type::stop: return "Stop";
+    }
+    return "";
+}
 
+bool matches(const hook_config& config, const hook_context& ctx) {
+    if (config.type != ctx.type) return false;
+    if (ctx.type != hook_type::pre_tool_use && ctx.type != hook_type::post_tool_use) return true;
+    if (config.matcher.empty() || config.matcher == "*") return true;
+    return config.matcher_regex ? std::regex_match(ctx.tool_name, *config.matcher_regex) : ctx.tool_name == config.matcher;
+}
+
+std::string string_field(const json& object, const char* key) {
+    const auto found = object.find(key);
+    return found != object.end() && found->is_string() ? found->get<std::string>() : std::string{};
+}
+
+void append_context(std::string& context, std::string_view addition) {
+    if (addition.empty()) return;
+    if (!context.empty()) context += '\n';
+    context += addition;
+}
+
+} // namespace
+
+hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, cancel_token& cancel,
+                          const std::optional<fs::path>& bash) {
+    if (!matches(config, ctx) || cancel.cancelled()) return {};
+
+    const auto cwd = narrow(ctx.session.cwd.wstring());
+    json input{{"session_id", ctx.session.id}, {"transcript_path", narrow(ctx.session.transcript.wstring())},
+               {"cwd", cwd}, {"hook_event_name", event_name(ctx.type)}};
     if (ctx.type == hook_type::pre_tool_use || ctx.type == hook_type::post_tool_use) {
-        input["tool"] = ctx.tool_name;
-        if (ctx.type == hook_type::pre_tool_use) {
-            input["input"] = ctx.tool_input;
-        } else {
-            input["output"] = ctx.output.text;
-            input["isError"] = ctx.output.is_error;
+        input["tool_name"] = ctx.tool_name;
+        input["tool_input"] = ctx.tool_input;
+        if (ctx.type == hook_type::post_tool_use) {
+            input["tool_response"] = {{"output", ctx.output.text}, {"is_error", ctx.output.is_error}};
         }
     } else if (ctx.type == hook_type::user_prompt_submit) {
         input["prompt"] = ctx.user_prompt;
-    } else if (ctx.type == hook_type::stop) {
-        input["reason"] = ctx.stop_reason;
+    } else {
+        input["stop_hook_active"] = ctx.stop_hook_active;
     }
 
     process_request req;
-    req.program = config.command;
-    req.arguments = config.args;
-    req.directory = config.working_dir.empty() ? fs::current_path() : config.working_dir;
-    req.timeout = std::chrono::milliseconds(5000);
-    req.stdin_data = input.dump();
+    if (bash) {
+        req.program = *bash;
+        req.arguments = {"-c", config.command};
+    } else {
+        req.program = find_on_path("cmd.exe").value_or("cmd.exe");
+        req.command_tail = "/d /s /c \"" + config.command + '"';
+    }
+    req.directory = ctx.session.cwd;
+    req.timeout = config.timeout;
+    req.env = {{"CLAUDE_PROJECT_DIR", cwd}};
+    req.separate_stderr = true;
+    req.stdin_data = input.dump() + "\r\n";
 
     const auto result = run_process(req, cancel);
+    if (!result.exit_code || result.cancelled || result.timed_out || !result.error.empty()) return {};
+    if (*result.exit_code == 2) return {false, result.stderr_output};
+    if (*result.exit_code != 0) return {};
 
-    // A hook that cannot run must not lock the user out of every tool, so it fails open.
-    if (!result.exit_code) return {true, result.error.empty() ? "Hook did not complete" : result.error};
-    return {*result.exit_code != 2, result.output};
+    const auto output = json::parse(result.output, nullptr, false);
+    hook_verdict verdict;
+    if (output.is_discarded()) {
+        if (ctx.type == hook_type::user_prompt_submit) verdict.additional_context = result.output;
+        return verdict;
+    }
+    if (!output.is_object()) return verdict;
+    const auto decision = string_field(output, "decision");
+    verdict.allow = decision != "block";
+    verdict.message = string_field(output, "reason");
+    if (ctx.type == hook_type::pre_tool_use && decision == "approve") {
+        verdict.tool_permission = hook_verdict::permission::allow;
+    }
+    const auto specific = output.find("hookSpecificOutput");
+    if (specific != output.end() && specific->is_object()) {
+        if (ctx.type == hook_type::pre_tool_use) {
+            const auto permission = string_field(*specific, "permissionDecision");
+            const auto reason = string_field(*specific, "permissionDecisionReason");
+            if (permission == "deny") verdict.allow = false;
+            if (permission == "allow") verdict.tool_permission = hook_verdict::permission::allow;
+            if (permission == "ask") verdict.tool_permission = hook_verdict::permission::ask;
+            if (!permission.empty() && !reason.empty()) verdict.message = reason;
+        }
+        verdict.additional_context = string_field(*specific, "additionalContext");
+    }
+    return verdict;
 }
 
-agent_hooks make_agent_hooks(std::vector<hook_config> list) {
+agent_hooks make_agent_hooks(std::vector<hook_config> list, std::function<hook_session()> session) {
     if (list.empty()) return {};
     const auto hooks = std::make_shared<const std::vector<hook_config>>(std::move(list));
-    const auto first_block = [hooks](const hook_context& ctx, cancel_token& cancel) -> hook_verdict {
-        for (const auto& h : *hooks) {
-            if (h.type != ctx.type) continue;
-            if (auto v = execute_hook(h, ctx, cancel); !v.allow) return v;
+    const auto bash = git_bash();
+    const auto run = [hooks, session = std::move(session), bash](hook_context ctx, cancel_token& cancel) {
+        ctx.session = session();
+        hook_verdict merged;
+        for (const auto& hook : *hooks) {
+            const auto verdict = execute_hook(hook, ctx, cancel, bash);
+            if (!verdict.allow) {
+                if (ctx.type != hook_type::post_tool_use) return verdict;
+                merged.allow = false;
+                append_context(merged.message, verdict.message);
+            }
+            if (verdict.tool_permission == hook_verdict::permission::ask ||
+                merged.tool_permission == hook_verdict::permission::inherit) {
+                merged.tool_permission = verdict.tool_permission;
+            }
+            append_context(merged.additional_context, verdict.additional_context);
         }
-        return {};
-    };
-    const auto run_all = [hooks](const hook_context& ctx, cancel_token& cancel) {
-        for (const auto& h : *hooks) {
-            if (h.type == ctx.type) execute_hook(h, ctx, cancel);
-        }
+        return merged;
     };
 
     agent_hooks out;
-    out.prompt = [first_block](std::string_view prompt, cancel_token& cancel) {
-        hook_context ctx;
+    out.prompt = [run](std::string_view prompt, cancel_token& cancel) {
+        hook_context ctx{};
         ctx.type = hook_type::user_prompt_submit;
-        ctx.user_prompt = std::string(prompt);
-        return first_block(ctx, cancel);
+        ctx.user_prompt = prompt;
+        return run(std::move(ctx), cancel);
     };
-    out.pre_tool = [first_block](const tool& t, const json& input, cancel_token& cancel) {
-        hook_context ctx;
+    out.pre_tool = [run](const tool& t, const json& input, cancel_token& cancel) {
+        hook_context ctx{};
         ctx.type = hook_type::pre_tool_use;
         ctx.tool_name = t.name;
         ctx.tool_input = input;
-        return first_block(ctx, cancel);
+        return run(std::move(ctx), cancel);
     };
-    out.post_tool = [run_all](const tool& t, const json& input, const tool_output& output, cancel_token& cancel) {
-        hook_context ctx;
+    out.post_tool = [run](const tool& t, const json& input, const tool_output& output, cancel_token& cancel) {
+        hook_context ctx{};
         ctx.type = hook_type::post_tool_use;
         ctx.tool_name = t.name;
         ctx.tool_input = input;
         ctx.output = output;
-        run_all(ctx, cancel);
+        return run(std::move(ctx), cancel);
     };
-    out.stop = [run_all](std::string_view reason, cancel_token& cancel) {
-        hook_context ctx;
+    out.stop = [run](bool active, cancel_token& cancel) {
+        hook_context ctx{};
         ctx.type = hook_type::stop;
-        ctx.stop_reason = std::string(reason);
-        run_all(ctx, cancel);
+        ctx.stop_hook_active = active;
+        return run(std::move(ctx), cancel);
     };
     return out;
 }

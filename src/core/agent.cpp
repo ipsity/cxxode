@@ -42,9 +42,11 @@ void agent::append(message m) {
 }
 
 turn_result agent::run(std::string user_text, agent_events& events, cancel_token& cancel) {
+    std::string hook_context;
     if (hooks_.prompt) {
-        const auto v = hooks_.prompt(user_text, cancel);
+        auto v = hooks_.prompt(user_text, cancel);
         if (!v.allow) return {stop_reason::error, v.message.empty() ? "Prompt blocked by hook" : v.message};
+        hook_context = std::move(v.additional_context);
     }
     message user{message::role::user, {}};
     if (!pending_note_.empty()) {
@@ -52,6 +54,7 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         pending_note_.clear();
     }
     user.blocks.push_back(block::make_text(std::move(user_text)));
+    if (!hook_context.empty()) user.blocks.push_back(block::make_text(std::move(hook_context)));
     append(std::move(user));
     turn_backup backup;
     const auto keep_backup = [&] {
@@ -60,10 +63,10 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
     };
     const auto finish = [&](turn_result r) {
         keep_backup();
-        if (hooks_.stop) hooks_.stop(r.error, cancel);
         return r;
     };
 
+    bool stop_hook_active = false;
     for (int round = 0; round < max_rounds_without_user; ++round) {
         if (events.request_started) events.request_started();
         stream_events stream;
@@ -91,9 +94,16 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
 
         std::vector<std::string> steering = events.take_steering ? events.take_steering() : std::vector<std::string>{};
         if (reply.stop != stop_reason::tool_use) {
-            if (steering.empty() || cancel.cancelled()) {
-                return finish({reply.stop, stop_text(reply.stop)});
+            if (cancel.cancelled()) return finish({stop_reason::cancelled, "Cancelled."});
+            if (steering.empty() && hooks_.stop && reply.stop == stop_reason::end_turn) {
+                auto v = hooks_.stop(stop_hook_active, cancel);
+                if (cancel.cancelled()) return finish({stop_reason::cancelled, "Cancelled."});
+                if (!v.allow) {
+                    stop_hook_active = true;
+                    steering.push_back(v.message.empty() ? "Continue working as requested by the Stop hook." : std::move(v.message));
+                }
             }
+            if (steering.empty()) return finish({reply.stop, stop_text(reply.stop)});
             message next{message::role::user, {}};
             for (auto& s : steering) next.blocks.push_back(block::make_text(std::move(s)));
             append(std::move(next));
@@ -168,6 +178,10 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
                 std::lock_guard lock(callback_mutex);
                 events.tool_progress(s);
             };
+            if (events.ask) serial.ask = [&](const tool& t, const json& in) {
+                std::lock_guard lock(callback_mutex);
+                return events.ask(t, in);
+            };
             std::vector<std::map<fs::path, file_stamp>> stamps(end - i);
             std::vector<std::future<tool_output>> pending;
             for (std::size_t k = i; k < end; ++k) {
@@ -191,37 +205,41 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
     if (!t) return {"Unknown tool: " + call.name, true, "未知工具", {}};
     if (!call.input.is_object()) return {"Tool input must be a JSON object.", true, "参数错误", {}};
     tool_output out;
-    switch (rules_.check(*t, call.input, root_)) {
+    const auto blocked = [&](std::string reason) {
+        tool_output denied{std::move(reason), true, "已拒绝", {}};
+        if (events.tool_started) events.tool_started(*t, call.input);
+        if (events.tool_finished) events.tool_finished(*t, call.input, denied);
+        return denied;
+    };
+    auto hook = hooks_.pre_tool ? hooks_.pre_tool(*t, call.input, cancel) : hook_verdict{};
+    if (cancel.cancelled()) return blocked("[Interrupted by the user]");
+    if (!hook.allow) return blocked(hook.message.empty() ? "Blocked by hook" : std::move(hook.message));
+
+    auto permission = [&] {
+        std::lock_guard lock(permission_mutex_);
+        return rules_.check(*t, call.input, root_);
+    }();
+    if (permission != verdict::deny) {
+        if (hook.tool_permission == hook_verdict::permission::ask) permission = verdict::ask;
+        if (hook.tool_permission == hook_verdict::permission::allow) permission = verdict::allow;
+    }
+    switch (permission) {
         case verdict::deny:
-            out = {rules_.mode() == permission_mode::plan
-                       ? "Plan mode is read-only. Describe the change instead; the user can switch modes with Shift+Tab."
-                       : "Denied by a permission rule.",
-                   true, "已拒绝", {}};
-            if (events.tool_started) events.tool_started(*t, call.input);
-            if (events.tool_finished) events.tool_finished(*t, call.input, out);
-            return out;
+            return blocked(rules_.mode() == permission_mode::plan
+                ? "Plan mode is read-only. Describe the change instead; the user can switch modes with Shift+Tab."
+                : "Denied by a permission rule.");
         case verdict::ask: {
             const auto a = events.ask ? events.ask(*t, call.input) : answer::no;
             if (a == answer::no) {
-                out = {"The user declined this tool call. Ask what they want instead, or try another approach.", true, "已拒绝", {}};
-                if (events.tool_started) events.tool_started(*t, call.input);
-                if (events.tool_finished) events.tool_finished(*t, call.input, out);
-                return out;
+                return blocked("The user declined this tool call. Ask what they want instead, or try another approach.");
             }
-            if (a == answer::always) rules_.allow.push_back(permission_rules::always_rule(*t, call.input));
+            if (a == answer::always) {
+                std::lock_guard lock(permission_mutex_);
+                rules_.allow.push_back(permission_rules::always_rule(*t, call.input));
+            }
             break;
         }
         case verdict::allow: break;
-    }
-
-    if (hooks_.pre_tool) {
-        const auto v = hooks_.pre_tool(*t, call.input, cancel);
-        if (!v.allow) {
-            out = {v.message.empty() ? "Blocked by hook" : v.message, true, "已拒绝", {}};
-            if (events.tool_started) events.tool_started(*t, call.input);
-            if (events.tool_finished) events.tool_finished(*t, call.input, out);
-            return out;
-        }
     }
 
     if (events.tool_started) events.tool_started(*t, call.input);
@@ -235,7 +253,12 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
 
     if (events.tool_finished) events.tool_finished(*t, call.input, out);
 
-    if (hooks_.post_tool) hooks_.post_tool(*t, call.input, out, cancel);
+    if (hooks_.post_tool && !cancel.cancelled()) {
+        const auto post = hooks_.post_tool(*t, call.input, out, cancel);
+        if (!post.allow && !post.message.empty()) out.text += "\n[PostToolUse hook] " + post.message;
+        if (!post.additional_context.empty()) out.text += "\n" + post.additional_context;
+    }
+    if (!hook.additional_context.empty()) out.text += "\n" + hook.additional_context;
 
     return out;
 }

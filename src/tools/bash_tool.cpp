@@ -14,12 +14,10 @@ struct shell {
     std::string name;
 };
 
-// Git Bash first: models write POSIX commands. PowerShell when Git for Windows is absent.
-const shell& detect_shell() {
-    static const shell value = [] {
-        if (const char* custom = std::getenv("ODE_SHELL"); custom && *custom) {
-            return shell{custom, {"-c"}, fs::path(custom).stem().string()};
-        }
+} // namespace
+
+std::optional<fs::path> git_bash() {
+    static const auto value = []() -> std::optional<fs::path> {
         std::vector<fs::path> candidates;
         if (auto git = find_on_path("git")) {
             // git.exe lives in <git>/cmd, <git>/bin or <git>/mingw64/bin; bash in <git>/bin.
@@ -36,8 +34,22 @@ const shell& detect_shell() {
         }
         for (const auto& c : candidates) {
             std::error_code ec;
-            if (fs::is_regular_file(c, ec)) return shell{c, {"-c"}, "bash"};
+            if (fs::is_regular_file(c, ec)) return c;
         }
+        return std::nullopt;
+    }();
+    return value;
+}
+
+namespace {
+
+// Git Bash first: models write POSIX commands. PowerShell when Git for Windows is absent.
+const shell& detect_shell() {
+    static const shell value = [] {
+        if (const char* custom = std::getenv("ODE_SHELL"); custom && *custom) {
+            return shell{custom, {"-c"}, fs::path(custom).stem().string()};
+        }
+        if (auto bash = git_bash()) return shell{*bash, {"-c"}, "bash"};
         auto ps = find_on_path("pwsh");
         if (!ps) ps = find_on_path("powershell");
         return shell{ps.value_or("powershell.exe"), {"-NoProfile", "-NonInteractive", "-Command"}, "powershell"};

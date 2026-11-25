@@ -3,9 +3,11 @@
 #include "base/json.hpp"
 #include "config/provider_config.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -22,9 +24,10 @@ enum class hook_type {
 // Hook configuration from settings.json
 struct hook_config {
     hook_type type;
+    std::string matcher;
     std::string command;
-    std::vector<std::string> args;
-    std::filesystem::path working_dir;
+    std::chrono::seconds timeout{60};
+    std::optional<std::regex> matcher_regex;
 };
 
 struct provider_entry {

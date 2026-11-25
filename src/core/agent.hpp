@@ -6,6 +6,7 @@
 #include "tools/tool.hpp"
 
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -32,16 +33,19 @@ struct turn_result {
 };
 
 struct hook_verdict {
+    enum class permission { inherit, allow, ask };
     bool allow = true;
     std::string message;  // shown to the model when the action is blocked
+    permission tool_permission = permission::inherit;
+    std::string additional_context{};
 };
 
 // Extension points the loop calls; core does not know where they come from (settings hooks, Lua).
 struct agent_hooks {
     std::function<hook_verdict(std::string_view prompt, cancel_token&)> prompt;
     std::function<hook_verdict(const tool&, const json& input, cancel_token&)> pre_tool;
-    std::function<void(const tool&, const json& input, const tool_output&, cancel_token&)> post_tool;
-    std::function<void(std::string_view reason, cancel_token&)> stop;
+    std::function<hook_verdict(const tool&, const json& input, const tool_output&, cancel_token&)> post_tool;
+    std::function<hook_verdict(bool active, cancel_token&)> stop;
 };
 
 class agent {
@@ -77,6 +81,7 @@ private:
     provider& provider_;
     std::vector<tool> tools_;
     permission_rules& rules_;
+    std::mutex permission_mutex_;
     fs::path root_;
     std::vector<turn_backup> backups_;
     std::map<fs::path, file_stamp> seen_;

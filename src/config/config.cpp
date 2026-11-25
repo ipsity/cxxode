@@ -64,19 +64,33 @@ void merge(settings& s, const json& j) {
             else if (type_name == "Stop") type = hook_type::stop;
             else continue;  // Unknown hook type
 
-            for (const auto& hook : hook_list) {
-                if (!hook.is_object()) continue;
-                hook_config cfg;
-                cfg.type = type;
-                cfg.command = hook.value("command", "");
-                if (cfg.command.empty()) continue;
-                if (hook.contains("args") && hook["args"].is_array()) {
-                    for (const auto& arg : hook["args"]) {
-                        if (arg.is_string()) cfg.args.push_back(arg);
+            for (const auto& group : hook_list) {
+                if (!group.is_object() || !group.contains("hooks") || !group["hooks"].is_array()) continue;
+                const auto matcher = group.contains("matcher") && group["matcher"].is_string()
+                    ? group["matcher"].get<std::string>() : std::string{};
+                std::optional<std::regex> pattern;
+                if ((type == hook_type::pre_tool_use || type == hook_type::post_tool_use) &&
+                    !matcher.empty() && matcher != "*") {
+                    try {
+                        pattern.emplace(matcher);
+                    } catch (const std::regex_error&) {
+                        s.warnings.push_back("Invalid " + type_name + " hook matcher; using exact match: " + matcher);
                     }
                 }
-                cfg.working_dir = hook.value("cwd", "");
-                s.hooks.push_back(cfg);
+                for (const auto& hook : group["hooks"]) {
+                    if (!hook.is_object() || !hook.contains("type") || hook["type"] != "command" ||
+                        !hook.contains("command") || !hook["command"].is_string()) continue;
+                    auto command = hook["command"].get<std::string>();
+                    if (command.empty()) continue;
+                    auto timeout = std::chrono::seconds(60);
+                    if (hook.contains("timeout") && hook["timeout"].is_number_integer()) {
+                        const auto& value = hook["timeout"];
+                        constexpr auto max_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::milliseconds::max()).count();
+                        if (value > 0 && value <= max_seconds) timeout = std::chrono::seconds(value.get<std::int64_t>());
+                    }
+                    s.hooks.push_back({type, matcher, std::move(command), timeout, pattern});
+                }
             }
         }
     }

@@ -94,7 +94,7 @@ user text
 
 ## 5. 扩展兼容规格
 
-以 Claude Code 当前公开的格式为准。读取位置为 `~/.claude/`、`~/.ode/`、`<workspace>/.claude/`、`<workspace>/.ode/`，后读的覆盖先读的。
+以 Claude Code 当前公开的格式为准。读取位置为 `~/.claude/`、`~/.ode/`、`<workspace>/.claude/`、`<workspace>/.ode/`。各层 Hooks 按读取顺序合并，其余配置按各自的合并规则处理，标量以后读的值为准。
 
 | 扩展 | 必须兼容的点 |
 |---|---|

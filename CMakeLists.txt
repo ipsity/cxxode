@@ -105,6 +105,7 @@ if(BUILD_TESTING)
         tests/ui/ui_test.cpp
         tests/ext/skills_test.cpp
         tests/ext/commands_test.cpp
+        tests/ext/hooks_test.cpp
         tests/ext/mcp_test.cpp)
     target_include_directories(cxxode_tests SYSTEM PRIVATE third_party/doctest)
     target_link_libraries(cxxode_tests PRIVATE ode_app)
