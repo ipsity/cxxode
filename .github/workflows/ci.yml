@@ -1,6 +1,13 @@
 name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   windows:
@@ -20,7 +27,58 @@ jobs:
       - run: cmake --preset release
       - run: cmake --build --preset release
       - run: ctest --preset release
+      - name: Check system DLL imports
+        run: |
+          set -euo pipefail
+          dlls=$(objdump -p build/release/ode.exe | sed -n 's/^[[:space:]]*DLL Name: \([^[:space:]]*\).*/\1/p')
+          test -n "$dlls"
+          while IFS= read -r dll; do
+            case "${dll,,}" in
+              kernel32.dll|advapi32.dll|shell32.dll|winhttp.dll|api-ms-win-crt-*.dll) ;;
+              *) echo "Unexpected DLL: $dll" >&2; exit 1 ;;
+            esac
+          done <<< "$dlls"
+      - name: Smoke test with an empty user profile
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $odeExe = (Resolve-Path 'build/release/ode.exe').Path
+          $isolatedProfile = Join-Path $env:RUNNER_TEMP 'ode-empty-profile'
+          New-Item -ItemType Directory -Path $isolatedProfile | Out-Null
+          $env:USERPROFILE = $isolatedProfile
+          Remove-Item Env:ANTHROPIC_API_KEY, Env:ANTHROPIC_AUTH_TOKEN, Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+          Push-Location $isolatedProfile
+          try {
+            & $odeExe --version
+            if ($LASTEXITCODE -ne 0) { throw 'ode --version failed' }
+            $lines = @(& $odeExe -p hi 2>&1 | ForEach-Object { $_.ToString() })
+            if ($LASTEXITCODE -ne 2 -or $lines.Count -ne 1 -or $lines[0] -notmatch 'No API key.*ode login') {
+              throw 'ode should exit with code 2 and one login hint when credentials are missing'
+            }
+            $lines[0]
+          } finally {
+            Pop-Location
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: ode-windows-x64
           path: build/release/ode.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ode-windows-x64
+      - name: Package release
+        shell: pwsh
+        run: Compress-Archive -LiteralPath 'ode.exe' -DestinationPath "ode-$env:GITHUB_REF_NAME-windows-x64.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ode-${{ github.ref_name }}-windows-x64.zip
+          fail_on_unmatched_files: true

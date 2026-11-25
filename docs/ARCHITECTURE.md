@@ -167,10 +167,10 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 - 首次运行时没有任何配置文件也必须能启动。缺少密钥时给出一行可操作的提示，并以退出码 2 退出（2026-11-25 已用空 `USERPROFILE` 验证过）。
 - Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。
 - 用 CI 的 `windows-latest` 干净镜像代替"另一台机器"做验证，不搭虚拟机。
+- `v*` tag 的构建通过后，GitHub Actions 发布仅含 `ode.exe` 的 `ode-<tag>-windows-x64.zip`。
 
 已知缺口：
 
-- CI 只上传构建产物（artifact），没有打 tag 时自动生成 Release zip 的流程。
 - 两个 remote 的历史不一致：`origin`（lay-code）可以直接快进推送。`cxxode` 上只有一个无关的"初始提交"，推送需要覆盖它。推送前要确定用哪个 remote。
 
 ## 10. 迁移计划
