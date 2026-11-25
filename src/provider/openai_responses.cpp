@@ -125,7 +125,8 @@ json encode_responses(const model_request& request) {
     if (request.thinking && (model == "o3" || model.starts_with("o3-") ||
                              model == "o4-mini" || model.starts_with("o4-mini-") ||
                              model.starts_with("gpt-5") || model.starts_with("gpt-6"))) {
-        body["reasoning"] = {{"summary", "auto"}};
+        // Some gateways skip reasoning entirely, summary included, unless an effort is named.
+        body["reasoning"] = {{"effort", "medium"}, {"summary", "auto"}};
     }
     if (!request.system.empty()) body["instructions"] = request.system;
     if (!tools.empty()) body["tools"] = tools;

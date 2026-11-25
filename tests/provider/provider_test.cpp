@@ -129,6 +129,7 @@ TEST_CASE("reasoning summaries are requested for compatible provider models") {
     const auto responses = encode_request(protocol::openai_responses, req);
     REQUIRE(responses.contains("reasoning"));
     CHECK(responses["reasoning"]["summary"] == "auto");
+    CHECK(responses["reasoning"]["effort"] == "medium");
 
     req.model = "gpt-4o";
     CHECK_FALSE(encode_request(protocol::openai_responses, req).contains("reasoning"));
