@@ -29,4 +29,4 @@ ode --help
 
 ## 历史
 
-旧文档和安装脚本在 `archive/`，V1 源码在 `legacy/`（tag `v1-final`）。两者都不参与构建。
+旧文档和安装脚本可在 `v0.3.3` 标签的 `archive/` 中查阅。V1 源码在 `legacy/`（tag `v1-final`）。
