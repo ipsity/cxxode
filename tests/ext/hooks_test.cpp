@@ -12,7 +12,7 @@ using namespace ode;
 namespace {
 
 struct hook_workspace {
-    fs::path path = fs::temp_directory_path() / ("ode-hooks-" + std::to_string(std::random_device{}()));
+    fs::path path = fs::temp_directory_path() / ("ode hooks-" + std::to_string(std::random_device{}()));
     std::string home = narrow(user_home().wstring());
 
     hook_workspace() {
@@ -68,8 +68,9 @@ TEST_CASE("exit code 2 reports only stderr and hook stdin uses Claude Code field
     hook_workspace ws;
     hook_config hook{};
     hook.type = hook_type::pre_tool_use;
-    hook.command = "hook-fixture.cmd";
-    std::ofstream(ws.path / hook.command) << "@echo off\nsetlocal EnableDelayedExpansion\n"
+    const auto script = ws.path / "hook-fixture.cmd";
+    hook.command = '"' + narrow(script.wstring()) + '"';
+    std::ofstream(script) << "@echo off\nsetlocal EnableDelayedExpansion\n"
         "set /p payload=\necho ignored\necho(!payload! 1>&2\nexit /b 2\n";
 
     hook_context ctx{};
