@@ -24,6 +24,8 @@ struct agent_events {
     std::function<void(const tool&, const json& input, const tool_output&)> tool_finished;
     std::function<answer(const tool&, const json& input)> ask;
     std::function<void(const usage&)> usage_updated;
+    std::function<void()> compacted;
+    std::function<void(std::string_view)> notice;
     std::function<std::vector<std::string>()> take_steering;  // messages typed while the agent works
 };
 
@@ -56,6 +58,7 @@ public:
     std::string model;
     std::string system;
     std::size_t context_window = 200000;
+    double auto_compact_ratio = 0.8;
     std::vector<message> messages;
     session_log* log = nullptr;
     usage total;                  // summed over every request

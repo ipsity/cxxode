@@ -48,6 +48,24 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         if (!v.allow) return {stop_reason::error, v.message.empty() ? "Prompt blocked by hook" : v.message};
         hook_context = std::move(v.additional_context);
     }
+    bool auto_compact_failed = false;
+    const auto compact_if_needed = [&] {
+        if (cancel.cancelled()) return false;
+        if (auto_compact_failed || auto_compact_ratio <= 0 || messages.size() <= 2 ||
+            static_cast<double>(context_tokens) <= static_cast<double>(context_window) * auto_compact_ratio) return true;
+        const auto result = compact(events, cancel);
+        if (result.stop == stop_reason::cancelled || cancel.cancelled()) return false;
+        if (result.stop == stop_reason::end_turn) {
+            if (events.compacted) events.compacted();
+        } else {
+            auto_compact_failed = true;
+            if (events.notice) events.notice("自动压缩失败，继续使用原上下文");
+        }
+        return true;
+    };
+    // The new user message belongs verbatim in the first request of this turn.
+    if (!compact_if_needed()) return {stop_reason::cancelled, "Cancelled."};
+
     message user{message::role::user, {}};
     if (!pending_note_.empty()) {
         user.blocks.push_back(block::make_text(pending_note_));
@@ -68,6 +86,8 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
 
     bool stop_hook_active = false;
     for (int round = 0; round < max_rounds_without_user; ++round) {
+        // Between requests, tool results have already been appended for every call in the previous reply.
+        if (round != 0 && !compact_if_needed()) return finish({stop_reason::cancelled, "Cancelled."});
         if (events.request_started) events.request_started();
         stream_events stream;
         stream.text = events.text;
@@ -286,9 +306,14 @@ turn_result agent::compact(agent_events& events, cancel_token& cancel, std::stri
     close_dangling_tool_calls(r.messages);
     stream_events quiet;
     auto reply = provider_.send(r, quiet, cancel);
-    if (!reply.complete) return {cancel.cancelled() ? stop_reason::cancelled : stop_reason::error, reply.error};
+    if (cancel.cancelled() || reply.stop == stop_reason::cancelled) return {stop_reason::cancelled, "Cancelled."};
+    if (!reply.complete) return {stop_reason::error, reply.error};
+    const auto summary_text = reply.content.plain_text();
+    if (reply.stop != stop_reason::end_turn || summary_text.find_first_not_of(" \t\r\n") == std::string::npos) {
+        return {stop_reason::error, "The model did not return a complete summary."};
+    }
     message summary{message::role::user,
-                    {block::make_text("[Summary of the earlier conversation]\n" + reply.content.plain_text())}};
+                    {block::make_text("[Summary of the earlier conversation]\n" + summary_text)}};
     if (log) log->append({{"v", 1}, {"type", "compact"}, {"message", to_json(summary)}});
     messages = {summary, message{message::role::assistant, {block::make_text("Understood. I'll continue from the summary.")}}};
     if (log) log->append_message(messages.back());

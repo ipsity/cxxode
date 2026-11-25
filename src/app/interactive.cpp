@@ -73,6 +73,8 @@ agent_events interactive_ui::make_events() {
         const auto& total = app_.core->total;
         push(ev_usage{u.context(), total.input + total.cache_read + total.cache_write, total.output});
     };
+    ev.compacted = [this] { push(ev_notice{"上下文已自动压缩", app_.core->context_tokens}); };
+    ev.notice = [this](std::string_view message) { push(ev_notice{std::string(message), std::nullopt}); };
     ev.take_steering = [this] {
         std::lock_guard lock(mutex_);
         auto taken = std::move(steering_);
@@ -105,8 +107,6 @@ void interactive_ui::start_turn(std::string text) {
     // Use cached theme color for user messages
     screen_.commit(ui::layout({{text, ui::tone::normal}}, size_.columns - 1,
                               {app_.current_theme.user_message_fg + "› \033[0m", 2}, {"  ", 2}));
-    const auto window = app_.core->context_window;
-    if (usage_.context > window * 8 / 10) note("上下文已用 " + short_count(usage_.context) + "，可用 /compact 压缩");
     start_job([this, text = std::move(text)](agent_events& ev, cancel_token& c) { return app_.core->run(text, ev, c); },
               false);
 }

@@ -241,6 +241,13 @@ void interactive_ui::answer_ask(answer a) {
     ask_.reset();
 }
 
+void interactive_ui::apply(ev_notice& e) {
+    flush_thinking(true);
+    flush_stream(true);
+    note(e.message);
+    if (e.context) usage_.context = *e.context;
+}
+
 void interactive_ui::apply(ev_done& e) {
     flush_thinking(true);
     flush_stream(true);

@@ -175,6 +175,88 @@ TEST_CASE("hooks block tools before asking and can continue a finished reply") {
     CHECK(active == std::vector<bool>{false, true});
 }
 
+TEST_CASE("auto-compaction checks the threshold after storing every tool result") {
+    temp_dir dir;
+    scripted_provider p;
+    auto first = reply({block::make_tool_use("1", "Glob", {{"pattern", "*"}})}, stop_reason::tool_use);
+    bool expect_compaction = true;
+    first.tokens.input = 820;
+    SUBCASE("At the threshold") {
+        first.tokens.input = 800;
+        expect_compaction = false;
+    }
+    p.replies.push_back(std::move(first));
+    if (expect_compaction) {
+        auto summary = reply({block::make_text("The user asked to list files.")}, stop_reason::end_turn);
+        summary.tokens.output = 10;
+        p.replies.push_back(std::move(summary));
+    }
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+
+    permission_rules rules;
+    agent a(p, builtin_tools(), rules, dir.path);
+    a.context_window = 1000;
+    agent_events ev;
+    int compacted = 0;
+    ev.compacted = [&] { ++compacted; };
+    cancel_token cancel;
+    CHECK(a.run("List files", ev, cancel).stop == stop_reason::end_turn);
+    REQUIRE(p.requests.size() == (expect_compaction ? 3 : 2));
+    CHECK(compacted == (expect_compaction ? 1 : 0));
+    const auto& second = p.requests[1];
+    REQUIRE(second.messages.size() >= 3);
+    CHECK(second.messages[2].blocks[0].type == block::kind::tool_result);
+    CHECK(second.messages[2].blocks[0].id == "1");
+    if (expect_compaction) {
+        CHECK(second.tools.empty());
+        CHECK(second.messages.back().plain_text().starts_with("Summarise"));
+        CHECK(p.requests.back().messages.front().plain_text().starts_with("[Summary of the earlier conversation]"));
+    } else {
+        CHECK_FALSE(second.tools.empty());
+    }
+}
+
+TEST_CASE("auto-compaction at the start keeps the new prompt and handles failure or cancellation") {
+    temp_dir dir;
+    scripted_provider p;
+    auto summary = reply({block::make_text("Earlier summary.")}, stop_reason::end_turn);
+    SUBCASE("Incomplete summary") { summary.complete = false; summary.stop = stop_reason::error; }
+    SUBCASE("Cancelled summary") { summary.complete = false; summary.stop = stop_reason::cancelled; }
+    const auto compact_stop = summary.stop;
+    p.replies.push_back(std::move(summary));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    permission_rules rules;
+    agent a(p, builtin_tools(), rules, dir.path);
+    a.context_window = 1000;
+    a.context_tokens = 820;
+    a.messages = {
+        {message::role::user, {block::make_text("Earlier request")}},
+        {message::role::assistant, {block::make_text("Earlier reply")}},
+        {message::role::user, {block::make_text("Follow-up")}},
+        {message::role::assistant, {block::make_text("Previous reply")}},
+    };
+    int noticed = 0;
+    agent_events ev;
+    ev.notice = [&](std::string_view) { ++noticed; };
+    cancel_token cancel;
+    const auto result = a.run("New prompt", ev, cancel);
+    REQUIRE_FALSE(p.requests.empty());
+    CHECK(p.requests[0].messages.size() == 5);
+    CHECK(p.requests[0].messages.back().plain_text().starts_with("Summarise"));
+    if (compact_stop == stop_reason::cancelled) {
+        CHECK(result.stop == stop_reason::cancelled);
+        CHECK(p.requests.size() == 1);
+        CHECK(a.messages.size() == 4);
+        CHECK(noticed == 0);
+    } else {
+        CHECK(result.stop == stop_reason::end_turn);
+        REQUIRE(p.requests.size() == 2);
+        CHECK(p.requests.back().messages.back().plain_text() == "New prompt");
+        CHECK(p.requests.back().messages.size() == (compact_stop == stop_reason::end_turn ? 3 : 5));
+        CHECK(noticed == (compact_stop == stop_reason::error ? 1 : 0));
+    }
+}
+
 TEST_CASE("permission rules") {
     const auto tools = builtin_tools();
     const auto& bash = find(tools, "Bash");

@@ -18,6 +18,7 @@ bool app::open_session(const std::optional<fs::path>& resume) {
         log.open(sessions_dir(root) / (session_id + ".jsonl"));
         log.append({{"v", 1}, {"type", "meta"}, {"model", core->model}, {"cwd", root.generic_string()}});
     }
+    core->context_tokens = 0;
     core->log = log.is_open() ? &log : nullptr;
     return log.is_open();
 }
@@ -45,6 +46,11 @@ int run_print(app& a, std::string prompt) {
         thinking = false;
     };
     ev.request_started = finish_thinking;
+    ev.notice = [&](std::string_view message) {
+        finish_thinking();
+        ui::write_stream(true, std::string(message) + '\n');
+    };
+    ev.compacted = [&] { ev.notice("上下文已自动压缩"); };
     ev.thinking = [&](std::string_view t, std::string_view) {
         if (t.empty()) return;
         if (!thinking) ui::write_stream(true, "✻ 思考\n");

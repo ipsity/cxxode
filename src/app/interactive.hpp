@@ -27,9 +27,10 @@ struct ev_progress { std::string text; };
 struct ev_tool_done { std::string name, label, summary, detail, full; bool error = false; };
 struct ev_ask { std::string name, label, rule; std::shared_ptr<std::promise<answer>> reply; };
 struct ev_usage { std::size_t context = 0, input = 0, output = 0; };
+struct ev_notice { std::string message; std::optional<std::size_t> context; };
 struct ev_done { turn_result result; bool compact = false; };
 using ui_event = std::variant<ev_text, ev_thinking, ev_request, ev_tool_start, ev_progress, ev_tool_done, ev_ask,
-                              ev_usage, ev_done>;
+                              ev_usage, ev_notice, ev_done>;
 
 struct running_tool {
     std::string name, label;
@@ -63,6 +64,7 @@ private:
     void apply(ev_tool_done&);
     void apply(ev_ask&);
     void apply(ev_usage& u) { usage_ = u; }
+    void apply(ev_notice&);
     void apply(ev_done&);
     void section(std::string_view kind);
     void flush_stream(bool all);
