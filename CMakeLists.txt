@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(cxxode VERSION 0.3.1 LANGUAGES CXX)
+project(cxxode VERSION 0.3.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,9 +22,7 @@ add_library(ode_lua STATIC ${LUA_SOURCES})
 target_include_directories(ode_lua SYSTEM PUBLIC third_party/lua)
 target_compile_definitions(ode_lua PRIVATE LUA_USE_JUMPTABLE=0)
 if(MINGW)
-    target_compile_options(ode_lua PRIVATE $<$<CONFIG:Release>:-Oz>)
-    set_source_files_properties(src/ext/lua/host.cpp PROPERTIES
-        COMPILE_OPTIONS "$<$<CONFIG:Release>:-Oz>")
+    target_compile_options(ode_lua PRIVATE $<$<CONFIG:Release>:-Os>)
 endif()
 
 # One static library per layer. Each links only the layers below it, so a reversed
@@ -103,16 +101,12 @@ target_link_libraries(ode_provider PUBLIC ode_config ode_platform)
 target_link_libraries(ode_tools PUBLIC ode_base ode_platform)
 target_link_libraries(ode_core PUBLIC ode_provider ode_tools)
 target_link_libraries(ode_ext PUBLIC ode_core ode_platform PRIVATE ode_lua)
-if(MINGW)
-    target_compile_options(ode_ext PRIVATE $<$<CONFIG:Release>:-Os>)
-    target_compile_options(ode_app PRIVATE $<$<CONFIG:Release>:-Os>)
-endif()
 target_link_libraries(ode_app PUBLIC ode_ext ode_ui)
 
 add_executable(ode src/main.cpp)
 target_link_libraries(ode PRIVATE ode_app shell32)
 if(MINGW)
-    target_link_options(ode PRIVATE -static)
+    target_link_options(ode PRIVATE -static $<$<CONFIG:Release>:-s>)
 endif()
 
 include(CTest)
