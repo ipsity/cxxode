@@ -120,7 +120,29 @@ user text
 - 不允许访问网络。所有测试加起来必须在 60 s 内跑完。
 - 每修一个 bug 都要补一条能复现它的测试。
 
-## 8. 迁移计划
+## 8. 开箱即用
+
+目标：推送到 remote 后，另一台没有任何本机状态的 Windows 10 1809+/11 x64 机器有两种方式可以用：
+
+- **只用：** 下载 GitHub Release 的 zip，解压出 `ode.exe` 放到 PATH 下，执行 `ode login` 后即可使用。
+- **开发：** `git clone`，装 MSYS2 UCRT64（gcc、cmake、ninja），执行 `cmake --preset dev && cmake --build --preset dev && ctest --preset dev`，全部通过。
+
+约束：
+
+- exe 只能依赖系统自带的 DLL：KERNEL32、ADVAPI32、SHELL32、WINHTTP，以及 Win10 起系统自带的 UCRT `api-ms-win-crt-*`。不允许依赖 libstdc++、libgcc、libwinpthread 等 MinGW DLL。CI 用 `objdump -p` 检查导入表，出现白名单以外的 DLL 就失败。
+- 第三方依赖只能以单头文件形式放在 `third_party/`，构建时不联网下载。
+- 源码、测试、配置里不允许出现本机路径或用户名。运行时状态（会话、命令历史、主题选择）只写到 `%USERPROFILE%\.ode\`，不写进工作区，也不进 git。
+- 首次运行时没有任何配置文件也必须能启动。缺少密钥时给出一行可操作的提示，并以退出码 2 退出（2026-11-25 已用空 `USERPROFILE` 验证过）。
+- Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。
+- 用 CI 的 `windows-latest` 干净镜像代替"另一台机器"做验证，不搭虚拟机。
+
+已知缺口：
+
+- `.claude/command_history.txt` 写在工作区里，并且被 git 跟踪，会把个人输入历史推送到 remote。改为写到 `~/.ode/`，并从仓库删除。
+- CI 只上传构建产物（artifact），没有打 tag 时自动生成 Release zip 的流程。
+- 两个 remote 的历史不一致：`origin`（lay-code）可以直接快进推送。`cxxode` 上只有一个无关的"初始提交"，推送需要覆盖它。推送前要确定用哪个 remote。
+
+## 9. 迁移计划
 
 按顺序执行，每一步都是一次独立提交，并且满足 CLAUDE.md 的完成定义。
 
@@ -133,6 +155,7 @@ user text
 | R4 | Hooks 改为 Claude Code 格式（matcher、字段名、JSON 输出） | 原样复制一份 Claude Code 的 hooks 配置就能生效 |
 | R5 | 自动压缩 | 夹具测试：超过阈值时自动触发压缩 |
 | R6 | Subagent frontmatter 中的 `tools`/`model`、斜杠命令参数 | 装一个 Claude Code 插件，它的 skill、命令、agent 都能用 |
-| R7 | 发布：`cmake --build --preset release` 产出单个 exe，在 GitHub Actions 上打 zip | 不提供安装脚本，README 说明把 exe 放到 PATH 下 |
+| R7 | 补齐第 8 节的缺口：命令历史改到 `~/.ode/`，CI 加 DLL 白名单检查和空 HOME 冒烟测试，打 tag 时生成 Release zip | CI 在干净的 `windows-latest` 上全部通过，下载的 zip 解压后可直接运行 |
+| R8 | 推送到 remote，打第一个 tag | 第 8 节两种方式都能走通 |
 
 `archive/` 只读：保留历史，不参与构建，也不再更新。需要旧内容时搬到 `docs/` 并改写。
