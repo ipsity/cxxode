@@ -30,6 +30,7 @@ struct file_stamp {
 
 enum class answer { yes, no, always };
 struct tool;
+struct tool_output;
 
 struct tool_context {
     fs::path root;
@@ -39,6 +40,8 @@ struct tool_context {
     std::function<void(std::string_view)> output;     // live bash output
     std::function<answer(const tool&, const json&)> ask{};
     std::span<const std::string> allowed_tools{};
+    std::function<tool_output(std::string_view, const json&)> invoke_builtin{};
+    std::function<void(std::string_view)> notice{};
 };
 
 struct tool_output {

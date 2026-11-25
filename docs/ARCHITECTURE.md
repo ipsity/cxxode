@@ -52,7 +52,7 @@ base       cancel_token、json 别名、UTF-8 / 字符串小工具
 - 每层只依赖它下面的层，同层之间互不依赖。`ext` 内部的模块也互不引用，需要组合的地方放到 `main.cpp` 里装配。
 - `core` 不认识 hooks、MCP、skills。它只认两类东西：一个 `std::vector<tool>`，和一组 `tool_hooks` 回调（pre/post/prompt/stop）。`ext/hooks` 负责把 settings 里的配置转成这组回调。
 - `core` 不直接输出任何内容，所有输出都通过 `agent_events` 回调交给前端。
-- `nlohmann::json` 只允许出现在 `provider`、`config`、`session`、`ext/mcp`、`ext/hooks` 和 `app/rpc` 里。`tool` 的输入是个例外，它本身就是 JSON Schema 对象，保留 `json`。
+- `nlohmann::json` 只允许出现在 `provider`、`config`、`session`、`ext/mcp`、`ext/hooks`、`ext/lua` 和 `app/rpc` 的协议边界。`tool` 的输入是个例外，它本身就是 JSON Schema 对象，保留 `json`。
 - 修改依赖关系时以 CMake 为准：每一层是一个 `STATIC` 库，`target_link_libraries` 只链接下层。违反分层就会链接失败，这样不用靠人工审查。
 
 ### 目录
@@ -126,12 +126,17 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 | `ode.command(name, fn)` | 斜杠命令 |
 | `ode.ui.set_status(text)`、`ode.keymap(key, fn)` | 状态栏和键位 |
 
+注册在 `init.lua` 中进行。Hook 收到与 shell hook 相同的字段，返回同格式的决策表或 `nil`。配置中的 shell hook 先执行，随后按 Lua 注册顺序执行。工具的 `schema` 描述 JSON 对象，`access` 为 `read`、`write` 或 `execute`。工具回调收到参数表，斜杠命令回调收到命令尾部的原始字符串，两者可返回字符串或含 `text`、`is_error`、`summary`、`detail` 的表。Lua 命令与现有命令重名时优先执行现有命令。
+
+工具和命令回调可调用 `ode.fs.read(path[, offset, limit])`、`ode.fs.write(path, content)`、`ode.fs.edit(path, old, new[, replace_all])` 和 `ode.exec(command[, timeout_ms])`。结果与内置工具一致，返回上述结果表。工具的声明访问级别限制这些调用，调用同时经过内置工具的 Hooks、权限、文件时间戳和撤销机制。JSON 空数组用 `ode.array()` 表示，JSON 空值用 `ode.null` 表示。
+
 **执行模型**：
 
 - 单独一个 Lua 线程持有唯一的 VM，所有调用都以消息的形式投递给它。
 - API 一律是同步风格（`local r = ode.exec("git status")`），在 Lua 线程上阻塞执行。以后如果需要并发，在 C++ 侧改用 `lua_yield`/`lua_resume`，脚本不用改。不做回调式的异步 API。
 - 渲染路径上 C++ 永远不同步等待 Lua。UI 相关的状态由 Lua 推送给 C++，C++ 不按帧调用 Lua。
 - 用 `lua_sethook` 做指令计数，用来响应取消和限制单次调用的执行时间；用自定义 `lua_Alloc` 限制内存。
+- VM 的堆上限为 8 MiB。每次执行最多 400 万条指令、2 秒脚本时间，内置工具和权限询问沿用各自的超时与取消语义。仅加载受限的 base、table、string、math 和 utf8 库。
 - Lua 源码按 C++ 编译，`lua_error` 走 C++ 异常，绑定代码里的 RAII 对象能正常析构。
 - 边界上的数据转换（JSON 和 Lua table 互转）只在 `ext/lua` 里做。
 

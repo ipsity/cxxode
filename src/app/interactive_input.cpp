@@ -43,7 +43,7 @@ void interactive_ui::submit() {
             return;
         }
         // Try user commands first, then builtin
-        if ((credentials || !user_command(text)) && !command(text)) quit_ = true;
+        if ((credentials || name == "/reload" || !user_command(text)) && !command(text)) quit_ = true;
         return;
     }
     if (busy_) {

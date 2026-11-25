@@ -35,12 +35,7 @@ void append_context(std::string& context, std::string_view addition) {
     context += addition;
 }
 
-} // namespace
-
-hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, cancel_token& cancel,
-                          const std::optional<fs::path>& bash) {
-    if (!matches(config, ctx) || cancel.cancelled()) return {};
-
+json hook_input(const hook_context& ctx) {
     const auto cwd = narrow(ctx.session.cwd.wstring());
     json input{{"session_id", ctx.session.id}, {"transcript_path", narrow(ctx.session.transcript.wstring())},
                {"cwd", cwd}, {"hook_event_name", event_name(ctx.type)}};
@@ -56,6 +51,14 @@ hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, ca
         input["stop_hook_active"] = ctx.stop_hook_active;
     }
 
+    return input;
+}
+
+} // namespace
+
+hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, cancel_token& cancel,
+                          const std::optional<fs::path>& bash) {
+    if (!matches(config, ctx) || cancel.cancelled()) return {};
     process_request req;
     if (bash) {
         req.program = *bash;
@@ -66,9 +69,9 @@ hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, ca
     }
     req.directory = ctx.session.cwd;
     req.timeout = config.timeout;
-    req.env = {{"CLAUDE_PROJECT_DIR", cwd}};
+    req.env = {{"CLAUDE_PROJECT_DIR", narrow(ctx.session.cwd.wstring())}};
     req.separate_stderr = true;
-    req.stdin_data = input.dump() + "\r\n";
+    req.stdin_data = hook_input(ctx).dump() + "\r\n";
 
     const auto result = run_process(req, cancel);
     if (!result.exit_code || result.cancelled || result.timed_out || !result.error.empty()) return {};
@@ -76,21 +79,26 @@ hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, ca
     if (*result.exit_code != 0) return {};
 
     const auto output = json::parse(result.output, nullptr, false);
-    hook_verdict verdict;
     if (output.is_discarded()) {
+        hook_verdict verdict;
         if (ctx.type == hook_type::user_prompt_submit) verdict.additional_context = result.output;
         return verdict;
     }
+    return parse_hook_output(ctx.type, output);
+}
+
+hook_verdict parse_hook_output(hook_type type, const json& output) {
+    hook_verdict verdict;
     if (!output.is_object()) return verdict;
     const auto decision = string_field(output, "decision");
     verdict.allow = decision != "block";
     verdict.message = string_field(output, "reason");
-    if (ctx.type == hook_type::pre_tool_use && decision == "approve") {
+    if (type == hook_type::pre_tool_use && decision == "approve") {
         verdict.tool_permission = hook_verdict::permission::allow;
     }
     const auto specific = output.find("hookSpecificOutput");
     if (specific != output.end() && specific->is_object()) {
-        if (ctx.type == hook_type::pre_tool_use) {
+        if (type == hook_type::pre_tool_use) {
             const auto permission = string_field(*specific, "permissionDecision");
             const auto reason = string_field(*specific, "permissionDecisionReason");
             if (permission == "deny") verdict.allow = false;
@@ -103,17 +111,17 @@ hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, ca
     return verdict;
 }
 
-agent_hooks make_agent_hooks(std::vector<hook_config> list, std::function<hook_session()> session) {
-    if (list.empty()) return {};
+agent_hooks make_agent_hooks(std::vector<hook_config> list, std::function<hook_session()> session,
+                             script_hooks scripts) {
+    if (list.empty() && !scripts) return {};
     const auto hooks = std::make_shared<const std::vector<hook_config>>(std::move(list));
-    const auto bash = git_bash();
-    const auto run = [hooks, session = std::move(session), bash](hook_context ctx, cancel_token& cancel) {
+    const auto bash = hooks->empty() ? std::nullopt : git_bash();
+    const auto run = [hooks, session = std::move(session), bash, scripts = std::move(scripts)]
+        (hook_context ctx, cancel_token& cancel) {
         ctx.session = session();
         hook_verdict merged;
-        for (const auto& hook : *hooks) {
-            const auto verdict = execute_hook(hook, ctx, cancel, bash);
+        const auto merge = [&](const hook_verdict& verdict) {
             if (!verdict.allow) {
-                if (ctx.type != hook_type::post_tool_use) return verdict;
                 merged.allow = false;
                 append_context(merged.message, verdict.message);
             }
@@ -122,7 +130,14 @@ agent_hooks make_agent_hooks(std::vector<hook_config> list, std::function<hook_s
                 merged.tool_permission = verdict.tool_permission;
             }
             append_context(merged.additional_context, verdict.additional_context);
+            append_context(merged.warning, verdict.warning);
+        };
+        for (const auto& hook : *hooks) {
+            const auto verdict = execute_hook(hook, ctx, cancel, bash);
+            if (!verdict.allow && ctx.type != hook_type::post_tool_use) return verdict;
+            merge(verdict);
         }
+        if (scripts && !cancel.cancelled()) merge(scripts(ctx.type, hook_input(ctx), cancel));
         return merged;
     };
 

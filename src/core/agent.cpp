@@ -45,6 +45,7 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
     std::string hook_context;
     if (hooks_.prompt) {
         auto v = hooks_.prompt(user_text, cancel);
+        if (events.notice && !v.warning.empty()) events.notice(v.warning);
         if (!v.allow) return {stop_reason::error, v.message.empty() ? "Prompt blocked by hook" : v.message};
         hook_context = std::move(v.additional_context);
     }
@@ -117,6 +118,7 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
             if (cancel.cancelled()) return finish({stop_reason::cancelled, "Cancelled."});
             if (steering.empty() && hooks_.stop && reply.stop == stop_reason::end_turn) {
                 auto v = hooks_.stop(stop_hook_active, cancel);
+                if (events.notice && !v.warning.empty()) events.notice(v.warning);
                 if (cancel.cancelled()) return finish({stop_reason::cancelled, "Cancelled."});
                 if (!v.allow) {
                     stop_hook_active = true;
@@ -198,6 +200,10 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
                 std::lock_guard lock(callback_mutex);
                 events.tool_progress(s);
             };
+            if (events.notice) serial.notice = [&](std::string_view s) {
+                std::lock_guard lock(callback_mutex);
+                events.notice(s);
+            };
             if (events.ask) serial.ask = [&](const tool& t, const json& in) {
                 std::lock_guard lock(callback_mutex);
                 return events.ask(t, in);
@@ -223,21 +229,28 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
                            std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools) {
     const auto* t = find_tool(call.name);
     if (!t) return {"Unknown tool: " + call.name, true, "未知工具", {}};
-    if (!call.input.is_object()) return {"Tool input must be a JSON object.", true, "参数错误", {}};
+    return run_tool(*t, call.input, events, cancel, &backup, seen, allowed_tools);
+}
+
+tool_output agent::run_tool(const tool& t, const json& input, agent_events& events, cancel_token& cancel,
+                            turn_backup* backup, std::map<fs::path, file_stamp>& seen,
+                            std::span<const std::string> allowed_tools) {
+    if (!input.is_object()) return {"Tool input must be a JSON object.", true, "参数错误", {}};
     tool_output out;
     const auto blocked = [&](std::string reason) {
         tool_output denied{std::move(reason), true, "已拒绝", {}};
-        if (events.tool_started) events.tool_started(*t, call.input);
-        if (events.tool_finished) events.tool_finished(*t, call.input, denied);
+        if (events.tool_started) events.tool_started(t, input);
+        if (events.tool_finished) events.tool_finished(t, input, denied);
         return denied;
     };
-    auto hook = hooks_.pre_tool ? hooks_.pre_tool(*t, call.input, cancel) : hook_verdict{};
+    auto hook = hooks_.pre_tool ? hooks_.pre_tool(t, input, cancel) : hook_verdict{};
+    if (events.notice && !hook.warning.empty()) events.notice(hook.warning);
     if (cancel.cancelled()) return blocked("[Interrupted by the user]");
     if (!hook.allow) return blocked(hook.message.empty() ? "Blocked by hook" : std::move(hook.message));
 
     auto permission = [&] {
         std::lock_guard lock(permission_mutex_);
-        return rules_.check(*t, call.input, root_, allowed_tools);
+        return rules_.check(t, input, root_, allowed_tools);
     }();
     if (permission != verdict::deny) {
         if (hook.tool_permission == hook_verdict::permission::ask) permission = verdict::ask;
@@ -249,39 +262,70 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
                 ? "Plan mode is read-only. Describe the change instead; the user can switch modes with Shift+Tab."
                 : "Denied by a permission rule.");
         case verdict::ask: {
-            const auto a = events.ask ? events.ask(*t, call.input) : answer::no;
+            const auto a = events.ask ? events.ask(t, input) : answer::no;
             if (a == answer::no) {
                 return blocked("The user declined this tool call. Ask what they want instead, or try another approach.");
             }
             if (a == answer::always) {
                 std::lock_guard lock(permission_mutex_);
-                rules_.allow.push_back(permission_rules::always_rule(*t, call.input));
+                rules_.allow.push_back(permission_rules::always_rule(t, input));
             }
             break;
         }
         case verdict::allow: break;
     }
 
-    if (events.tool_started) events.tool_started(*t, call.input);
-
-    tool_context ctx{root_, &cancel, t->access == tool_access::read ? nullptr : &backup, &seen, events.tool_progress,
-                     events.ask, allowed_tools};
+    if (events.tool_started) events.tool_started(t, input);
+    auto ctx = make_context(t.access, events, cancel, backup, seen, allowed_tools);
     try {
-        out = t->run(call.input, ctx);
+        out = t.run(input, ctx);
     } catch (const std::exception& e) {
         out = {std::string("Tool failed: ") + e.what(), true, "失败", {}};
     }
 
-    if (events.tool_finished) events.tool_finished(*t, call.input, out);
+    if (events.tool_finished) events.tool_finished(t, input, out);
 
     if (hooks_.post_tool && !cancel.cancelled()) {
-        const auto post = hooks_.post_tool(*t, call.input, out, cancel);
+        const auto post = hooks_.post_tool(t, input, out, cancel);
+        if (events.notice && !post.warning.empty()) events.notice(post.warning);
         if (!post.allow && !post.message.empty()) out.text += "\n[PostToolUse hook] " + post.message;
         if (!post.additional_context.empty()) out.text += "\n" + post.additional_context;
     }
     if (!hook.additional_context.empty()) out.text += "\n" + hook.additional_context;
 
     return out;
+}
+
+tool_context agent::make_context(tool_access access, agent_events& events, cancel_token& cancel, turn_backup* backup,
+                                 std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools) {
+    return {root_, &cancel, access == tool_access::read ? nullptr : backup, &seen, events.tool_progress,
+            events.ask, allowed_tools, [this, access, &events, &cancel, backup, &seen, allowed_tools]
+            (std::string_view name, const json& input) -> tool_output {
+                if (cancel.cancelled()) return {"[Interrupted by the user]", true, "已取消", {}};
+                const auto builtin = find_tool(name);
+                if (!builtin) return {"Tool is unavailable: " + std::string(name), true, "不可用", {}};
+                if (builtin->access > access) return {"Operation exceeds the tool's declared access.", true, "已拒绝", {}};
+                return run_tool(*builtin, input, events, cancel, backup, seen, allowed_tools);
+            }, events.notice};
+}
+
+tool_output agent::run_local(const std::function<tool_output(tool_context&)>& action,
+                             agent_events& events, cancel_token& cancel) {
+    turn_backup backup;
+    auto ctx = make_context(tool_access::execute, events, cancel, &backup, seen_, {});
+    tool_output out;
+    try {
+        out = action(ctx);
+    } catch (const std::exception& e) {
+        out = {e.what(), true, "失败", {}};
+    }
+    if (!backup.originals.empty()) backups_.push_back(std::move(backup));
+    return out;
+}
+
+void agent::set_extensions(std::vector<tool> tools, agent_hooks hooks) {
+    tools_ = std::move(tools);
+    hooks_ = std::move(hooks);
 }
 
 std::vector<std::string> agent::undo() {

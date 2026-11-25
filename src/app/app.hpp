@@ -19,6 +19,8 @@
 
 namespace ode {
 
+class lua_host;
+
 // Everything one running ode process owns.
 struct app {
     fs::path root;
@@ -34,6 +36,7 @@ struct app {
     std::vector<user_command> commands;
     std::vector<std::shared_ptr<mcp_client>> mcp_clients;
     std::vector<agent_config> agents;
+    lua_host* lua = nullptr;
     std::function<std::vector<std::string>(cancel_token&)> reload_lua;
 
     // Current theme

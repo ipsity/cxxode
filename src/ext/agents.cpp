@@ -57,6 +57,7 @@ tool_output run_subagent(const agent_config& config, const std::string& prompt, 
 
     agent_events events;
     events.ask = ctx.ask;
+    events.notice = ctx.notice;
     cancel_token cancel;
     const auto result = sub_agent.run(prompt, events, ctx.cancel ? *ctx.cancel : cancel, {ctx.allowed_tools, ctx.backup});
     if (result.stop != stop_reason::end_turn) {

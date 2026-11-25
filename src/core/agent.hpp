@@ -43,6 +43,7 @@ struct hook_verdict {
     std::string message;  // shown to the model when the action is blocked
     permission tool_permission = permission::inherit;
     std::string additional_context{};
+    std::string warning{};
 };
 
 // Extension points the loop calls; core does not know where they come from (settings hooks, Lua).
@@ -75,6 +76,9 @@ public:
     bool can_undo() const { return !backups_.empty(); }
     const std::vector<tool>& tools() const { return tools_; }
     const tool* find_tool(std::string_view name) const;
+    void set_extensions(std::vector<tool> tools, agent_hooks hooks);
+    tool_output run_local(const std::function<tool_output(tool_context&)>& action,
+                          agent_events& events, cancel_token& cancel);
 
 private:
     model_request request() const;
@@ -83,6 +87,12 @@ private:
                    turn_backup& backup, std::span<const std::string> allowed_tools);
     tool_output run_one(const block& call, agent_events& events, cancel_token& cancel, turn_backup& backup,
                         std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools);
+    tool_output run_tool(const tool& t, const json& input, agent_events& events, cancel_token& cancel,
+                         turn_backup* backup, std::map<fs::path, file_stamp>& seen,
+                         std::span<const std::string> allowed_tools);
+    tool_context make_context(tool_access access, agent_events& events, cancel_token& cancel,
+                              turn_backup* backup, std::map<fs::path, file_stamp>& seen,
+                              std::span<const std::string> allowed_tools);
 
     provider& provider_;
     std::vector<tool> tools_;

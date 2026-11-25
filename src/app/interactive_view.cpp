@@ -1,4 +1,5 @@
 #include "app/interactive.hpp"
+#include "ext/lua/host.hpp"
 
 #include <cctype>
 
@@ -130,6 +131,14 @@ std::vector<interactive_ui::palette_item> interactive_ui::palette_items() const 
         if (!about.empty() && !cmd.description.empty()) about += "  ";
         about += cmd.description;
         add("/" + cmd.name, std::move(about), command_kind::user_command);
+    }
+    if (app_.lua) {
+        for (const auto& name : app_.lua->commands()) {
+            const auto slash = "/" + name;
+            if (std::ranges::find(items, slash, &palette_item::name) == items.end()) {
+                add(slash, "Lua", command_kind::user_command);
+            }
+        }
     }
 
     std::sort(items.begin(), items.end(), [](const auto& a, const auto& b) {

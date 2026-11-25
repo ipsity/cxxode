@@ -29,6 +29,9 @@ hook_verdict execute_hook(const hook_config& config, const hook_context& ctx, ca
                           const std::optional<fs::path>& bash);
 
 // Adapts the hooks from settings.json to the loop's extension points.
-agent_hooks make_agent_hooks(std::vector<hook_config> hooks, std::function<hook_session()> session);
+using script_hooks = std::function<hook_verdict(hook_type, const json&, cancel_token&)>;
+agent_hooks make_agent_hooks(std::vector<hook_config> hooks, std::function<hook_session()> session,
+                             script_hooks scripts = {});
+hook_verdict parse_hook_output(hook_type type, const json& output);
 
 } // namespace ode

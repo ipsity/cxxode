@@ -41,6 +41,9 @@ void rpc_server::handle_request(const json& req) {
         events.text = [this, id](std::string_view text) {
             send_event(id, "text", {{"text", std::string(text)}});
         };
+        events.notice = [this, id](std::string_view text) {
+            send_event(id, "notice", {{"text", std::string(text)}});
+        };
         events.thinking = [this, id](std::string_view text, std::string_view sig) {
             send_event(id, "thinking", {{"text", std::string(text)}, {"signature", std::string(sig)}});
         };

@@ -1,6 +1,7 @@
 #include "app/interactive.hpp"
 #include "ext/commands.hpp"
 #include "ext/discovery.hpp"
+#include "ext/lua/host.hpp"
 #include "provider/models.hpp"
 #include "ui/theme.hpp"
 
@@ -369,6 +370,16 @@ bool interactive_ui::command(const std::string& line) {
                 note("已恢复 " + std::to_string(core.messages.size()) + " 条消息：" + ui::one_line(sessions[index - 1].title));
             }
         }
+    } else if (app_.lua && std::ranges::find(app_.lua->commands(), name.substr(1)) != app_.lua->commands().end()) {
+        start_job([this, name = name.substr(1), arg](agent_events& events, cancel_token& cancel) {
+            const auto out = app_.core->run_local([&](tool_context& ctx) {
+                return app_.lua->run_command(name, arg, ctx);
+            }, events, cancel);
+            if (cancel.cancelled()) return turn_result{stop_reason::cancelled, "Cancelled."};
+            if (out.is_error) return turn_result{stop_reason::error, out.text};
+            if (!out.text.empty()) events.notice(out.text);
+            return turn_result{};
+        }, false, false);
     } else {
         note("未知命令 " + name + "，/help 查看全部", tone::error);
     }

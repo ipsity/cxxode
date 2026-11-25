@@ -12,6 +12,7 @@
 #include "ui/render.hpp"
 #include "ui/term.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
@@ -151,7 +152,7 @@ int main(int argc, char** argv) {
 
     lua_host lua;
     app a;
-    a.reload_lua = [&lua](cancel_token& cancel) { return lua.reload({ode_home() / "init.lua"}, cancel); };
+    a.lua = &lua;
     a.root = workspace;
     a.config = load_settings(workspace);
     a.permissions.allow = a.config.permission_allow;
@@ -230,24 +231,40 @@ int main(int argc, char** argv) {
     // Load subagent configs
     a.agents = load_agents(workspace);
 
-    // Assemble the tool list from each ext module. The task tool gets a copy of the
-    // tools registered before it, so a subagent runs everything except task itself.
-    auto tools = builtin_tools();
-    const auto append = [&tools](std::vector<tool> more) {
-        tools.insert(tools.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+    const auto assemble_extensions = [&](std::vector<std::string>& warnings) {
+        auto tools = builtin_tools();
+        const auto append = [&tools](std::vector<tool> more) {
+            tools.insert(tools.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+        };
+        append(make_skill_tools(a.skills));
+        append(make_mcp_tools(a.mcp_clients));
+        auto lua_tools = lua.tools();
+        std::erase_if(lua_tools, [&](const tool& t) {
+            const bool conflict = t.name == "Task" ||
+                std::ranges::find(tools, t.name, &tool::name) != tools.end();
+            if (conflict) warnings.push_back("Lua tool name is reserved: " + t.name);
+            return conflict;
+        });
+        append(std::move(lua_tools));
+        script_hooks script;
+        if (lua.has_hooks()) {
+            script = [&lua](hook_type type, const json& input, cancel_token& cancel) {
+                return lua.run_hooks(type, input, cancel, parse_hook_output);
+            };
+        }
+        auto hooks = make_agent_hooks(a.config.hooks, [&a] {
+            return hook_session{a.session_id, a.log.path(), a.root};
+        }, std::move(script));
+        // A subagent receives every registered tool except Task itself.
+        append(make_task_tools(a.agents, *a.model_provider, tools, a.permissions, [&a] { return a.core->model; }, hooks));
+        a.core->set_extensions(std::move(tools), std::move(hooks));
     };
-    append(make_skill_tools(a.skills));
-    append(make_mcp_tools(a.mcp_clients));
-    auto hooks = make_agent_hooks(a.config.hooks, [&a] { return hook_session{a.session_id, a.log.path(), a.root}; });
-    append(make_task_tools(a.agents, *a.model_provider, tools, a.permissions, [&a] { return a.core->model; }, hooks));
-
-    a.core = std::make_unique<agent>(
-        *a.model_provider,
-        std::move(tools),
-        a.permissions,
-        workspace,
-        std::move(hooks)
-    );
+    a.core = std::make_unique<agent>(*a.model_provider, std::vector<tool>{}, a.permissions, workspace);
+    a.reload_lua = [&](cancel_token& cancel) {
+        auto warnings = lua.reload({ode_home() / "init.lua"}, cancel);
+        assemble_extensions(warnings);
+        return warnings;
+    };
 
     const auto& entry = a.config.providers.at(a.config.provider);
     a.set_model(!model.empty() ? model : !a.config.model.empty() ? a.config.model : entry.default_model);
