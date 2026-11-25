@@ -1,4 +1,5 @@
 #include "app/interactive.hpp"
+#include "ext/lua/host.hpp"
 
 #include <iostream>
 
@@ -57,7 +58,7 @@ void interactive_ui::submit() {
     start_turn(std::move(text));
 }
 
-void interactive_ui::handle(const ui::key& k) {
+void interactive_ui::handle(const ui::key& k, bool allow_lua) {
     if (login_) {
         handle_login(k);
         return;
@@ -89,6 +90,23 @@ void interactive_ui::handle(const ui::key& k) {
         else if (k.kind == key_kind::ctrl && k.letter == 'c') cancel();
         else if (k.kind == key_kind::shift_tab) app_.permissions.set_mode(next_mode(app_.permissions.mode()));
         return;
+    }
+    if (allow_lua && !busy_ && app_.lua && (k.kind == key_kind::ctrl || k.kind == key_kind::function_key)) {
+        const auto name = k.kind == key_kind::ctrl
+            ? "Ctrl+" + std::string(1, static_cast<char>('A' + k.letter - 'a'))
+            : "F" + std::to_string(k.number);
+        if (app_.lua->has_key(name)) {
+            lua_key_ = k;
+            lua_key_handled_ = false;
+            start_job([this, name](agent_events&, cancel_token& cancel) {
+                const auto result = app_.lua->run_key(name, cancel);
+                lua_key_handled_ = result.handled;
+                if (cancel.cancelled()) return turn_result{stop_reason::cancelled, "Cancelled."};
+                if (!result.error.empty()) return turn_result{stop_reason::error, result.error};
+                return turn_result{};
+            }, false, false);
+            return;
+        }
     }
     const int inner = std::max(4, size_.columns - 7);
     const auto items = palette_items();

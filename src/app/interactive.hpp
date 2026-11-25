@@ -51,7 +51,7 @@ public:
     bool user_command(const std::string& line);  // false: not a user command
 
 private:
-    void handle(const ui::key& k);
+    void handle(const ui::key& k, bool allow_lua = true);
     void submit();
     void handle_login(const ui::key& k);
     void login_command(std::string_view arg);
@@ -116,6 +116,8 @@ private:
         std::string key;
     };
     std::optional<login_state> login_;
+    std::optional<ui::key> lua_key_;
+    bool lua_key_handled_ = false;
 
     app& app_;
     ui::terminal& term_;

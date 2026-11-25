@@ -10,13 +10,14 @@ namespace ode::ui {
 
 enum class key_kind {
     character, enter, newline, backspace, del, left, right, up, down, home, end,
-    page_up, page_down, tab, shift_tab, escape, ctrl, word_left, word_right,
+    page_up, page_down, tab, shift_tab, escape, ctrl, word_left, word_right, function_key,
 };
 
 struct key {
     key_kind kind = key_kind::character;
     std::string text;  // character: UTF-8 text
     char letter = 0;   // ctrl: lower-case letter
+    int number = 0;   // function_key: F1 through F12
 };
 
 struct size {

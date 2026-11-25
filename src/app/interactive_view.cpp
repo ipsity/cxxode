@@ -217,7 +217,17 @@ std::string interactive_ui::status_line(int columns) const {
     std::string left = "ode  " + home_relative(app_.root);
     if (!branch_.empty()) left += "  " + branch_;
     const int room = columns - 2 - text::width(right) - 2;
-    left = room > 8 ? text::keep_tail(left, room) : std::string{};
+    if (room > 8 && app_.lua) {
+        if (const auto status = app_.lua->status()) {
+            const std::string separator = " · ";
+            const int status_room = room - text::width(left) - text::width(separator);
+            if (status_room > 0) {
+                left += separator + text::keep_head(ui::one_line(*status), status_room);
+            }
+        }
+    }
+    if (room > 8 && text::width(left) > room) left = text::keep_tail(left, room);
+    else if (room <= 8) left.clear();
     const int gap = std::max(1, columns - 2 - text::width(left) - text::width(right));
     const auto mode_text = std::string(mode_name(mode));
     return "  " + paint(tone::dim, left) + std::string(static_cast<std::size_t>(gap), ' ') + paint(mode_tone, mode_text) +

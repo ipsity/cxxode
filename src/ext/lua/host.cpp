@@ -8,13 +8,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <condition_variable>
 #include <cstdlib>
 #include <deque>
-#include <future>
+#include <exception>
 #include <limits>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 namespace ode {
 namespace {
@@ -24,11 +27,19 @@ constexpr int hook_interval = 1000;
 constexpr int instruction_limit = 4'000'000;
 constexpr auto time_limit = std::chrono::seconds(2);
 char json_null;
+char load_function_key;
 constexpr char array_type[] = "ode.json.array";
 
 std::string string_path(const std::filesystem::path& path) {
     const auto utf8 = path.generic_u8string();
     return {utf8.begin(), utf8.end()};
+}
+
+std::filesystem::path path_from_utf8(std::string_view value) {
+    std::u8string encoded;
+    encoded.reserve(value.size());
+    for (const unsigned char ch : value) encoded.push_back(static_cast<char8_t>(ch));
+    return std::filesystem::path(encoded);
 }
 
 std::string lua_error_text(lua_State* state) {
@@ -43,7 +54,10 @@ void open_libraries(lua_State* state) {
         lua_pop(state, 1);
     }
     // Protected calls can catch the instruction limit, and user finalizers can run with hooks disabled.
-    for (const char* name : {"dofile", "loadfile", "load", "pcall", "xpcall", "setmetatable", "print"}) {
+    lua_pushlightuserdata(state, &load_function_key);
+    lua_getglobal(state, "load");
+    lua_rawset(state, LUA_REGISTRYINDEX);
+    for (const char* name : {"dofile", "loadfile", "load", "pcall", "xpcall", "setmetatable"}) {
         lua_pushnil(state);
         lua_setglobal(state, name);
     }
@@ -176,11 +190,19 @@ tool_output result_output(const json& result) {
 } // namespace
 
 struct lua_host::runtime {
-    struct callback { std::string name; int ref; };
-    struct registered_tool { tool definition; int ref; };
-    struct registered_hook { hook_type type; int ref; };
+    struct callback { std::string name; int ref; std::size_t status_slot; };
+    struct registered_tool { tool definition; int ref; std::size_t status_slot; };
+    struct registered_hook { hook_type type; int ref; std::size_t status_slot; };
+    struct job {
+        std::function<void()> run;
+        std::condition_variable done;
+        std::exception_ptr error;
+        bool finished = false;
+    };
 
-    runtime() : worker([this] { work(); }) {}
+    explicit runtime(std::atomic<std::shared_ptr<const std::string>>& status,
+                     std::function<void(std::string_view)> print)
+        : status(status), print_output(std::move(print)), worker([this] { work(); }) {}
 
     ~runtime() {
         {
@@ -193,19 +215,23 @@ struct lua_host::runtime {
 
     template<class F>
     auto call(F fn) {
-        // A native tool can trigger hooks while a Lua callback is on the stack.
-        if (std::this_thread::get_id() == worker.get_id()) return fn();
-        std::packaged_task task(std::move(fn));
-        auto result = task.get_future();
-        {
-            std::lock_guard lock(mutex);
-            pending.emplace_back([task = std::move(task)]() mutable { task(); });
-        }
-        wake.notify_one();
-        return result.get();
+        std::invoke_result_t<F> out;
+        dispatch([&] { out = fn(); });
+        return out;
     }
 
-    std::vector<std::string> load(const std::vector<std::filesystem::path>& scripts, cancel_token& cancel) {
+    void dispatch(std::function<void()> fn) {
+        // A native tool can trigger hooks while a Lua callback is on the stack.
+        if (std::this_thread::get_id() == worker.get_id()) return fn();
+        job task{std::move(fn), {}, {}};
+        std::unique_lock lock(mutex);
+        pending.push_back(&task);
+        wake.notify_one();
+        task.done.wait(lock, [&] { return task.finished; });
+        if (task.error) std::rethrow_exception(task.error);
+    }
+
+    std::vector<std::string> load(const std::vector<lua_script>& scripts, cancel_token& cancel) {
         return call([&] {
             std::vector<std::string> warnings;
             state = lua_newstate(allocate, this);
@@ -216,8 +242,11 @@ struct lua_host::runtime {
                 warnings.push_back("Lua: " + lua_error_text(state));
                 return warnings;
             }
-            for (const auto& path : scripts) {
-                if (cancel.cancelled()) break;
+            status_slots.assign(scripts.size(), {});
+            for (std::size_t script_index = 0; script_index < scripts.size(); ++script_index) {
+                const auto& script = scripts[script_index];
+                active_status_slot = script_index;
+                const auto& path = script.path;
                 const auto name = string_path(path);
                 std::error_code ec;
                 if (std::filesystem::file_size(path, ec) > memory_limit || ec) {
@@ -233,9 +262,13 @@ struct lua_host::runtime {
                 const auto tool_count = tools.size();
                 const auto hook_count = hooks.size();
                 const auto command_count = commands.size();
+                const auto key_count = keys.size();
                 int result = luaL_loadbufferx(state, code->data(), code->size(), chunk.c_str(), "t");
                 loading = true;
-                if (result == LUA_OK) result = run(0, 0, cancel);
+                if (result == LUA_OK) {
+                    push_script_environment(script, path);
+                    result = run(0, 0, cancel);
+                }
                 loading = false;
                 if (result != LUA_OK) {
                     warnings.push_back(name + ": " + lua_error_text(state));
@@ -243,7 +276,12 @@ struct lua_host::runtime {
                     discard(hooks, hook_count);
                     discard(commands, command_count);
                     command_names.resize(command_count);
+                    discard(keys, key_count);
+                    status_slots[script_index].clear();
+                } else {
+                    publish_status();
                 }
+                status_update.reset();
                 lua_settop(state, 0);
             }
             return warnings;
@@ -272,10 +310,14 @@ struct lua_host::runtime {
         json output;
     };
 
-    std::string invoke(int ref, const json& input, json& output, cancel_token& cancel, tool_context* ctx = nullptr) {
+    std::string invoke(int ref, const json& input, json& output, cancel_token& cancel,
+                       tool_context* ctx = nullptr, std::size_t status_slot = 0) {
         if (cancel.cancelled()) return "Lua execution cancelled";
         const int top = lua_gettop(state);
         const auto previous = action;
+        const auto previous_status_slot = active_status_slot;
+        active_status_slot = status_slot;
+        auto previous_status = std::exchange(status_update, std::nullopt);
         action = ctx;
         invocation request{ref, input, {}};
         lua_pushcfunction(state, bridge<invoke_callback>);
@@ -285,13 +327,16 @@ struct lua_host::runtime {
         auto error = result == LUA_OK ? std::string{} : lua_error_text(state);
         if (error.empty() && result != LUA_OK) error = "Lua execution failed";
         lua_settop(state, top);
+        if (result == LUA_OK && !cancel.cancelled()) publish_status();
+        active_status_slot = previous_status_slot;
+        status_update = std::move(previous_status);
         output = std::move(request.output);
         return error;
     }
 
-    tool_output invoke_action(int ref, const json& input, tool_context& ctx) {
+    tool_output invoke_action(int ref, std::size_t status_slot, const json& input, tool_context& ctx) {
         json result;
-        if (auto error = invoke(ref, input, result, *ctx.cancel, &ctx); !error.empty()) {
+        if (auto error = invoke(ref, input, result, *ctx.cancel, &ctx, status_slot); !error.empty()) {
             return {"Lua: " + error, true, "Lua", {}};
         }
         try {
@@ -321,7 +366,9 @@ struct lua_host::runtime {
 
     static int open_libraries(runtime&, lua_State* state) {
         ode::open_libraries(state);
-        luaL_newmetatable(state, array_type);
+        lua_pushcfunction(state, bridge<print_values>);
+        lua_setglobal(state, "print");
+        lua_newtable(state);
         lua_pushliteral(state, "ode.array");
         lua_setfield(state, -2, "__metatable");
         lua_pop(state, 1);
@@ -348,7 +395,152 @@ struct lua_host::runtime {
         lua_pushcfunction(state, bridge<edit>);
         lua_setfield(state, -2, "edit");
         lua_setfield(state, -2, "fs");
+        lua_pushcfunction(state, bridge<add_key>);
+        lua_setfield(state, -2, "keymap");
+        lua_newtable(state);
+        lua_pushcfunction(state, bridge<set_status>);
+        lua_setfield(state, -2, "set_status");
+        lua_setfield(state, -2, "ui");
         lua_setglobal(state, "ode");
+        return 0;
+    }
+
+    void push_script_environment(const lua_script& script, const std::filesystem::path& path) {
+        const int chunk = lua_absindex(state, -1);
+        lua_newtable(state);
+        const int environment = lua_absindex(state, -1);
+
+        lua_newtable(state);
+        lua_pushglobaltable(state);
+        lua_setfield(state, -2, "__index");
+        lua_setmetatable(state, environment);
+        lua_pushvalue(state, environment);
+        lua_setfield(state, environment, "_G");
+
+        if (!script.plugin_name.empty()) {
+            lua_getglobal(state, "ode");
+            const int global_ode = lua_absindex(state, -1);
+            lua_newtable(state);
+            const int local_ode = lua_absindex(state, -1);
+            lua_pushnil(state);
+            while (lua_next(state, global_ode)) {
+                lua_pushvalue(state, -2);
+                lua_pushvalue(state, -2);
+                lua_rawset(state, local_ode);
+                lua_pop(state, 1);
+            }
+            lua_newtable(state);
+            lua_pushvalue(state, global_ode);
+            lua_setfield(state, -2, "__index");
+            lua_setmetatable(state, local_ode);
+            lua_newtable(state);
+            lua_pushlstring(state, script.plugin_name.data(), script.plugin_name.size());
+            lua_setfield(state, -2, "name");
+            lua_pushlstring(state, script.plugin_version.data(), script.plugin_version.size());
+            lua_setfield(state, -2, "version");
+            const auto plugin_path = string_path(path.parent_path().parent_path());
+            lua_pushlstring(state, plugin_path.data(), plugin_path.size());
+            lua_setfield(state, -2, "path");
+            lua_setfield(state, local_ode, "plugin");
+            lua_setfield(state, environment, "ode");
+            lua_pop(state, 1);
+        }
+
+        lua_pushvalue(state, environment);
+        lua_pushcclosure(state, bridge<load_text>, 1);
+        lua_setfield(state, environment, "load");
+        const auto directory = string_path(path.parent_path());
+        lua_pushlstring(state, directory.data(), directory.size());
+        lua_pushvalue(state, environment);
+        lua_newtable(state);
+        lua_pushcclosure(state, bridge<require_module>, 3);
+        lua_setfield(state, environment, "require");
+        lua_pushvalue(state, environment);
+        if (!lua_setupvalue(state, chunk, 1)) {
+            lua_pop(state, 1);
+            throw std::runtime_error("Lua chunk has no environment upvalue");
+        }
+        lua_pop(state, 1);
+    }
+
+    static int require_module(runtime& self, lua_State* state) {
+        auto module = read_string(state, 1);
+        if (module.empty() || module.size() > 128 || module.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos ||
+            module.find("..") != std::string::npos || module.front() == '.' || module.back() == '.') {
+            return luaL_error(state, "invalid Lua module name");
+        }
+        for (auto& ch : module) if (ch == '.') ch = '/';
+
+        lua_pushvalue(state, 1);
+        lua_rawget(state, lua_upvalueindex(3));
+        if (!lua_isnil(state, -1)) return 1;
+        lua_pop(state, 1);
+
+        std::size_t directory_size = 0;
+        const char* directory = lua_tolstring(state, lua_upvalueindex(1), &directory_size);
+        const auto dir = path_from_utf8(std::string_view(directory, directory_size));
+        const auto path = dir / path_from_utf8(module + ".lua");
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(path, ec);
+        if (ec || size > memory_limit) return luaL_error(state, "Lua module not found or too large: %s", module.c_str());
+        const auto source = read_file(path);
+        if (!source) return luaL_error(state, "Lua module cannot be read: %s", module.c_str());
+        const auto chunk_name = "@" + string_path(path);
+        int result = luaL_loadbufferx(state, source->data(), source->size(), chunk_name.c_str(), "t");
+        if (result != LUA_OK) return lua_error(state);
+
+        lua_pushvalue(state, lua_upvalueindex(2));
+        if (!lua_setupvalue(state, -2, 1)) return luaL_error(state, "Lua module has no environment upvalue");
+        lua_pushvalue(state, 1);
+        lua_pushboolean(state, 1);
+        lua_rawset(state, lua_upvalueindex(3));
+        result = lua_pcall(state, 0, 1, 0);
+        if (result != LUA_OK) {
+            lua_pushvalue(state, 1);
+            lua_pushnil(state);
+            lua_rawset(state, lua_upvalueindex(3));
+            return lua_error(state);
+        }
+        if (lua_isnil(state, -1)) {
+            lua_pop(state, 1);
+            lua_pushboolean(state, 1);
+        }
+        lua_pushvalue(state, 1);
+        lua_pushvalue(state, -2);
+        lua_rawset(state, lua_upvalueindex(3));
+        (void)self;
+        return 1;
+    }
+
+    static int load_text(runtime&, lua_State* state) {
+        const int original_count = lua_gettop(state);
+        lua_pushlightuserdata(state, &load_function_key);
+        lua_rawget(state, LUA_REGISTRYINDEX);
+        lua_pushvalue(state, 1);
+        if (original_count >= 2) lua_pushvalue(state, 2);
+        else lua_pushnil(state);
+        lua_pushliteral(state, "t");
+        if (original_count >= 4) lua_pushvalue(state, 4);
+        else lua_pushvalue(state, lua_upvalueindex(1));
+        lua_call(state, 4, LUA_MULTRET);
+        const int result_count = lua_gettop(state) - original_count;
+        lua_rotate(state, 1, -original_count);
+        lua_settop(state, result_count);
+        return result_count;
+    }
+
+    static int print_values(runtime& self, lua_State* state) {
+        std::string line;
+        const int count = lua_gettop(state);
+        for (int i = 1; i <= count; ++i) {
+            if (i > 1) line.push_back('\t');
+            std::size_t size = 0;
+            const char* value = luaL_tolstring(state, i, &size);
+            line.append(value, size);
+            lua_pop(state, 1);
+        }
+        if (self.print_output) self.print_output(line);
         return 0;
     }
 
@@ -384,7 +576,7 @@ struct lua_host::runtime {
         const auto type = std::ranges::find(types, name, &std::pair<std::string_view, hook_type>::first);
         if (type == std::end(types)) return luaL_error(state, "unknown hook event");
         lua_pushvalue(state, 2);
-        self.hooks.push_back({type->second, luaL_ref(state, LUA_REGISTRYINDEX)});
+        self.hooks.push_back({type->second, luaL_ref(state, LUA_REGISTRYINDEX), self.active_status_slot});
         return 0;
     }
 
@@ -416,7 +608,7 @@ struct lua_host::runtime {
         else return luaL_error(state, "tool access must be read, write or execute");
         lua_getfield(state, 1, "run");
         luaL_checktype(state, -1, LUA_TFUNCTION);
-        self.tools.push_back({std::move(definition), luaL_ref(state, LUA_REGISTRYINDEX)});
+        self.tools.push_back({std::move(definition), luaL_ref(state, LUA_REGISTRYINDEX), self.active_status_slot});
         return 0;
     }
 
@@ -429,8 +621,48 @@ struct lua_host::runtime {
         }
         lua_pushvalue(state, 2);
         self.command_names.push_back(name);
-        self.commands.push_back({std::move(name), luaL_ref(state, LUA_REGISTRYINDEX)});
+        self.commands.push_back({std::move(name), luaL_ref(state, LUA_REGISTRYINDEX), self.active_status_slot});
         return 0;
+    }
+
+    static int add_key(runtime& self, lua_State* state) {
+        self.require_loading();
+        auto name = read_string(state, 1);
+        luaL_checktype(state, 2, LUA_TFUNCTION);
+        const bool ctrl = name.starts_with("Ctrl+") && name.size() == 6 && name.back() >= 'A' && name.back() <= 'Z';
+        constexpr std::string_view reserved_ctrl_keys = "acdeklotuw";
+        const bool reserved = ctrl && (name.back() == 'C' || name.back() == 'J' ||
+            reserved_ctrl_keys.find(static_cast<char>(std::tolower(static_cast<unsigned char>(name.back())))) !=
+                std::string_view::npos);
+        constexpr std::string_view function_keys[] = {
+            "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"};
+        if (reserved || (!ctrl && std::ranges::find(function_keys, name) == std::end(function_keys))) {
+            return luaL_error(state, "unsupported or reserved key; use an unassigned Ctrl letter or F1 through F12");
+        }
+        if (std::ranges::find(self.keys, name, &callback::name) != self.keys.end()) {
+            return luaL_error(state, "key is already registered");
+        }
+        lua_pushvalue(state, 2);
+        self.keys.push_back({std::move(name), luaL_ref(state, LUA_REGISTRYINDEX), self.active_status_slot});
+        return 0;
+    }
+
+    static int set_status(runtime& self, lua_State* state) {
+        self.status_update = clip(read_string(state, 1), 512);
+        return 0;
+    }
+
+    void publish_status() {
+        if (!status_update || active_status_slot >= status_slots.size()) return;
+        status_slots[active_status_slot] = std::move(*status_update);
+        std::string combined;
+        for (const auto& value : status_slots) {
+            if (value.empty()) continue;
+            if (!combined.empty()) combined += " · ";
+            combined += value;
+        }
+        if (combined.empty()) status.store({});
+        else status.store(std::make_shared<const std::string>(std::move(combined)));
     }
 
     int native_tool(std::string_view name, json input) {
@@ -500,10 +732,17 @@ struct lua_host::runtime {
             std::unique_lock lock(mutex);
             wake.wait(lock, [&] { return stopping || !pending.empty(); });
             if (pending.empty()) break;
-            auto next = std::move(pending.front());
+            auto* next = pending.front();
             pending.pop_front();
             lock.unlock();
-            next();
+            try {
+                next->run();
+            } catch (...) {
+                next->error = std::current_exception();
+            }
+            lock.lock();
+            next->finished = true;
+            next->done.notify_one();
         }
         if (state) lua_close(state);
     }
@@ -515,28 +754,43 @@ struct lua_host::runtime {
     std::vector<registered_hook> hooks;
     std::vector<callback> commands;
     std::vector<std::string> command_names;
+    std::vector<callback> keys;
+    std::vector<std::string> status_slots;
+    std::size_t active_status_slot = 0;
+    std::atomic<std::shared_ptr<const std::string>>& status;
+    std::function<void(std::string_view)> print_output;
+    std::optional<std::string> status_update;
     std::size_t allocated = 0;
     cancel_token* current_cancel = nullptr;
     int remaining = 0;
     std::chrono::steady_clock::time_point deadline;
     std::mutex mutex;
     std::condition_variable wake;
-    std::deque<std::packaged_task<void()>> pending;
+    // The submitting thread keeps each job alive until the worker signals completion.
+    std::deque<job*> pending;
     bool stopping = false;
     std::thread worker;
 };
 
-lua_host::lua_host() = default;
+lua_host::lua_host(std::function<void(std::string_view)> print) : print_(std::move(print)) {}
 lua_host::~lua_host() = default;
 
 std::vector<std::string> lua_host::reload(std::vector<std::filesystem::path> scripts, cancel_token& cancel) {
+    std::vector<lua_script> entries;
+    entries.reserve(scripts.size());
+    for (auto& path : scripts) entries.push_back({std::move(path), {}, {}});
+    return reload_scripts(std::move(entries), cancel);
+}
+
+std::vector<std::string> lua_host::reload_scripts(std::vector<lua_script> scripts, cancel_token& cancel) {
     vm_.reset();
-    std::erase_if(scripts, [](const auto& path) {
+    status_.store({});
+    std::erase_if(scripts, [](const auto& script) {
         std::error_code ec;
-        return !std::filesystem::is_regular_file(path, ec);
+        return !std::filesystem::is_regular_file(script.path, ec);
     });
     if (scripts.empty() || cancel.cancelled()) return {};
-    vm_ = std::make_unique<runtime>();
+    vm_ = std::make_unique<runtime>(status_, print_);
     return vm_->load(scripts, cancel);
 }
 
@@ -554,7 +808,7 @@ std::vector<tool> lua_host::tools() {
                     return r.definition.name == name;
                 });
                 if (registered == vm_->tools.end()) return tool_output{"Lua tool is unavailable", true, "Lua", {}};
-                return vm_->invoke_action(registered->ref, input, ctx);
+                return vm_->invoke_action(registered->ref, registered->status_slot, input, ctx);
             });
         };
         result.push_back(std::move(t));
@@ -583,7 +837,7 @@ hook_verdict lua_host::run_hooks(hook_type type, const json& input, cancel_token
             if (cancel.cancelled()) break;
             if (hook.type != type) continue;
             json output;
-            if (auto error = vm_->invoke(hook.ref, input, output, cancel); !error.empty()) {
+            if (auto error = vm_->invoke(hook.ref, input, output, cancel, nullptr, hook.status_slot); !error.empty()) {
                 append(merged.warning, "Lua hook: " + error);
                 continue;
             }
@@ -612,8 +866,35 @@ tool_output lua_host::run_command(std::string_view name, std::string_view args, 
     return vm_->call([&] {
         const auto cmd = std::ranges::find(vm_->commands, name, &runtime::callback::name);
         if (cmd == vm_->commands.end()) return tool_output{"Lua command is unavailable", true, "Lua", {}};
-        return vm_->invoke_action(cmd->ref, args, ctx);
+        return vm_->invoke_action(cmd->ref, cmd->status_slot, args, ctx);
     });
 }
+
+bool lua_host::has_key(std::string_view name) const {
+    return vm_ && std::ranges::find(vm_->keys, name, &runtime::callback::name) != vm_->keys.end();
+}
+
+std::vector<std::string> lua_host::keys() const {
+    std::vector<std::string> result;
+    if (vm_) {
+        for (const auto& key : vm_->keys) result.push_back(key.name);
+    }
+    return result;
+}
+
+lua_key_result lua_host::run_key(std::string_view name, cancel_token& cancel) {
+    if (!vm_) return {};
+    return vm_->call([&] {
+        const auto key = std::ranges::find(vm_->keys, name, &runtime::callback::name);
+        if (key == vm_->keys.end()) return lua_key_result{};
+        json output;
+        auto error = vm_->invoke(key->ref, name, output, cancel, nullptr, key->status_slot);
+        if (!error.empty()) return lua_key_result{false, "Lua key " + std::string(name) + ": " + error};
+        if (output.is_null() || output.is_boolean()) return lua_key_result{output.is_null() || output.get<bool>(), {}};
+        return lua_key_result{false, "Lua key callback must return a boolean or nil"};
+    });
+}
+
+std::shared_ptr<const std::string> lua_host::status() const { return status_.load(); }
 
 } // namespace ode

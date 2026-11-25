@@ -191,6 +191,10 @@ void interactive_ui::apply(ev_tool_done& e) {
 }
 
 void interactive_ui::apply(ev_ask& e) {
+    if (cancel_.cancelled()) {
+        e.reply->set_value(answer::no);
+        return;
+    }
     flush_thinking(true);
     flush_stream(true);
 
@@ -257,6 +261,11 @@ void interactive_ui::apply(ev_done& e) {
     thinking_ = false;
     if (worker_.joinable()) worker_.join();
     const auto& r = e.result;
+    if (lua_key_) {
+        const auto key = *lua_key_;
+        lua_key_.reset();
+        if (!lua_key_handled_ && r.stop != stop_reason::cancelled) handle(key, false);
+    }
     if (r.stop == stop_reason::cancelled) {
         note("已中断", tone::dim);
     } else if (r.stop == stop_reason::error || !r.error.empty()) {

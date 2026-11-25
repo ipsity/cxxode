@@ -128,7 +128,7 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 
 注册在 `init.lua` 中进行。Hook 收到与 shell hook 相同的字段，返回同格式的决策表或 `nil`。配置中的 shell hook 先执行，随后按 Lua 注册顺序执行。工具的 `schema` 描述 JSON 对象，`access` 为 `read`、`write` 或 `execute`。工具回调收到参数表，斜杠命令回调收到命令尾部的原始字符串，两者可返回字符串或含 `text`、`is_error`、`summary`、`detail` 的表。Lua 命令与现有命令重名时优先执行现有命令。
 
-工具和命令回调可调用 `ode.fs.read(path[, offset, limit])`、`ode.fs.write(path, content)`、`ode.fs.edit(path, old, new[, replace_all])` 和 `ode.exec(command[, timeout_ms])`。结果与内置工具一致，返回上述结果表。工具的声明访问级别限制这些调用，调用同时经过内置工具的 Hooks、权限、文件时间戳和撤销机制。JSON 空数组用 `ode.array()` 表示，JSON 空值用 `ode.null` 表示。
+工具和命令回调可调用 `ode.fs.read(path[, offset, limit])`、`ode.fs.write(path, content)`、`ode.fs.edit(path, old, new[, replace_all])` 和 `ode.exec(command[, timeout_ms])`。它们通过对应内置工具运行，遵守权限、Hooks、文件时间戳和撤销机制；当前实现中，这些操作都要求存在工具或命令回调上下文。JSON 空数组用 `ode.array()` 表示，JSON 空值用 `ode.null` 表示。`ode.on` 支持 `pre_tool`、`post_tool`、`prompt`、`stop`；返回值复用 shell hook 的 `decision`、`reason` 和 `hookSpecificOutput` 约定。`ode.command(name, fn)` 注册斜杠命令，命令回调在 worker 上执行，UI 线程不等待 Lua。
 
 **执行模型**：
 
@@ -136,11 +136,16 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 - API 一律是同步风格（`local r = ode.exec("git status")`），在 Lua 线程上阻塞执行。以后如果需要并发，在 C++ 侧改用 `lua_yield`/`lua_resume`，脚本不用改。不做回调式的异步 API。
 - 渲染路径上 C++ 永远不同步等待 Lua。UI 相关的状态由 Lua 推送给 C++，C++ 不按帧调用 Lua。
 - 用 `lua_sethook` 做指令计数，用来响应取消和限制单次调用的执行时间；用自定义 `lua_Alloc` 限制内存。
-- VM 的堆上限为 8 MiB。每次执行最多 400 万条指令、2 秒脚本时间，内置工具和权限询问沿用各自的超时与取消语义。仅加载受限的 base、table、string、math 和 utf8 库。
+- 每个脚本使用独立 `_ENV`，通过受限全局表继承标准库；插件脚本获得浅拷贝的 `ode` 表和 `ode.plugin={name, version, path}`。`require(name)` 只从当前脚本目录查找点号映射到目录分隔符的 `.lua` 文件，按脚本缓存，不加载 C 模块或字节码。
+- Lua 虚拟机只在至少有一个脚本文件时创建；没有脚本时不创建线程或 VM。脚本加载失败只回滚该脚本注册的扩展并记录警告。
+- 每次脚本调用最多 400 万条 Lua 指令、2 秒 Lua 执行时间、8 MiB VM 堆；进入内置工具或权限询问时暂停 Lua 时间计数。取消或关闭宿主会通过指令 hook 中止执行。
+- 受限环境只打开 base、table、string、math、utf8；移除 `dofile`、`loadfile`、`pcall`、`xpcall`、`setmetatable`。脚本环境提供的 `load` 强制文本模式并默认继承当前脚本环境；`print` 将参数以制表符分隔后写入 ode 的 stderr 日志。
 - Lua 源码按 C++ 编译，`lua_error` 走 C++ 异常，绑定代码里的 RAII 对象能正常析构。
 - 边界上的数据转换（JSON 和 Lua table 互转）只在 `ext/lua` 里做。
 
-**生命周期**。启动时如果找不到任何 `init.lua`，就不创建 VM。`/reload` 会销毁整个 VM 并重新加载所有脚本，不做单个插件的热加载。版本只用一个 `ode.api_version` 整数表示，不兼容的改动就加 1。
+**生命周期**。先加载 `~/.ode/init.lua`，再按路径顺序加载已发现的 Claude Code 格式插件下的 `ode/init.lua`。插件的 skills 继续按插件发现规则加载。没有 Lua 脚本时跳过 VM 创建。`/reload` 销毁 VM、清空 Lua 状态栏文字，并重新发现和加载 Lua 脚本。版本用 `ode.api_version` 整数表示，不兼容的改动就加 1。
+
+空闲时，`ode.keymap("Ctrl+G", fn)` 可绑定未占用的 Ctrl 字母组合以及 F1–F12；Ctrl+C/J 和编辑器现有的 Ctrl+A/D/E/K/L/O/T/U/W 保留。注册冲突会作为脚本加载警告处理。按键回调在 worker 上运行，UI 线程不等待；回调收到键名，返回 `false` 或发生错误时交还给原键位处理。权限询问和其他弹窗拥有键盘优先权。`/help` 列出已注册的 Lua 键位。`ode.ui.set_status("")` 清空状态栏文字。
 
 **预算**。exe 体积增加不超过 400 KB。没有脚本时，启动时间和内存与纯 C++ 版本相同。
 

@@ -4,6 +4,7 @@
 #include "app/rpc.hpp"
 #include "core/version.hpp"
 #include "ext/agents.hpp"
+#include "ext/discovery.hpp"
 #include "ext/hooks.hpp"
 #include "ext/lua/host.hpp"
 #include "ext/mcp.hpp"
@@ -150,7 +151,9 @@ int main(int argc, char** argv) {
     workspace = fs::weakly_canonical(fs::absolute(workspace), ec);
     if (!fs::is_directory(workspace, ec)) return fail("not a directory: " + workspace.string());
 
-    lua_host lua;
+    lua_host lua([](std::string_view text) {
+        ui::write_stream(true, "lua: " + std::string(text) + "\n");
+    });
     app a;
     a.lua = &lua;
     a.root = workspace;
@@ -261,7 +264,13 @@ int main(int argc, char** argv) {
     };
     a.core = std::make_unique<agent>(*a.model_provider, std::vector<tool>{}, a.permissions, workspace);
     a.reload_lua = [&](cancel_token& cancel) {
-        auto warnings = lua.reload({ode_home() / "init.lua"}, cancel);
+        std::vector<lua_script> scripts{{ode_home() / "init.lua", {}, {}}};
+        auto plugins = load_plugins();
+        std::ranges::sort(plugins, {}, &plugin_info::path);
+        for (const auto& plugin : plugins) {
+            scripts.push_back({plugin.path / "ode" / "init.lua", plugin.name, plugin.version});
+        }
+        auto warnings = lua.reload_scripts(std::move(scripts), cancel);
         assemble_extensions(warnings);
         return warnings;
     };

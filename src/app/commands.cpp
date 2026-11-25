@@ -88,7 +88,15 @@ bool interactive_ui::command(const std::string& line) {
 
     if (name == "/exit" || name == "/quit") return false;
     if (name == "/help" || name == "/keys" || name == "/shortcuts") {
-        print_markdown(help_text);
+        std::string text = help_text;
+        if (app_.lua) {
+            const auto keys = app_.lua->keys();
+            if (!keys.empty()) {
+                text += "\n\n**Lua 键位**\n";
+                for (const auto& key : keys) text += "- `" + key + "`\n";
+            }
+        }
+        print_markdown(text);
     }
     // 🆕 快捷工作流命令 - 减少重复操作
     else if (name == "/ref") {

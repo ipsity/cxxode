@@ -46,7 +46,7 @@ struct hook_verdict {
     std::string warning{};
 };
 
-// Extension points the loop calls; core does not know where they come from (settings hooks, Lua).
+// Extension points the loop calls; core does not know which application module provides them.
 struct agent_hooks {
     std::function<hook_verdict(std::string_view prompt, cancel_token&)> prompt;
     std::function<hook_verdict(const tool&, const json& input, cancel_token&)> pre_tool;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(cxxode VERSION 0.2.0 LANGUAGES CXX)
+project(cxxode VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,7 +22,9 @@ add_library(ode_lua STATIC ${LUA_SOURCES})
 target_include_directories(ode_lua SYSTEM PUBLIC third_party/lua)
 target_compile_definitions(ode_lua PRIVATE LUA_USE_JUMPTABLE=0)
 if(MINGW)
-    target_compile_options(ode_lua PRIVATE $<$<CONFIG:Release>:-Os>)
+    target_compile_options(ode_lua PRIVATE $<$<CONFIG:Release>:-Oz>)
+    set_source_files_properties(src/ext/lua/host.cpp PROPERTIES
+        COMPILE_OPTIONS "$<$<CONFIG:Release>:-Oz>")
 endif()
 
 # One static library per layer. Each links only the layers below it, so a reversed

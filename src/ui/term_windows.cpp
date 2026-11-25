@@ -109,6 +109,11 @@ std::optional<std::vector<key>> terminal::read(int wait_ms) {
             out.letter = static_cast<char>('a' + (k.wVirtualKeyCode - 'A'));
             known = true;
         }
+        if (!known && !ctrl && !alt && !shift && k.wVirtualKeyCode >= VK_F1 && k.wVirtualKeyCode <= VK_F12) {
+            out.kind = key_kind::function_key;
+            out.number = k.wVirtualKeyCode - VK_F1 + 1;
+            known = true;
+        }
         if (!known) {
             const wchar_t unit = k.uChar.UnicodeChar;
             if (!unit) continue;
