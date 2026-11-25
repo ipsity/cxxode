@@ -137,6 +137,26 @@ TEST_CASE("reasoning summaries are requested for compatible provider models") {
     CHECK_FALSE(encode_request(protocol::openai_responses, req).contains("reasoning"));
 }
 
+TEST_CASE("images survive session serialization and are omitted from unsupported requests") {
+    const message saved{message::role::user,
+        {block::make_image("image/png", "aW1hZ2U="), block::make_text("Hello")}};
+    auto loaded = message_from_json(to_json(saved));
+    REQUIRE(loaded.blocks.size() == 2);
+    CHECK(loaded.blocks[0].type == block::kind::image);
+    CHECK(loaded.blocks[0].media_type == "image/png");
+    CHECK(loaded.blocks[0].data == "aW1hZ2U=");
+
+    model_request request;
+    request.messages.push_back(std::move(loaded));
+    const auto anthropic = encode_request(protocol::anthropic, request);
+    const auto& content = anthropic["messages"][0]["content"];
+    REQUIRE(content.size() == 1);
+    CHECK(content[0]["text"] == "Hello");
+    const auto responses = encode_request(protocol::openai_responses, request);
+    REQUIRE(responses["input"].size() == 1);
+    CHECK(responses["input"][0]["content"][0]["text"] == "Hello");
+}
+
 TEST_CASE("anthropic streams thinking text in order and preserves the signature") {
     const char* s =
         "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"

@@ -20,12 +20,15 @@ json encode_block(const block& b) {
             return {{"type", "tool_result"}, {"tool_use_id", b.id}, {"content", b.text}, {"is_error", b.is_error}};
         case block::kind::thinking:
             return {{"type", "thinking"}, {"thinking", b.text}, {"signature", b.signature}};
+        case block::kind::image: break;
         case block::kind::opaque: return b.input;
     }
     return {};
 }
 
 bool belongs(const block& b) {
+    // Session history can contain images before the encoder has image input support.
+    if (b.type == block::kind::image) return false;
     if (b.type == block::kind::opaque) return b.name == "anthropic";
     if (b.type == block::kind::thinking) return !b.signature.empty();
     if (b.type == block::kind::text) return !b.text.empty();

@@ -6,7 +6,7 @@
 
 namespace ode {
 
-int cmd_models(app& a, const std::string& args) {
+int cmd_models(app& a, const std::string&) {
     // List available models for current provider
     ui::write_stream(false, "Fetching models from " + a.config.provider + "...\n");
 

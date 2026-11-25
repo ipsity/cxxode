@@ -108,6 +108,7 @@ json encode_responses(const model_request& request) {
                 case block::kind::opaque:
                     if (b.name == "responses") input.push_back(b.input);
                     break;
+                case block::kind::image:
                 case block::kind::thinking: break;
             }
         }

@@ -37,7 +37,7 @@ struct provider_entry {
     std::string api_key_env;     // environment variable holding the key
     std::string auth_token_env;  // Anthropic bearer token variable
     std::string default_model;
-    std::string api_key;         // Direct API key (alternative to env var)
+    std::string api_key{};       // Direct API key (alternative to env var)
 };
 
 struct settings {
