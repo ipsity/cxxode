@@ -4,6 +4,7 @@
 #include <doctest.h>
 #include <fstream>
 #include <filesystem>
+#include <algorithm>
 
 using namespace ode;
 
@@ -39,10 +40,11 @@ TEST_CASE("parse_frontmatter handles CRLF line endings") {
 
 TEST_CASE("load_skills finds and parses skill files") {
     const auto temp = std::filesystem::temp_directory_path() / "ode-skills-test";
-    std::filesystem::create_directories(temp / ".claude" / "skills");
+    const auto path = temp / ".claude" / "skills" / "example" / "SKILL.md";
+    std::filesystem::create_directories(path.parent_path());
 
     {
-        std::ofstream f(temp / ".claude" / "skills" / "example.md");
+        std::ofstream f(path);
         f << "---\n"
           << "name: example\n"
           << "description: Example skill\n"
@@ -52,10 +54,10 @@ TEST_CASE("load_skills finds and parses skill files") {
     }
 
     const auto skills = load_skills(temp);
-    CHECK(skills.size() == 1);
-    CHECK(skills[0].name == "example");
-    CHECK(skills[0].description == "Example skill");
-    CHECK(skills[0].path == temp / ".claude" / "skills" / "example.md");
+    const auto loaded = std::ranges::find(skills, path, &skill::path);
+    REQUIRE(loaded != skills.end());
+    CHECK(loaded->name == "example");
+    CHECK(loaded->description == "Example skill");
 
     std::filesystem::remove_all(temp);
 }

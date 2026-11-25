@@ -102,13 +102,14 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
     });
 }
 
-void interactive_ui::start_turn(std::string text) {
+void interactive_ui::start_turn(std::string text, std::vector<std::string> allowed_tools) {
     section("user");
     // Use cached theme color for user messages
     screen_.commit(ui::layout({{text, ui::tone::normal}}, size_.columns - 1,
                               {app_.current_theme.user_message_fg + "› \033[0m", 2}, {"  ", 2}));
-    start_job([this, text = std::move(text)](agent_events& ev, cancel_token& c) { return app_.core->run(text, ev, c); },
-              false);
+    start_job([this, text = std::move(text), allowed_tools = std::move(allowed_tools)](agent_events& ev, cancel_token& c) {
+        return app_.core->run(text, ev, c, {allowed_tools});
+    }, false);
 }
 
 void interactive_ui::drain() {

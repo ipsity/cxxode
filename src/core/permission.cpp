@@ -45,7 +45,7 @@ bool rule_matches(std::string_view rule, const tool& t, const json& input) {
         return glob_match(pattern, path);
     }
     const auto command = input.value("command", std::string{});
-    const bool prefix = pattern.ends_with(":*");
+    const bool prefix = pattern.ends_with(":*") || pattern.ends_with(" *");
     const auto body = prefix ? pattern.substr(0, pattern.size() - 2) : pattern;
     const auto segments = command_segments(command);
     if (segments.empty()) return false;
@@ -105,7 +105,8 @@ std::vector<std::string> command_segments(std::string_view command) {
     return out;
 }
 
-verdict permission_rules::check(const tool& t, const json& input, const fs::path& root) const {
+verdict permission_rules::check(const tool& t, const json& input, const fs::path& root,
+                                std::span<const std::string> turn_allow) const {
     for (const auto& r : deny) {
         if (rule_matches(r, t, input)) return verdict::deny;
     }
@@ -114,6 +115,9 @@ verdict permission_rules::check(const tool& t, const json& input, const fs::path
     if (mode == permission_mode::plan) return verdict::deny;
     if (mode == permission_mode::yolo) return verdict::allow;
     for (const auto& r : allow) {
+        if (rule_matches(r, t, input)) return verdict::allow;
+    }
+    for (const auto& r : turn_allow) {
         if (rule_matches(r, t, input)) return verdict::allow;
     }
     if (t.access == tool_access::write) {

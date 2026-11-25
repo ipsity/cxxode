@@ -14,19 +14,16 @@ struct agent_config {
     std::string description;
     std::string system_prompt;
     std::filesystem::path path;
+    std::vector<std::string> tools;
+    std::string model;
 };
 
 // Load agent configurations from .claude/agents/ directories
 std::vector<agent_config> load_agents(const std::filesystem::path& workspace);
 
-// Execute a subagent in isolated context, return final text only
-tool_output run_subagent(const agent_config& config, const std::string& task,
-                         provider& model_provider, const std::vector<tool>& tools,
-                         permission_rules& rules, const fs::path& workspace);
-
-// The `task` tool. Subagents get `tools` (everything registered before this one).
-// Not created when there are no agents.
+// Task can delegate the tools registered before it.
 std::vector<tool> make_task_tools(std::vector<agent_config> agents, provider& model_provider,
-                                  std::vector<tool> tools, permission_rules& rules, fs::path workspace);
+                                  std::vector<tool> tools, permission_rules& rules,
+                                  std::function<std::string()> parent_model, const agent_hooks& hooks = {});
 
 } // namespace ode

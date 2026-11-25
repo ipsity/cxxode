@@ -35,7 +35,8 @@ public:
     std::vector<std::string> allow;
     std::vector<std::string> deny;
 
-    verdict check(const tool& t, const json& input, const fs::path& root) const;
+    verdict check(const tool& t, const json& input, const fs::path& root,
+                  std::span<const std::string> turn_allow = {}) const;
     // Rule a user grants with "always", e.g. Bash(npm run:*).
     static std::string always_rule(const tool& t, const json& input);
 

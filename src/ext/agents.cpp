@@ -1,6 +1,9 @@
 #include "ext/agents.hpp"
 #include "base/files.hpp"
+#include "config/config.hpp"
 #include "ext/discovery.hpp"
+
+#include <algorithm>
 
 namespace ode {
 
@@ -19,21 +22,11 @@ std::vector<agent_config> load_agents(const fs::path& workspace) {
             if (!content) continue;
 
             auto [meta, body] = parse_frontmatter(*content);
-            const auto name = meta.count("name") ? meta["name"] : path.stem().string();
-            const auto desc = meta.count("description") ? meta["description"] : "";
-
-            // Avoid duplicates - workspace agents override user agents
-            bool found = false;
-            for (auto& a : agents) {
-                if (a.name == name) {
-                    a.path = path;
-                    a.description = desc;
-                    a.system_prompt = body;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) agents.push_back({name, desc, body, path});
+            agent_config config{meta.contains("name") ? meta["name"] : path.stem().string(),
+                                meta["description"], std::move(body), path, frontmatter_list(meta["tools"]), meta["model"]};
+            const auto found = std::ranges::find(agents, config.name, &agent_config::name);
+            if (found == agents.end()) agents.push_back(std::move(config));
+            else *found = std::move(config);
         }
     }
 
@@ -41,60 +34,71 @@ std::vector<agent_config> load_agents(const fs::path& workspace) {
     return agents;
 }
 
-tool_output run_subagent(const agent_config& config, const std::string& task,
-                         provider& model_provider, const std::vector<tool>& tools,
-                         permission_rules& rules, const fs::path& workspace) {
-    // Create isolated agent instance
-    agent sub_agent(model_provider, tools, rules, workspace);
-    sub_agent.system = config.system_prompt;
+namespace {
 
-    // Run the agent with the task
-    std::string output;
-    bool had_error = false;
+tool_output run_subagent(const agent_config& config, const std::string& prompt, const std::string& parent_model,
+                         provider& model_provider, const std::vector<tool>& tools,
+                         permission_rules& rules, const agent_hooks& hooks, tool_context& ctx) {
+    std::vector<tool> selected;
+    for (const auto& candidate : tools) {
+        if (config.tools.empty() || std::ranges::any_of(config.tools, [&](std::string_view selector) {
+                if (selector.starts_with("mcp__") && selector.ends_with("__*")) {
+                    return candidate.name.starts_with(selector.substr(0, selector.size() - 1));
+                }
+                return candidate.name == selector;
+            })) selected.push_back(candidate);
+    }
+    if (!config.tools.empty() && selected.empty()) {
+        return {"No configured tools are available for agent: " + config.name, true, "工具不可用", {}};
+    }
+    agent sub_agent(model_provider, std::move(selected), rules, ctx.root, hooks);
+    sub_agent.system = config.system_prompt;
+    sub_agent.model = config.model.empty() || config.model == "inherit" ? parent_model : resolve_model_alias(config.model);
 
     agent_events events;
-    events.text = [&output](std::string_view text) { output += text; };
-    events.thinking = [](std::string_view, std::string_view) {}; // Ignore thinking
-    events.tool_finished = [&had_error](const tool&, const json&, const tool_output& result) {
-        if (result.is_error) had_error = true;
-    };
-    events.ask = [](const tool&, const json&) { return answer::yes; }; // Auto-approve
-
+    events.ask = ctx.ask;
     cancel_token cancel;
-    const auto result = sub_agent.run(task, events, cancel);
-
-    if (result.stop == stop_reason::error || had_error) {
-        return {output.empty() ? result.error : output, true, "失败", ""};
+    const auto result = sub_agent.run(prompt, events, ctx.cancel ? *ctx.cancel : cancel, {ctx.allowed_tools, ctx.backup});
+    if (result.stop != stop_reason::end_turn) {
+        return {result.error.empty() ? "The subagent did not finish." : result.error, true, "失败", {}};
     }
-
-    return {output, false, "完成", ""};
+    return {sub_agent.messages.back().plain_text(), false, "完成", {}};
 }
 
+} // namespace
+
 std::vector<tool> make_task_tools(std::vector<agent_config> agents, provider& model_provider,
-                                  std::vector<tool> tools, permission_rules& rules, fs::path workspace) {
+                                  std::vector<tool> tools, permission_rules& rules,
+                                  std::function<std::string()> parent_model, const agent_hooks& hooks) {
     if (agents.empty()) return {};
     tool t;
-    t.name = "task";
-    t.description = "Run a subagent in isolated context. Returns final text output.";
+    t.name = "Task";
+    t.description = "Run a subagent in isolated context and return its final text. Available agents:";
+    for (const auto& config : agents) t.description += "\n- " + config.name + ": " + config.description;
     t.schema = {
         {"type", "object"},
         {"properties", {
-            {"agent", {{"type", "string"}, {"description", "Agent name"}}},
-            {"task", {{"type", "string"}, {"description", "Task description"}}}
+            {"subagent_type", {{"type", "string"}, {"description", "Name of the subagent"}}},
+            {"description", {{"type", "string"}, {"description", "Short description of the task"}}},
+            {"prompt", {{"type", "string"}, {"description", "Instructions to give the subagent"}}}
         }},
-        {"required", {"agent", "task"}}
+        {"required", {"subagent_type", "prompt"}}
     };
     t.access = tool_access::execute;
+    agent_hooks child_hooks;
+    child_hooks.pre_tool = hooks.pre_tool;
+    child_hooks.post_tool = hooks.post_tool;
     t.run = [agents = std::move(agents), &model_provider, tools = std::move(tools), &rules,
-             workspace = std::move(workspace)](const json& input, tool_context&) -> tool_output {
-        const auto name = input.value("agent", std::string{});
-        const auto task = input.value("task", std::string{});
-        if (name.empty() || task.empty()) return {"Agent and task required.", true, "缺少参数", ""};
+             parent_model = std::move(parent_model), child_hooks = std::move(child_hooks)](const json& input, tool_context& ctx) -> tool_output {
+        const auto name = input.value("subagent_type", std::string{});
+        const auto prompt = input.value("prompt", std::string{});
+        if (name.empty() || prompt.empty()) return {"subagent_type and prompt are required.", true, "缺少参数", {}};
         for (const auto& config : agents) {
-            if (config.name == name) return run_subagent(config, task, model_provider, tools, rules, workspace);
+            if (config.name == name) return run_subagent(config, prompt, parent_model(), model_provider, tools, rules, child_hooks, ctx);
         }
-        return {"Unknown agent: " + name, true, "未知代理", ""};
+        return {"Unknown agent: " + name, true, "未知代理", {}};
     };
+    t.label = [](const json& input) { return input.value("description", input.value("subagent_type", std::string{})); };
     return {std::move(t)};
 }
 

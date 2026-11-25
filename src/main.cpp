@@ -225,14 +225,15 @@ int main(int argc, char** argv) {
     };
     append(make_skill_tools(a.skills));
     append(make_mcp_tools(a.mcp_clients));
-    append(make_task_tools(a.agents, *a.model_provider, tools, a.permissions, workspace));
+    auto hooks = make_agent_hooks(a.config.hooks, [&a] { return hook_session{a.session_id, a.log.path(), a.root}; });
+    append(make_task_tools(a.agents, *a.model_provider, tools, a.permissions, [&a] { return a.core->model; }, hooks));
 
     a.core = std::make_unique<agent>(
         *a.model_provider,
         std::move(tools),
         a.permissions,
         workspace,
-        make_agent_hooks(a.config.hooks, [&a] { return hook_session{a.session_id, a.log.path(), a.root}; })
+        std::move(hooks)
     );
 
     const auto& entry = a.config.providers.at(a.config.provider);

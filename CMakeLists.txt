@@ -103,6 +103,7 @@ if(BUILD_TESTING)
         tests/provider/provider_test.cpp
         tests/tools/tools_test.cpp
         tests/ui/ui_test.cpp
+        tests/ext/agents_test.cpp
         tests/ext/skills_test.cpp
         tests/ext/commands_test.cpp
         tests/ext/hooks_test.cpp

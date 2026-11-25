@@ -28,7 +28,8 @@ std::vector<plugin_info> load_plugins();
 // Later entries override earlier ones with the same name.
 std::vector<std::filesystem::path> extension_dirs(const std::filesystem::path& workspace, std::string_view kind);
 
-// YAML frontmatter as flat key: value pairs, and the body after it.
+// Simple YAML frontmatter and its body. Block list entries are separated by newlines.
 std::pair<std::map<std::string, std::string>, std::string> parse_frontmatter(std::string_view text);
+std::vector<std::string> frontmatter_list(std::string_view value, bool split_spaces = false);
 
 } // namespace ode

@@ -20,7 +20,7 @@ void interactive_ui::submit() {
     // Handle palette selection
     const auto items = palette_items();
 
-    if (!items.empty() && !text.empty() && text.front() == '/') {
+    if (!items.empty() && text.front() == '/' && text.find_first_of(" \t\r\n") == std::string::npos) {
         // When navigating palette, always use the selected item
         if (palette_index_ < items.size()) {
             text = items[palette_index_];

@@ -29,20 +29,21 @@ std::vector<skill> load_skills(const fs::path& workspace) {
         std::error_code ec;
         if (!fs::is_directory(dir, ec)) continue;
         for (const auto& entry : fs::directory_iterator(dir, ec)) {
-            if (!entry.is_regular_file(ec)) continue;
-            const auto& path = entry.path();
-            if (path.extension() != ".md") continue;
+            const bool packaged = entry.is_directory(ec);
+            const auto path = packaged ? entry.path() / "SKILL.md" : entry.path();
+            if (path.extension() != ".md" || !fs::is_regular_file(path, ec)) continue;
             const auto content = read_file(path);
             if (!content) continue;
 
             auto [meta, body] = parse_frontmatter(*content);
-            const auto name = meta.count("name") ? meta["name"] : path.stem().string();
+            const auto name = meta.contains("name") ? meta["name"]
+                : (packaged ? entry.path().filename().string() : path.stem().string());
             const auto desc = meta.count("description") ? meta["description"] : "";
             const auto same = std::ranges::find(skills, name, &skill::name);
             if (same != skills.end()) {
                 same->path = path;
                 same->description = desc;
-                same->body.clear();
+                same->body = std::move(body);
             } else {
                 skills.push_back({name, desc, path, body});
             }

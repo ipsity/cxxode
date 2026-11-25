@@ -29,21 +29,11 @@ std::vector<user_command> load_commands(const fs::path& workspace) {
             if (!content) continue;
 
             auto [meta, body] = parse_frontmatter(*content);
-            const auto name = meta.count("name") ? meta["name"] : path.stem().string();
-            const auto desc = meta.count("description") ? meta["description"] : "";
-
-            // Avoid duplicates - workspace commands override user commands
-            bool found = false;
-            for (auto& c : commands) {
-                if (c.name == name) {
-                    c.path = path;
-                    c.description = desc;
-                    c.body.clear();
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) commands.push_back({name, desc, path, body});
+            user_command command{meta.contains("name") ? meta["name"] : path.stem().string(), meta["description"],
+                                 path, std::move(body), meta["argument-hint"]};
+            const auto found = std::ranges::find(commands, command.name, &user_command::name);
+            if (found == commands.end()) commands.push_back(std::move(command));
+            else *found = std::move(command);
         }
     }
 
@@ -75,6 +65,31 @@ std::string expand_variables(std::string_view body, const std::map<std::string, 
     }
 
     return result;
+}
+
+std::string expand_command(std::string_view body, std::string_view arguments, std::string_view workspace) {
+    std::map<std::string, std::string> vars{{"ARGUMENTS", std::string(arguments)}, {"WORKSPACE", std::string(workspace)}};
+    std::size_t offset = 0;
+    for (int index = 1; index <= 9; ++index) {
+        offset = arguments.find_first_not_of(" \t\r\n", offset);
+        if (offset == std::string_view::npos) break;
+        std::string argument;
+        bool quoted = false;
+        for (; offset < arguments.size(); ++offset) {
+            const char c = arguments[offset];
+            if (c == '\\' && offset + 1 < arguments.size() && arguments[offset + 1] == '"') {
+                argument += arguments[++offset];
+            } else if (c == '"') {
+                quoted = !quoted;
+            } else if (!quoted && std::isspace(static_cast<unsigned char>(c))) {
+                break;
+            } else {
+                argument += c;
+            }
+        }
+        vars.emplace(std::to_string(index), std::move(argument));
+    }
+    return expand_variables(body, vars);
 }
 
 } // namespace ode

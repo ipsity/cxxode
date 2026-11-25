@@ -90,6 +90,7 @@ user text
 - 每个 `tool_use` 都必须有对应的 `tool_result`。被取消或崩溃导致缺失时，由 `close_dangling_tool_calls` 补齐。
 - Write/Edit 前检查文件的 mtime 和 size 是否与模型上次读到的一致，不一致就拒绝写入并让模型重新读取。
 - 一个用户回合内被改动的文件都会备份，`/undo` 恢复的是最近一个改过文件的回合。
+- 子 agent 沿用主 agent 的工具权限规则和前后置 Hooks，由当前前端处理权限询问，文件备份归入主回合。
 - session 是只追加的 JSONL 文件，崩溃最多丢失最后一行。
 
 ## 5. 扩展兼容规格

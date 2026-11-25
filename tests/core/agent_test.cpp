@@ -283,6 +283,20 @@ TEST_CASE("permission rules") {
     CHECK(command_segments("a 'b;c' | d && e") == std::vector<std::string>{"a 'b;c'", "d", "e"});
 }
 
+TEST_CASE("command grants apply only during their turn and keep explicit denials") {
+    const auto tools = builtin_tools();
+    const auto& bash = find(tools, "Bash");
+    const auto root = fs::temp_directory_path();
+    permission_rules rules;
+    const json input{{"command", "fixture lint files"}};
+    const std::vector<std::string> allowed{"Bash(fixture lint *)"};
+    CHECK(rules.check(bash, input, root) == verdict::ask);
+    CHECK(rules.check(bash, input, root, allowed) == verdict::allow);
+    CHECK(rules.check(bash, input, root) == verdict::ask);
+    rules.deny.push_back("Bash(fixture lint files)");
+    CHECK(rules.check(bash, input, root, allowed) == verdict::deny);
+}
+
 TEST_CASE("session log round trip drops a torn line and closes dangling calls") {
     temp_dir dir;
     const auto path = dir.path / "s.jsonl";

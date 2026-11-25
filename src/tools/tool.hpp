@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -27,12 +28,17 @@ struct file_stamp {
     bool operator==(const file_stamp&) const = default;
 };
 
+enum class answer { yes, no, always };
+struct tool;
+
 struct tool_context {
     fs::path root;
     cancel_token* cancel = nullptr;
     turn_backup* backup = nullptr;
     std::map<fs::path, file_stamp>* seen = nullptr;  // last stamp the model observed
     std::function<void(std::string_view)> output;     // live bash output
+    std::function<answer(const tool&, const json&)> ask{};
+    std::span<const std::string> allowed_tools{};
 };
 
 struct tool_output {

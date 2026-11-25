@@ -34,6 +34,12 @@ TEST_CASE("expand_variables handles edge cases") {
     CHECK(expand_variables("text$", vars) == "text$");
 }
 
+TEST_CASE("command argument expansion handles quotes and preserves raw input") {
+    const std::string arguments = R"("C:\Program Files\ode" next "" \"literal\")";
+    CHECK(expand_command("$1|$2|$3|$4|$5|$10|$ARGUMENTS|$WORKSPACE", arguments, "D:/workspace") ==
+          "C:\\Program Files\\ode|next||\"literal\"|$5|$10|" + arguments + "|D:/workspace");
+}
+
 TEST_CASE("load_commands finds and parses command files") {
     const auto temp = std::filesystem::temp_directory_path() / "ode-commands-test";
     std::filesystem::create_directories(temp / ".claude" / "commands");

@@ -41,7 +41,7 @@ void agent::append(message m) {
     messages.push_back(std::move(m));
 }
 
-turn_result agent::run(std::string user_text, agent_events& events, cancel_token& cancel) {
+turn_result agent::run(std::string user_text, agent_events& events, cancel_token& cancel, turn_options options) {
     std::string hook_context;
     if (hooks_.prompt) {
         auto v = hooks_.prompt(user_text, cancel);
@@ -74,10 +74,10 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
     user.blocks.push_back(block::make_text(std::move(user_text)));
     if (!hook_context.empty()) user.blocks.push_back(block::make_text(std::move(hook_context)));
     append(std::move(user));
-    turn_backup backup;
+    turn_backup local_backup;
+    auto& backup = options.shared_backup ? *options.shared_backup : local_backup;
     const auto keep_backup = [&] {
-        if (!backup.originals.empty()) backups_.push_back(std::move(backup));
-        backup = {};
+        if (!local_backup.originals.empty()) backups_.push_back(std::move(local_backup));
     };
     const auto finish = [&](turn_result r) {
         keep_backup();
@@ -131,7 +131,7 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         }
 
         message results{message::role::user, {}};
-        run_tools(reply.content, events, cancel, results, backup);
+        run_tools(reply.content, events, cancel, results, backup, options.allowed_tools);
         if (events.take_steering) {
             for (auto& s : events.take_steering()) steering.push_back(std::move(s));
         }
@@ -148,7 +148,7 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
 }
 
 void agent::run_tools(const message& reply, agent_events& events, cancel_token& cancel, message& results,
-                      turn_backup& backup) {
+                      turn_backup& backup, std::span<const std::string> allowed_tools) {
     const auto calls = reply.tool_uses();
 
     // TODO: 未来可以启用智能调度器
@@ -179,7 +179,7 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
             }
         }
         if (end - i == 1) {
-            auto out = run_one(*calls[i], events, cancel, backup, seen_);
+            auto out = run_one(*calls[i], events, cancel, backup, seen_, allowed_tools);
             results.blocks.push_back(block::make_tool_result(calls[i]->id, std::move(out.text), out.is_error));
         } else {
             // Each parallel read records file stamps privately; they are merged afterwards.
@@ -206,7 +206,7 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
             std::vector<std::future<tool_output>> pending;
             for (std::size_t k = i; k < end; ++k) {
                 pending.push_back(std::async(std::launch::async, [&, k] {
-                    return run_one(*calls[k], serial, cancel, backup, stamps[k - i]);
+                    return run_one(*calls[k], serial, cancel, backup, stamps[k - i], allowed_tools);
                 }));
             }
             for (std::size_t k = i; k < end; ++k) {
@@ -220,7 +220,7 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
 }
 
 tool_output agent::run_one(const block& call, agent_events& events, cancel_token& cancel, turn_backup& backup,
-                           std::map<fs::path, file_stamp>& seen) {
+                           std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools) {
     const auto* t = find_tool(call.name);
     if (!t) return {"Unknown tool: " + call.name, true, "未知工具", {}};
     if (!call.input.is_object()) return {"Tool input must be a JSON object.", true, "参数错误", {}};
@@ -237,7 +237,7 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
 
     auto permission = [&] {
         std::lock_guard lock(permission_mutex_);
-        return rules_.check(*t, call.input, root_);
+        return rules_.check(*t, call.input, root_, allowed_tools);
     }();
     if (permission != verdict::deny) {
         if (hook.tool_permission == hook_verdict::permission::ask) permission = verdict::ask;
@@ -264,7 +264,8 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
 
     if (events.tool_started) events.tool_started(*t, call.input);
 
-    tool_context ctx{root_, &cancel, t->access == tool_access::write ? &backup : nullptr, &seen, events.tool_progress};
+    tool_context ctx{root_, &cancel, t->access == tool_access::read ? nullptr : &backup, &seen, events.tool_progress,
+                     events.ask, allowed_tools};
     try {
         out = t->run(call.input, ctx);
     } catch (const std::exception& e) {

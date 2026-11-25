@@ -162,7 +162,10 @@ std::vector<std::string> interactive_ui::palette_items() {
         const auto name = "/" + cmd.name;
         int score = fuzzy_match(query, name);
         if (score >= 0) {
-            items.push_back({name, cmd.description, command_kind::user_command, score});
+            auto about = cmd.argument_hint;
+            if (!about.empty() && !cmd.description.empty()) about += "  ";
+            about += cmd.description;
+            items.push_back({name, std::move(about), command_kind::user_command, score});
         }
     }
 

@@ -60,11 +60,10 @@ constexpr const char* help_text =
     "- `/clear` 新会话  `/cost` 查看用量  `/exit` 退出";
 
 std::pair<std::string, std::string> split(const std::string& line) {
-    const auto space = line.find(' ');
+    const auto space = line.find_first_of(" \t");
     if (space == std::string::npos) return {line, {}};
-    auto arg = line.substr(space + 1);
-    while (!arg.empty() && arg.front() == ' ') arg.erase(0, 1);
-    return {line.substr(0, space), arg};
+    const auto start = line.find_first_not_of(" \t", space);
+    return {line.substr(0, space), start == std::string::npos ? std::string{} : line.substr(start)};
 }
 
 } // namespace
@@ -450,13 +449,9 @@ bool interactive_ui::user_command(const std::string& line) {
             }
 
             auto [meta, body] = parse_frontmatter(*content);
-            std::map<std::string, std::string> vars;
-            vars["ARGUMENTS"] = arg;
             const auto ws = app_.root.generic_u8string();
-            vars["WORKSPACE"] = std::string(ws.begin(), ws.end());
-
-            const auto expanded = expand_variables(body, vars);
-            start_turn(expanded);
+            start_turn(expand_command(body, arg, std::string(ws.begin(), ws.end())),
+                       frontmatter_list(meta["allowed-tools"], true));
             return true;
         }
     }

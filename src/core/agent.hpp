@@ -12,8 +12,6 @@
 
 namespace ode {
 
-enum class answer { yes, no, always };
-
 // Callbacks run on the agent's worker thread. ask() blocks until the user decides.
 struct agent_events {
     std::function<void()> request_started;
@@ -32,6 +30,11 @@ struct agent_events {
 struct turn_result {
     stop_reason stop = stop_reason::end_turn;
     std::string error;
+};
+
+struct turn_options {
+    std::span<const std::string> allowed_tools{};
+    turn_backup* shared_backup = nullptr;
 };
 
 struct hook_verdict {
@@ -64,7 +67,7 @@ public:
     usage total;                  // summed over every request
     std::size_t context_tokens = 0;  // size of the latest request and reply
 
-    turn_result run(std::string user_text, agent_events& events, cancel_token& cancel);
+    turn_result run(std::string user_text, agent_events& events, cancel_token& cancel, turn_options options = {});
     // Replaces history with a model-written summary.
     turn_result compact(agent_events& events, cancel_token& cancel, std::string_view focus = {});
     // Restores files changed by the most recent turn that changed files.
@@ -77,9 +80,9 @@ private:
     model_request request() const;
     void append(message m);
     void run_tools(const message& reply, agent_events& events, cancel_token& cancel, message& results,
-                   turn_backup& backup);
+                   turn_backup& backup, std::span<const std::string> allowed_tools);
     tool_output run_one(const block& call, agent_events& events, cancel_token& cancel, turn_backup& backup,
-                        std::map<fs::path, file_stamp>& seen);
+                        std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools);
 
     provider& provider_;
     std::vector<tool> tools_;

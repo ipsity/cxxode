@@ -53,7 +53,7 @@ public:
 private:
     void handle(const ui::key& k);
     void submit();
-    void start_turn(std::string text);
+    void start_turn(std::string text, std::vector<std::string> allowed_tools = {});
     void start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact);
     void drain();
     void apply(ev_text&);
