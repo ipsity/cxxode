@@ -266,7 +266,9 @@ int main(int argc, char** argv) {
 
     if (print) {
         if (prompt.empty()) return fail("-p needs a prompt");
-        if (mode_text.empty()) a.permissions.set_mode(permission_mode::plan);
+        // Headless runs cannot ask, and default mode writes inside the workspace without asking,
+        // so stay read-only unless the user chose a mode on the command line or in settings.
+        if (mode_text.empty() && !parse_mode(a.config.permission_mode)) a.permissions.set_mode(permission_mode::plan);
         return run_print(a, prompt);
     }
     if (!ui::terminal::interactive()) return fail("not a terminal; use ode -p \"...\"");
