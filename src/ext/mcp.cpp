@@ -1,6 +1,4 @@
-#include "mcp/mcp_client.hpp"
-#include "config/config.hpp"
-#include "core/session.hpp"
+#include "ext/mcp.hpp"
 
 #include <sstream>
 
@@ -201,6 +199,36 @@ std::vector<mcp_client::server_config> load_mcp_servers(const fs::path& workspac
     }
 
     return servers;
+}
+
+// Wraps MCP tools as cxxode tools
+std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>& mcp_clients) {
+    std::vector<tool> tools;
+
+    for (const auto& client : mcp_clients) {
+        if (!client || !client->is_running()) continue;
+
+        const auto mcp_tools = client->list_tools();
+        for (const auto& mcp_tool : mcp_tools) {
+            tool t;
+            // Name format: mcp__servername__toolname
+            t.name = "mcp__" + client->server_name() + "__" + mcp_tool.name;
+            t.description = mcp_tool.description + " (via MCP server: " + client->server_name() + ")";
+            t.schema = mcp_tool.schema;
+            t.access = tool_access::execute;  // MCP tools can do anything
+
+            // Capture client and original tool name
+            auto client_ptr = client;
+            auto original_name = mcp_tool.name;
+            t.run = [client_ptr, original_name](const json& input, tool_context&) -> tool_output {
+                return client_ptr->call_tool(original_name, input);
+            };
+
+            tools.push_back(std::move(t));
+        }
+    }
+
+    return tools;
 }
 
 } // namespace ode

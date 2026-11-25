@@ -1,11 +1,13 @@
-#include "commands/command.hpp"
-#include "core/session.hpp"
-#include "ext/plugins.hpp"
-#include "skills/skill.hpp"
+#include "ext/commands.hpp"
+#include "base/files.hpp"
+#include "ext/discovery.hpp"
 
 #include <algorithm>
+#include <cctype>
 
 namespace ode {
+
+namespace fs = std::filesystem;
 
 std::string user_command::load_body() const {
     if (!body.empty()) return body;
@@ -14,26 +16,7 @@ std::string user_command::load_body() const {
 
 std::vector<user_command> load_commands(const fs::path& workspace) {
     std::vector<user_command> commands;
-    std::vector<fs::path> search_paths;
-
-    // User-level commands
-    const auto home = ode_home().parent_path();
-    search_paths.push_back(home / ".claude" / "commands");
-    search_paths.push_back(home / ".ode" / "commands");
-
-    // Plugin commands
-    for (const auto& plugin_path : plugin_search_paths()) {
-        search_paths.push_back(plugin_path / "commands");
-        search_paths.push_back(plugin_path / ".claude" / "commands");
-    }
-
-    // Workspace commands - walk up to git root
-    for (auto dir = workspace; ; dir = dir.parent_path()) {
-        search_paths.push_back(dir / ".claude" / "commands");
-        if (fs::exists(dir / ".git") || dir == dir.parent_path()) break;
-    }
-
-    for (const auto& dir : search_paths) {
+    for (const auto& dir : extension_dirs(workspace, "commands")) {
         std::error_code ec;
         if (!fs::is_directory(dir, ec)) continue;
 

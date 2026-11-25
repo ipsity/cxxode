@@ -1,4 +1,5 @@
-#include "skills/skill.hpp"
+#include "ext/discovery.hpp"
+#include "ext/skills.hpp"
 
 #include <doctest.h>
 #include <fstream>

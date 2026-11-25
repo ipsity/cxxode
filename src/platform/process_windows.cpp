@@ -1,5 +1,5 @@
 #include "platform/process.hpp"
-#include "platform/text.hpp"
+#include "base/utf.hpp"
 
 #include <mutex>
 #include <thread>

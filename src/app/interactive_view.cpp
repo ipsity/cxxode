@@ -266,7 +266,7 @@ std::vector<std::string> interactive_ui::palette_rows(int columns) {
 }
 
 std::string interactive_ui::status_line(int columns) const {
-    const auto mode = app_.core ? app_.config.permissions.mode() : permission_mode::normal;
+    const auto mode = app_.core ? app_.permissions.mode() : permission_mode::normal;
     std::string right = std::string(mode_name(mode)) + " · " + app_.core->model;
     if (usage_.context) {
         right += " · " + short_count(usage_.context) + "/" + short_count(app_.core->context_window);

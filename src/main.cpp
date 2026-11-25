@@ -1,9 +1,12 @@
 #include "app/app.hpp"
-#include "commands/builtin_commands.hpp"
-#include "commands/command.hpp"
-#include "core/rpc.hpp"
+#include "app/builtin_commands.hpp"
+#include "ext/commands.hpp"
+#include "app/rpc.hpp"
 #include "core/version.hpp"
-#include "skills/skill.hpp"
+#include "ext/agents.hpp"
+#include "ext/hooks.hpp"
+#include "ext/mcp.hpp"
+#include "ext/skills.hpp"
 #include "tools/tool.hpp"
 #include "ui/render.hpp"
 #include "ui/term.hpp"
@@ -15,7 +18,7 @@
 #include <vector>
 
 #ifdef _WIN32
-#include "platform/text.hpp"
+#include "base/utf.hpp"
 #include <shellapi.h>
 #endif
 
@@ -141,6 +144,9 @@ int main(int argc, char** argv) {
     app a;
     a.root = workspace;
     a.config = load_settings(workspace);
+    a.permissions.allow = a.config.permission_allow;
+    a.permissions.deny = a.config.permission_deny;
+    if (auto m = parse_mode(a.config.permission_mode)) a.permissions.set_mode(*m);
     for (const auto& w : a.config.warnings) ui::write_stream(true, "ode: " + w + "\n");
     if (!provider_name.empty()) a.config.provider = provider_name;
 
@@ -165,7 +171,7 @@ int main(int argc, char** argv) {
     if (!mode_text.empty()) {
         const auto m = parse_mode(mode_text);
         if (!m) return fail("--permission takes plan, default or yolo");
-        a.config.permissions.set_mode(*m);
+        a.permissions.set_mode(*m);
     }
 
     a.model_provider = make_provider(a.provider_cfg);
@@ -206,13 +212,22 @@ int main(int argc, char** argv) {
     // Load subagent configs
     a.agents = load_agents(workspace);
 
-    // Create agent with hooks and all tools (builtin + skills + MCP + subagents)
+    // Assemble the tool list from each ext module. The task tool gets a copy of the
+    // tools registered before it, so a subagent runs everything except task itself.
+    auto tools = builtin_tools();
+    const auto append = [&tools](std::vector<tool> more) {
+        tools.insert(tools.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+    };
+    append(make_skill_tools(a.skills));
+    append(make_mcp_tools(a.mcp_clients));
+    append(make_task_tools(a.agents, *a.model_provider, tools, a.permissions, workspace));
+
     a.core = std::make_unique<agent>(
         *a.model_provider,
-        make_tools(a.skills, a.mcp_clients, &a.agents, a.model_provider.get(), &a.config.permissions, &workspace),
-        a.config.permissions,
+        std::move(tools),
+        a.permissions,
         workspace,
-        a.config.hooks
+        make_agent_hooks(a.config.hooks)
     );
 
     const auto& entry = a.config.providers.at(a.config.provider);
@@ -245,7 +260,7 @@ int main(int argc, char** argv) {
 
     if (print) {
         if (prompt.empty()) return fail("-p needs a prompt");
-        if (mode_text.empty()) a.config.permissions.set_mode(permission_mode::plan);
+        if (mode_text.empty()) a.permissions.set_mode(permission_mode::plan);
         return run_print(a, prompt);
     }
     if (!ui::terminal::interactive()) return fail("not a terminal; use ode -p \"...\"");

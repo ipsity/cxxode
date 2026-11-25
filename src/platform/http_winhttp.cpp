@@ -1,5 +1,5 @@
 #include "platform/http.hpp"
-#include "platform/text.hpp"
+#include "base/utf.hpp"
 
 #include <winhttp.h>
 

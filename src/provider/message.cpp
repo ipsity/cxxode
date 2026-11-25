@@ -1,4 +1,4 @@
-#include "core/message.hpp"
+#include "provider/message.hpp"
 
 namespace ode {
 namespace {

@@ -11,55 +11,49 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-set(CXXODE_PLATFORM_SOURCES)
-if(WIN32)
-    list(APPEND CXXODE_PLATFORM_SOURCES src/platform/http_winhttp.cpp src/platform/process_windows.cpp src/platform/interactive_process.cpp src/ui/term_windows.cpp)
-endif()
-
-add_library(cxxode_core STATIC
-    src/core/version.cpp
-    src/core/message.cpp
-    src/core/permission.cpp
-    src/core/session.cpp
-    src/core/agent.cpp
-    src/core/prompt.cpp
-    src/core/rpc.cpp
-    src/core/tool_suggestion.cpp
-    src/core/error_handler.cpp
-    src/core/command_history.cpp
-    src/core/input_validator.cpp
+# One static library per layer. Each links only the layers below it, so a reversed
+# dependency fails at link time instead of compiling silently.
+add_library(ode_base STATIC
+    src/base/files.cpp
+    src/base/text.cpp)
+add_library(ode_platform STATIC
+    src/platform/http_winhttp.cpp
+    src/platform/process_windows.cpp
+    src/platform/interactive_process.cpp)
+add_library(ode_ui STATIC
+    src/ui/render.cpp
+    src/ui/term_windows.cpp
+    src/ui/theme.cpp
+    src/ui/welcome.cpp)
+add_library(ode_config STATIC
     src/config/config.cpp
+    src/config/provider_config.cpp)
+add_library(ode_provider STATIC
     src/provider/provider.cpp
+    src/provider/message.cpp
     src/provider/anthropic.cpp
     src/provider/openai_chat.cpp
     src/provider/openai_responses.cpp
-    src/provider/models.cpp
+    src/provider/models.cpp)
+add_library(ode_tools STATIC
     src/tools/files.cpp
     src/tools/edit_tools.cpp
     src/tools/search_tools.cpp
-    src/tools/bash_tool.cpp
-    src/theme/theme.cpp
-    src/ui/render.cpp
-    src/ui/welcome.cpp
-    src/skills/skill.cpp
-    src/skills/make_tools.cpp
-    src/commands/command.cpp
-    src/commands/builtin_commands.cpp
-    src/mcp/mcp_client.cpp
-    src/mcp/mcp_tools.cpp
-    src/hooks/hooks.cpp
-    src/agents/subagent.cpp
-    src/ext/plugins.cpp
-    ${CXXODE_PLATFORM_SOURCES})
-target_include_directories(cxxode_core PUBLIC src)
-target_include_directories(cxxode_core SYSTEM PUBLIC third_party)
-target_compile_definitions(cxxode_core PUBLIC CXXODE_VERSION="${PROJECT_VERSION}")
-if(WIN32)
-    target_compile_definitions(cxxode_core PUBLIC UNICODE _UNICODE)
-    target_link_libraries(cxxode_core PUBLIC winhttp advapi32 shell32)
-endif()
-
-add_executable(ode src/main.cpp
+    src/tools/bash_tool.cpp)
+add_library(ode_core STATIC
+    src/core/version.cpp
+    src/core/permission.cpp
+    src/core/session.cpp
+    src/core/agent.cpp
+    src/core/prompt.cpp)
+add_library(ode_ext STATIC
+    src/ext/discovery.cpp
+    src/ext/skills.cpp
+    src/ext/commands.cpp
+    src/ext/hooks.cpp
+    src/ext/mcp.cpp
+    src/ext/agents.cpp)
+add_library(ode_app STATIC
     src/app/app.cpp
     src/app/format.cpp
     src/app/commands.cpp
@@ -67,8 +61,35 @@ add_executable(ode src/main.cpp
     src/app/interactive_events.cpp
     src/app/interactive_input.cpp
     src/app/interactive_view.cpp
-    src/app/interactive_files.cpp)
-target_link_libraries(ode PRIVATE cxxode_core)
+    src/app/interactive_files.cpp
+    src/app/builtin_commands.cpp
+    src/app/command_history.cpp
+    src/app/error_handler.cpp
+    src/app/input_validator.cpp
+    src/app/tool_suggestion.cpp
+    src/app/rpc.cpp)
+
+set(ODE_LAYERS ode_base ode_platform ode_ui ode_config ode_provider ode_tools ode_core ode_ext ode_app)
+foreach(layer ${ODE_LAYERS})
+    target_include_directories(${layer} PUBLIC src)
+    target_include_directories(${layer} SYSTEM PUBLIC third_party)
+    target_compile_definitions(${layer} PUBLIC CXXODE_VERSION="${PROJECT_VERSION}")
+    if(WIN32)
+        target_compile_definitions(${layer} PUBLIC UNICODE _UNICODE)
+    endif()
+endforeach()
+
+target_link_libraries(ode_platform PUBLIC ode_base winhttp)
+target_link_libraries(ode_ui PUBLIC ode_base)
+target_link_libraries(ode_config PUBLIC ode_base)
+target_link_libraries(ode_provider PUBLIC ode_config ode_platform)
+target_link_libraries(ode_tools PUBLIC ode_base ode_platform)
+target_link_libraries(ode_core PUBLIC ode_provider ode_tools)
+target_link_libraries(ode_ext PUBLIC ode_core ode_platform)
+target_link_libraries(ode_app PUBLIC ode_ext ode_ui)
+
+add_executable(ode src/main.cpp)
+target_link_libraries(ode PRIVATE ode_app shell32)
 if(MINGW)
     target_link_options(ode PRIVATE -static)
 endif()
@@ -82,10 +103,10 @@ if(BUILD_TESTING)
         tests/provider/provider_test.cpp
         tests/tools/tools_test.cpp
         tests/ui/ui_test.cpp
-        tests/skills/skill_test.cpp
-        tests/commands/command_test.cpp)
+        tests/ext/skills_test.cpp
+        tests/ext/commands_test.cpp)
     target_include_directories(cxxode_tests SYSTEM PRIVATE third_party/doctest)
-    target_link_libraries(cxxode_tests PRIVATE cxxode_core)
+    target_link_libraries(cxxode_tests PRIVATE ode_app)
     if(MINGW)
         target_link_options(cxxode_tests PRIVATE -static)
     endif()

@@ -1,5 +1,5 @@
-#include "commands/command.hpp"
-#include "skills/skill.hpp"
+#include "ext/commands.hpp"
+#include "ext/skills.hpp"
 
 #include <doctest.h>
 #include <fstream>

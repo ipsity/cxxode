@@ -1,17 +1,17 @@
 #include "config/config.hpp"
-#include "core/session.hpp"
-#include "hooks/hooks.hpp"
-#include "tools/tool.hpp"
+#include "base/files.hpp"
+#include "base/text.hpp"
 
 #include <cstdlib>
 #include <memory>
 
 #ifdef _WIN32
-#include "platform/text.hpp"
+#include "base/utf.hpp"
 #include <wincred.h>
 #endif
 
 namespace ode {
+namespace fs = std::filesystem;
 namespace {
 
 std::string env(const std::string& name) {
@@ -19,8 +19,6 @@ std::string env(const std::string& name) {
     const char* v = std::getenv(name.c_str());
     return v ? v : "";
 }
-
-fs::path user_home() { return ode_home().parent_path(); }
 
 void merge(settings& s, const json& j) {
     if (j.contains("provider") && j["provider"].is_string()) s.provider = j["provider"];
@@ -50,10 +48,10 @@ void merge(settings& s, const json& j) {
         const auto& p = j["permissions"];
         for (const auto& key : {"allow", "deny"}) {
             if (!p.contains(key) || !p[key].is_array()) continue;
-            auto& list = std::string_view(key) == "allow" ? s.permissions.allow : s.permissions.deny;
+            auto& list = std::string_view(key) == "allow" ? s.permission_allow : s.permission_deny;
             for (const auto& r : p[key]) if (r.is_string()) list.push_back(r);
         }
-        if (auto m = parse_mode(p.value("defaultMode", ""))) s.permissions.set_mode(*m);
+        if (p.contains("defaultMode") && p["defaultMode"].is_string()) s.permission_mode = p["defaultMode"];
     }
     if (j.contains("hooks") && j["hooks"].is_object()) {
         const auto& hooks = j["hooks"];
@@ -107,13 +105,6 @@ void merge_file(settings& s, const fs::path& path) {
 }
 
 } // namespace
-
-std::optional<protocol> parse_protocol(std::string_view text) {
-    if (text == "anthropic" || text == "messages") return protocol::anthropic;
-    if (text == "openai-chat" || text == "chat-completions" || text == "chat") return protocol::openai_chat;
-    if (text == "openai-responses" || text == "responses" || text == "openai") return protocol::openai_responses;
-    return std::nullopt;
-}
 
 std::string resolve_model_alias(const std::string& model) {
     struct alias { const char* name; const char* variable; const char* fallback; };

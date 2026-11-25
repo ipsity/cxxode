@@ -1,9 +1,7 @@
 #pragma once
 
-#include "core/permission.hpp"
-#include "platform/process.hpp"
-#include "provider/provider.hpp"
-#include "tools/tool.hpp"
+#include "base/json.hpp"
+#include "config/provider_config.hpp"
 
 #include <filesystem>
 #include <map>
@@ -43,7 +41,11 @@ struct settings {
     std::string provider = "anthropic";
     std::string model;
     std::map<std::string, provider_entry> providers;
-    permission_rules permissions;
+    // Permission rules as written in settings.json. main.cpp turns these into a
+    // permission_rules, which lives in core and must not be known here.
+    std::vector<std::string> permission_allow;
+    std::vector<std::string> permission_deny;
+    std::string permission_mode;  // empty means the built-in default
     std::vector<hook_config> hooks;  // Hooks loaded from settings.json
     json mcp_servers;  // MCP server configurations from settings.json
     std::vector<std::filesystem::path> loaded_files;
@@ -57,8 +59,6 @@ settings load_settings(const std::filesystem::path& workspace);
 // Returns an error message on failure.
 std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out);
 bool save_credential(const std::string& provider, const std::string& key);
-
-std::optional<protocol> parse_protocol(std::string_view text);
 
 // Claude Code aliases: opus, sonnet, haiku, fable. ANTHROPIC_DEFAULT_<NAME>_MODEL overrides
 // the built-in id, so a gateway mapping set up for Claude Code applies unchanged.

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "config/config.hpp"
 #include "core/permission.hpp"
 #include "core/session.hpp"
 #include "provider/provider.hpp"
@@ -32,10 +31,23 @@ struct turn_result {
     std::string error;
 };
 
+struct hook_verdict {
+    bool allow = true;
+    std::string message;  // shown to the model when the action is blocked
+};
+
+// Extension points the loop calls; core does not know where they come from (settings hooks, Lua).
+struct agent_hooks {
+    std::function<hook_verdict(std::string_view prompt, cancel_token&)> prompt;
+    std::function<hook_verdict(const tool&, const json& input, cancel_token&)> pre_tool;
+    std::function<void(const tool&, const json& input, const tool_output&, cancel_token&)> post_tool;
+    std::function<void(std::string_view reason, cancel_token&)> stop;
+};
+
 class agent {
 public:
     agent(provider& model_provider, std::vector<tool> tools, permission_rules& rules, fs::path root,
-          std::vector<hook_config> hooks = {});
+          agent_hooks hooks = {});
 
     std::string model;
     std::string system;
@@ -69,7 +81,7 @@ private:
     std::vector<turn_backup> backups_;
     std::map<fs::path, file_stamp> seen_;
     std::string pending_note_;
-    std::vector<hook_config> hooks_;
+    agent_hooks hooks_;
 };
 
 std::string build_system_prompt(const fs::path& root, std::string_view shell,

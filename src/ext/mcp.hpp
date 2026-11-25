@@ -57,4 +57,7 @@ private:
 // Load MCP server configurations from settings
 std::vector<mcp_client::server_config> load_mcp_servers(const fs::path& workspace);
 
+// Every tool of every running server, named mcp__<server>__<tool>.
+std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>& clients);
+
 } // namespace ode

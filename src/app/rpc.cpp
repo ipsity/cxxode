@@ -1,4 +1,4 @@
-#include "core/rpc.hpp"
+#include "app/rpc.hpp"
 #include "core/session.hpp"
 #include "ui/term.hpp"
 

@@ -92,7 +92,7 @@ void interactive_ui::handle(const ui::key& k) {
         else if (k.kind == key_kind::escape || (k.kind == key_kind::character && (k.text == "n" || k.text == "N"))) answer_ask(answer::no);
         else if (k.kind == key_kind::character && (k.text == "a" || k.text == "A")) answer_ask(answer::always);
         else if (k.kind == key_kind::ctrl && k.letter == 'c') cancel();
-        else if (k.kind == key_kind::shift_tab) app_.config.permissions.set_mode(next_mode(app_.config.permissions.mode()));
+        else if (k.kind == key_kind::shift_tab) app_.permissions.set_mode(next_mode(app_.permissions.mode()));
         return;
     }
     const int inner = std::max(4, size_.columns - 7);
@@ -144,8 +144,8 @@ void interactive_ui::handle(const ui::key& k) {
             }
             break;
         case key_kind::shift_tab: {
-            const auto m = next_mode(app_.config.permissions.mode());
-            app_.config.permissions.set_mode(m);
+            const auto m = next_mode(app_.permissions.mode());
+            app_.permissions.set_mode(m);
             break;
         }
         case key_kind::escape:

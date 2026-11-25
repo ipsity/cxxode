@@ -1,4 +1,4 @@
-#include "commands/builtin_commands.hpp"
+#include "app/builtin_commands.hpp"
 #include "provider/models.hpp"
 #include "ui/term.hpp"
 

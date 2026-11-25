@@ -1,4 +1,4 @@
-#include "core/tool_suggestion.hpp"
+#include "app/tool_suggestion.hpp"
 #include <algorithm>
 #include <cctype>
 #include <regex>

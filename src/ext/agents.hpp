@@ -1,10 +1,8 @@
 #pragma once
 
-#include "tools/tool.hpp"
 #include "core/agent.hpp"
 
 #include <filesystem>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -25,5 +23,10 @@ std::vector<agent_config> load_agents(const std::filesystem::path& workspace);
 tool_output run_subagent(const agent_config& config, const std::string& task,
                          provider& model_provider, const std::vector<tool>& tools,
                          permission_rules& rules, const fs::path& workspace);
+
+// The `task` tool. Subagents get `tools` (everything registered before this one).
+// Not created when there are no agents.
+std::vector<tool> make_task_tools(std::vector<agent_config> agents, provider& model_provider,
+                                  std::vector<tool> tools, permission_rules& rules, fs::path workspace);
 
 } // namespace ode

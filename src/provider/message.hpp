@@ -1,14 +1,12 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
+#include "base/json.hpp"
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
 namespace ode {
-
-using json = nlohmann::json;
 
 struct block {
     enum class kind { text, tool_use, tool_result, thinking, image, opaque };

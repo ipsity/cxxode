@@ -1,7 +1,8 @@
 #include "app/interactive.hpp"
-#include "commands/command.hpp"
+#include "ext/commands.hpp"
+#include "ext/discovery.hpp"
 #include "provider/models.hpp"
-#include "theme/theme.hpp"
+#include "ui/theme.hpp"
 
 #include <iostream>
 
@@ -275,10 +276,10 @@ bool interactive_ui::command(const std::string& line) {
             }
         }
     } else if (name == "/mode") {
-        if (auto m = parse_mode(arg)) app_.config.permissions.set_mode(*m);
-        else if (arg.empty()) app_.config.permissions.set_mode(next_mode(app_.config.permissions.mode()));
+        if (auto m = parse_mode(arg)) app_.permissions.set_mode(*m);
+        else if (arg.empty()) app_.permissions.set_mode(next_mode(app_.permissions.mode()));
         else note("档位为 plan、default 或 yolo", tone::error);
-        note("权限档 " + std::string(mode_name(app_.config.permissions.mode())));
+        note("权限档 " + std::string(mode_name(app_.permissions.mode())));
     } else if (name == "/theme") {
         if (arg.empty()) {
             // Show interactive theme selector with customize option

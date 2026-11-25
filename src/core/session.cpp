@@ -46,15 +46,6 @@ void session_log::append_message(const message& m) {
     append({{"v", 1}, {"type", "message"}, {"message", to_json(m)}});
 }
 
-fs::path ode_home() {
-#ifdef _WIN32
-    const char* home = std::getenv("USERPROFILE");
-#else
-    const char* home = std::getenv("HOME");
-#endif
-    return fs::path(home ? home : ".") / ".ode";
-}
-
 fs::path sessions_dir(const fs::path& workspace) {
     auto text = workspace.lexically_normal().generic_u8string();
     std::string slug;

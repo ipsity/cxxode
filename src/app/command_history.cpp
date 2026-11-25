@@ -1,4 +1,4 @@
-#include "core/command_history.hpp"
+#include "app/command_history.hpp"
 #include <algorithm>
 #include <fstream>
 

@@ -1,32 +1,12 @@
-#include "agents/subagent.hpp"
-#include "core/session.hpp"
-#include "ext/plugins.hpp"
-#include "skills/skill.hpp"
+#include "ext/agents.hpp"
+#include "base/files.hpp"
+#include "ext/discovery.hpp"
 
 namespace ode {
 
 std::vector<agent_config> load_agents(const fs::path& workspace) {
     std::vector<agent_config> agents;
-    std::vector<fs::path> search_paths;
-
-    // User-level agents
-    const auto home = ode_home().parent_path();
-    search_paths.push_back(home / ".claude" / "agents");
-    search_paths.push_back(home / ".ode" / "agents");
-
-    // Plugin agents
-    for (const auto& plugin_path : plugin_search_paths()) {
-        search_paths.push_back(plugin_path / "agents");
-        search_paths.push_back(plugin_path / ".claude" / "agents");
-    }
-
-    // Workspace agents - walk up to git root
-    for (auto dir = workspace; ; dir = dir.parent_path()) {
-        search_paths.push_back(dir / ".claude" / "agents");
-        if (fs::exists(dir / ".git") || dir == dir.parent_path()) break;
-    }
-
-    for (const auto& dir : search_paths) {
+    for (const auto& dir : extension_dirs(workspace, "agents")) {
         std::error_code ec;
         if (!fs::is_directory(dir, ec)) continue;
 
@@ -88,6 +68,34 @@ tool_output run_subagent(const agent_config& config, const std::string& task,
     }
 
     return {output, false, "完成", ""};
+}
+
+std::vector<tool> make_task_tools(std::vector<agent_config> agents, provider& model_provider,
+                                  std::vector<tool> tools, permission_rules& rules, fs::path workspace) {
+    if (agents.empty()) return {};
+    tool t;
+    t.name = "task";
+    t.description = "Run a subagent in isolated context. Returns final text output.";
+    t.schema = {
+        {"type", "object"},
+        {"properties", {
+            {"agent", {{"type", "string"}, {"description", "Agent name"}}},
+            {"task", {{"type", "string"}, {"description", "Task description"}}}
+        }},
+        {"required", {"agent", "task"}}
+    };
+    t.access = tool_access::execute;
+    t.run = [agents = std::move(agents), &model_provider, tools = std::move(tools), &rules,
+             workspace = std::move(workspace)](const json& input, tool_context&) -> tool_output {
+        const auto name = input.value("agent", std::string{});
+        const auto task = input.value("task", std::string{});
+        if (name.empty() || task.empty()) return {"Agent and task required.", true, "缺少参数", ""};
+        for (const auto& config : agents) {
+            if (config.name == name) return run_subagent(config, task, model_provider, tools, rules, workspace);
+        }
+        return {"Unknown agent: " + name, true, "未知代理", ""};
+    };
+    return {std::move(t)};
 }
 
 } // namespace ode

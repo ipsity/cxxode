@@ -1,17 +1,17 @@
 #pragma once
 
-#include "agents/subagent.hpp"
-#include "commands/command.hpp"
+#include "ext/agents.hpp"
+#include "ext/commands.hpp"
 #include "config/config.hpp"
 #include "core/agent.hpp"
-#include "core/command_history.hpp"
-#include "core/error_handler.hpp"
-#include "core/goal_manager.hpp"
-#include "core/input_validator.hpp"
-#include "core/tool_suggestion.hpp"
-#include "mcp/mcp_client.hpp"
-#include "skills/skill.hpp"
-#include "theme/theme.hpp"
+#include "app/command_history.hpp"
+#include "app/error_handler.hpp"
+#include "app/goal_manager.hpp"
+#include "app/input_validator.hpp"
+#include "app/tool_suggestion.hpp"
+#include "ext/mcp.hpp"
+#include "ext/skills.hpp"
+#include "ui/theme.hpp"
 
 #include <memory>
 #include <optional>
@@ -23,6 +23,7 @@ namespace ode {
 struct app {
     fs::path root;
     settings config;
+    permission_rules permissions;
     provider_config provider_cfg;
     std::unique_ptr<provider> model_provider;
     std::unique_ptr<agent> core;

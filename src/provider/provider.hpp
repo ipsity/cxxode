@@ -1,7 +1,8 @@
 #pragma once
 
-#include "core/cancel.hpp"
-#include "core/message.hpp"
+#include "base/cancel.hpp"
+#include "config/provider_config.hpp"
+#include "provider/message.hpp"
 
 #include <functional>
 #include <memory>
@@ -46,16 +47,6 @@ class provider {
 public:
     virtual ~provider() = default;
     virtual model_reply send(const model_request& request, const stream_events& events, cancel_token& cancel) = 0;
-};
-
-enum class protocol { anthropic, openai_chat, openai_responses };
-
-struct provider_config {
-    std::string name;
-    protocol kind = protocol::anthropic;
-    std::string base_url;
-    std::string api_key;
-    bool bearer = false;  // Anthropic: send Authorization: Bearer instead of x-api-key
 };
 
 std::unique_ptr<provider> make_provider(const provider_config& config);

@@ -1,7 +1,9 @@
 #pragma once
 
-#include "core/cancel.hpp"
-#include "core/message.hpp"
+#include "base/cancel.hpp"
+#include "base/files.hpp"
+#include "base/json.hpp"
+#include "base/text.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -60,10 +62,8 @@ std::string shell_name();
 fs::path resolve(const fs::path& root, std::string_view path);
 std::string display_path(const fs::path& root, const fs::path& path);
 bool inside(const fs::path& root, const fs::path& path);
-std::optional<std::string> read_file(const fs::path& path);
 bool glob_match(std::string_view pattern, std::string_view path);
 std::vector<fs::path> workspace_files(const fs::path& root, const fs::path& under);
-std::string clip(std::string text, std::size_t limit);
 std::optional<file_stamp> stamp(const fs::path& path);
 
 // Restores every file in the backup. Returns the display paths restored.

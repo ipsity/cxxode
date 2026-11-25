@@ -1,5 +1,5 @@
 #include "ui/term.hpp"
-#include "platform/text.hpp"
+#include "base/utf.hpp"
 
 #include <io.h>
 

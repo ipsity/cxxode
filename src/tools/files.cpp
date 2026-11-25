@@ -27,14 +27,6 @@ std::string display_path(const fs::path& root, const fs::path& path) {
     return std::string(abs.begin(), abs.end());
 }
 
-std::optional<std::string> read_file(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) return std::nullopt;
-    std::ostringstream out;
-    out << in.rdbuf();
-    return std::move(out).str();
-}
-
 std::optional<file_stamp> stamp(const fs::path& path) {
     std::error_code ec;
     const auto mtime = fs::last_write_time(path, ec);
@@ -42,16 +34,6 @@ std::optional<file_stamp> stamp(const fs::path& path) {
     const auto size = fs::file_size(path, ec);
     if (ec) return std::nullopt;
     return file_stamp{mtime, size};
-}
-
-std::string clip(std::string text, std::size_t limit) {
-    if (text.size() <= limit) return text;
-    const auto half = limit / 2;
-    auto head = half, tail = text.size() - half;
-    // Never cut inside a UTF-8 sequence.
-    while (head > 0 && (static_cast<unsigned char>(text[head]) & 0xC0) == 0x80) --head;
-    while (tail < text.size() && (static_cast<unsigned char>(text[tail]) & 0xC0) == 0x80) ++tail;
-    return text.substr(0, head) + "\n… [" + std::to_string(tail - head) + " bytes omitted] …\n" + text.substr(tail);
 }
 
 namespace {

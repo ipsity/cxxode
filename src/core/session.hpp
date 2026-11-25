@@ -1,6 +1,7 @@
 #pragma once
 
-#include "core/message.hpp"
+#include "base/files.hpp"
+#include "provider/message.hpp"
 
 #include <cstdio>
 #include <filesystem>
@@ -43,7 +44,6 @@ struct loaded_session {
     std::string model;
 };
 
-std::filesystem::path ode_home();
 std::filesystem::path sessions_dir(const std::filesystem::path& workspace);
 std::string new_session_id();
 loaded_session load_session(const std::filesystem::path& path);

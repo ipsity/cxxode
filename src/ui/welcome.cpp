@@ -1,5 +1,5 @@
 #include "ui/welcome.hpp"
-#include "core/session.hpp"
+#include "base/files.hpp"
 #include "ui/render.hpp"
 
 #include <fstream>
