@@ -3,6 +3,7 @@
 
 #include <winhttp.h>
 
+#include <cstdlib>
 #include <memory>
 
 namespace ode {
@@ -17,19 +18,50 @@ std::string last_error(std::string_view what) {
     return std::string(what) + " failed (WinHTTP error " + std::to_string(GetLastError()) + ")";
 }
 
-HINTERNET session_handle() {
-    // One process-wide session keeps connections and TLS sessions warm across requests.
-    static hinternet session{[] {
-        auto* h = WinHttpOpen(L"ode/0.2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                              WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (!h) h = WinHttpOpen(L"ode/0.2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+bool bypass_proxy(std::wstring_view host) {
+    const auto* value = std::getenv("NO_PROXY");
+    if (!value) return false;
+    std::wstring entries = widen(value);
+    std::wstring_view rest = entries;
+    const auto equal = [](std::wstring_view left, std::wstring_view right) {
+        return left.size() == right.size() &&
+            CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
+                                 right.data(), static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
+    };
+    while (!rest.empty()) {
+        const auto comma = rest.find(L',');
+        auto entry = rest.substr(0, comma);
+        rest.remove_prefix(comma == std::wstring_view::npos ? rest.size() : comma + 1);
+        const auto first = entry.find_first_not_of(L" \t");
+        if (first == std::wstring_view::npos) continue;
+        entry = entry.substr(first, entry.find_last_not_of(L" \t") - first + 1);
+        if (entry == L"*") return true;
+        if (entry.starts_with(L'.')) entry.remove_prefix(1);
+        if (entry.empty() || entry.size() > host.size()) continue;
+        const auto offset = host.size() - entry.size();
+        if ((offset == 0 || host[offset - 1] == L'.') && equal(host.substr(offset), entry)) return true;
+    }
+    return false;
+}
+
+HINTERNET session_handle(bool direct) {
+    // Keep connection pools separate so an explicit bypass cannot affect other hosts.
+    const auto open = [](DWORD access) -> hinternet {
+        auto* h = WinHttpOpen(L"ode/0.2", access, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (h) {
             DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
             WinHttpSetOption(h, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
         }
-        return h;
-    }()};
+        return hinternet{h};
+    };
+    if (direct) {
+        static auto session = open(WINHTTP_ACCESS_TYPE_NO_PROXY);
+        return session.get();
+    }
+    static auto session = [&] {
+        auto automatic = open(WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY);
+        return automatic ? std::move(automatic) : open(WINHTTP_ACCESS_TYPE_DEFAULT_PROXY);
+    }();
     return session.get();
 }
 
@@ -37,11 +69,6 @@ HINTERNET session_handle() {
 
 http_result http_send(const http_request& request, const http_sink& sink, cancel_token& cancel) {
     http_result result;
-    auto* session = session_handle();
-    if (!session) {
-        result.error = last_error("WinHttpOpen");
-        return result;
-    }
     auto url = widen(request.url);
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof(parts);
@@ -51,6 +78,12 @@ http_result http_send(const http_request& request, const http_sink& sink, cancel
         return result;
     }
     const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
+    const bool direct = bypass_proxy(host);
+    auto* session = session_handle(direct);
+    if (!session) {
+        result.error = last_error("WinHttpOpen");
+        return result;
+    }
     std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
     path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
 
@@ -85,7 +118,16 @@ http_result http_send(const http_request& request, const http_sink& sink, cancel
                             const_cast<char*>(request.body.data()), static_cast<DWORD>(request.body.size()),
                             static_cast<DWORD>(request.body.size()), 0) ||
         !WinHttpReceiveResponse(raw, nullptr)) {
-        if (!cancel.cancelled()) result.error = last_error("HTTP request");
+        const auto error = GetLastError();
+        if (!cancel.cancelled()) {
+            if (error == ERROR_WINHTTP_CANNOT_CONNECT) {
+                result.error = "Could not connect to " + narrow(host) + ":" + std::to_string(parts.nPort) +
+                    (direct ? " directly (NO_PROXY)" : " using Windows proxy settings") +
+                    " (WinHTTP error " + std::to_string(error) + ")";
+            } else {
+                result.error = "HTTP request to " + narrow(host) + " failed (WinHTTP error " + std::to_string(error) + ")";
+            }
+        }
         return finish();
     }
     DWORD status = 0, size = sizeof(status);
