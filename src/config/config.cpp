@@ -1,63 +1,76 @@
 #include "config/config.hpp"
 #include "base/files.hpp"
 #include "base/text.hpp"
+#include "base/utf.hpp"
+#include "platform/file_lock.hpp"
 
 #include <cstdlib>
 #include <fstream>
-#include <memory>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
 #include <wincred.h>
-#include "base/utf.hpp"
-#endif
 
 namespace ode {
 namespace fs = std::filesystem;
 namespace {
 
-std::string env(const std::string& name) {
-    if (name.empty()) return {};
-    const char* v = std::getenv(name.c_str());
-    return v ? v : "";
-}
+enum class connection_scope { ignored, user, workspace };
 
-void merge(settings& s, const json& j) {
+void merge_connection(settings& s, const json& j, connection_scope scope) {
     if (j.contains("provider") && j["provider"].is_string()) s.provider = j["provider"];
-    if (j.contains("env") && j["env"].is_object()) {
-        for (const auto& [k, v] : j["env"].items()) {
-            if (!v.is_string()) continue;
-#ifdef _WIN32
-            _putenv_s(k.c_str(), v.get<std::string>().c_str());
-#else
-            setenv(k.c_str(), v.get<std::string>().c_str(), 1);
-#endif
-        }
-    }
     if (j.contains("providers") && j["providers"].is_object()) {
         for (const auto& [name, p] : j["providers"].items()) {
-            auto& e = s.providers[name];
-            e.name = name;
-            if (auto k = parse_protocol(p.value("protocol", ""))) e.kind = *k;
-            e.base_url = p.value("base_url", e.base_url);
-            e.api_key_env = p.value("api_key_env", e.api_key_env);
+            if (!p.is_object()) continue;
+            auto entry = s.providers.find(name);
+            if (scope == connection_scope::user) {
+                entry = s.providers.try_emplace(name).first;
+                auto& e = entry->second;
+                e.name = name;
+                if (const auto protocol_name = p.find("protocol"); protocol_name != p.end() && protocol_name->is_string()) {
+                    if (auto k = parse_protocol(protocol_name->get_ref<const std::string&>())) e.kind = *k;
+                }
+                if (const auto url = p.find("base_url"); url != p.end() && url->is_string()) {
+                    e.base_url = url->get_ref<const std::string&>();
+                }
+                if (const auto key = p.find("api_key"); key != p.end() && key->is_string()) {
+                    e.api_key = key->get_ref<const std::string&>();
+                }
+                const auto uses_legacy_auth = [&](std::string_view field) {
+                    const auto value = p.find(field);
+                    return value != p.end() && value->is_string() && !value->get_ref<const std::string&>().empty();
+                };
+                if (const auto auth = p.find("auth"); auth != p.end()) {
+                    if (*auth == "api-key") e.auth = credential_mode::api_key;
+                    else if (*auth == "bearer") e.auth = credential_mode::bearer;
+                    else if (*auth == "none") e.auth = credential_mode::none;
+                    else s.warnings.push_back("Invalid auth mode for provider '" + name + "'.");
+                } else if (e.auth == credential_mode::optional &&
+                           (uses_legacy_auth("api_key_env") || uses_legacy_auth("auth_token_env"))) {
+                    e.auth = credential_mode::api_key;
+                }
+                if (p.contains("api_key_env") || p.contains("auth_token_env")) {
+                    s.warnings.push_back("Key environment variable settings ignored for '" + name + "'; use api_key or ode login " + name + ".");
+                }
+            }
+            if (entry == s.providers.end()) continue;
             if (const auto model = p.find("model"); model != p.end() && model->is_string()) {
-                e.default_model = model->get<std::string>();
+                entry->second.default_model = model->get<std::string>();
                 s.model_overrides.erase(name);
             }
-            e.api_key = p.value("api_key", e.api_key);  // Parse direct API key
         }
     }
     if (j.contains("model") && j["model"].is_string()) {
         const auto provider = j.find("model_provider");
         const auto& owner = provider != j.end() && provider->is_string() ? provider->get_ref<const std::string&>() : s.provider;
         s.model_overrides[owner] = j["model"].get<std::string>();
+    }
+}
+
+void merge(settings& s, const json& j, connection_scope scope = connection_scope::ignored) {
+    if (scope != connection_scope::ignored) merge_connection(s, j, scope);
+    if (j.contains("env") && j["env"].is_object()) {
+        for (const auto& [k, v] : j["env"].items()) {
+            if (v.is_string()) _putenv_s(k.c_str(), v.get<std::string>().c_str());
+        }
     }
     if (j.contains("permissions") && j["permissions"].is_object()) {
         const auto& p = j["permissions"];
@@ -120,7 +133,7 @@ void merge(settings& s, const json& j) {
     }
 }
 
-void merge_file(settings& s, const fs::path& path) {
+void merge_file(settings& s, const fs::path& path, connection_scope scope = connection_scope::ignored) {
     std::error_code ec;
     if (!fs::is_regular_file(path, ec)) return;
     const auto text = read_file(path);
@@ -129,7 +142,7 @@ void merge_file(settings& s, const fs::path& path) {
         s.warnings.push_back("Ignored invalid JSON in " + path.string());
         return;
     }
-    merge(s, j);
+    merge(s, j, scope);
     s.loaded_files.push_back(path);
 }
 
@@ -152,54 +165,43 @@ void merge_mcp_file(settings& s, const fs::path& path) {
 } // namespace
 
 std::string resolve_model_alias(const std::string& model) {
-    struct alias { const char* name; const char* variable; const char* fallback; };
-    static constexpr alias aliases[] = {
-        {"opus", "ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-4-8"},
-        {"sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6"},
-        {"haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-haiku-4-5-20251001"},
-        {"fable", "ANTHROPIC_DEFAULT_FABLE_MODEL", "claude-fable-5"},
+    static constexpr std::pair<std::string_view, std::string_view> aliases[] = {
+        {"opus", "claude-opus-4-8"},
+        {"sonnet", "claude-sonnet-4-6"},
+        {"haiku", "claude-haiku-4-5-20251001"},
+        {"fable", "claude-fable-5"},
     };
     // "opus[1m]" keeps its window suffix after resolution.
     const auto bracket = model.find('[');
     const auto base = model.substr(0, bracket);
     const auto suffix = bracket == std::string::npos ? std::string{} : model.substr(bracket);
-    for (const auto& a : aliases) {
-        if (base != a.name) continue;
-        const auto mapped = env(a.variable);
-        return (mapped.empty() ? std::string(a.fallback) : mapped) + suffix;
+    for (const auto& [name, id] : aliases) {
+        if (base == name) return std::string(id) + suffix;
     }
     return model;
 }
 
 settings load_settings(const fs::path& workspace) {
     settings s;
-    // Built-in provider configurations
-    s.providers["anthropic"] = {"anthropic", protocol::anthropic,
-                                env("ANTHROPIC_BASE_URL").empty() ? "https://api.anthropic.com" : env("ANTHROPIC_BASE_URL"),
-                                "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "claude-sonnet-4-6"};
-    s.providers["openai"] = {"openai", protocol::openai_chat,
-                             env("OPENAI_BASE_URL").empty() ? "https://api.openai.com/v1" : env("OPENAI_BASE_URL"),
-                             "OPENAI_API_KEY", "", "gpt-5"};
-
-    s.providers["deepseek"] = {"deepseek", protocol::openai_chat,
-                               env("DEEPSEEK_BASE_URL").empty() ? "https://api.deepseek.com/v1" : env("DEEPSEEK_BASE_URL"),
-                               "DEEPSEEK_API_KEY", "", "deepseek-flash"};
-
-    // Claude Code's own model variables, so an existing gateway setup works unchanged.
-    for (const auto* var : {"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_MODEL"}) {
-        if (!env(var).empty()) s.providers["anthropic"].default_model = env(var);
-    }
+    s.providers["anthropic"] = {"anthropic", protocol::anthropic, "https://api.anthropic.com",
+                                "claude-sonnet-4-6", credential_mode::api_key};
+    s.providers["openai"] = {"openai", protocol::openai_chat, "https://api.openai.com/v1",
+                             "gpt-5", credential_mode::api_key};
+    s.providers["deepseek"] = {"deepseek", protocol::openai_chat, "https://api.deepseek.com/v1",
+                               "deepseek-flash", credential_mode::api_key};
     const auto home = user_home();
+    const auto user_dir = home / ".ode";
+    if (home.is_absolute()) s.user_settings_path = user_dir / "settings.json";
     // Later files override earlier ones. .mcp.json is Claude Code's server list and is
     // read at each of the same scopes, after that scope's settings.json.
     merge_file(s, home / ".claude" / "settings.json");
     merge_mcp_file(s, home / ".claude" / ".mcp.json");
-    merge_file(s, ode_home() / "settings.json");
+    merge_file(s, user_dir / "settings.json", home.is_absolute() ? connection_scope::user : connection_scope::ignored);
     merge_mcp_file(s, ode_home() / ".mcp.json");
     merge_file(s, workspace / ".claude" / "settings.json");
     merge_file(s, workspace / ".claude" / "settings.local.json");
     merge_mcp_file(s, workspace / ".mcp.json");
-    merge_file(s, workspace / ".ode" / "settings.json");
+    merge_file(s, workspace / ".ode" / "settings.json", connection_scope::workspace);
     merge_mcp_file(s, workspace / ".ode" / ".mcp.json");
     if (s.providers.contains(s.provider) == false) {
         s.warnings.push_back("Unknown provider '" + s.provider + "'; using anthropic.");
@@ -214,109 +216,126 @@ std::string configured_model(const settings& s, const std::string& provider) {
     return s.providers.at(provider).default_model;
 }
 
+namespace {
+
+std::optional<json> read_store(const fs::path& path) {
+    const auto text = read_file(path);
+    if (!text) {
+        std::error_code ec;
+        if (fs::exists(path, ec) || ec) return std::nullopt;
+        return json::object();
+    }
+    auto data = json::parse(*text, nullptr, false, true);
+    if (!data.is_object()) return std::nullopt;
+    return data;
+}
+
+bool write_store(const fs::path& path, const json& data) {
+    auto temporary = path;
+    temporary += ".tmp";
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+    out << data.dump(2) << '\n';
+    out.close();
+    if (out && MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return true;
+    }
+    std::error_code ec;
+    fs::remove(temporary, ec);
+    return false;
+}
+
+template <class Update>
+bool update_store(const fs::path& path, Update update) {
+    if (path.empty()) return false;
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    if (ec) return false;
+    auto lock_path = path;
+    lock_path += ".lock";
+    const file_lock lock(lock_path);
+    if (!lock) return false;
+    auto data = read_store(path);
+    if (!data) return false;
+    const auto changed = update(*data);
+    return changed && (!*changed || write_store(path, *data));
+}
+
+bool valid_api_key(std::string_view key) {
+    return !key.empty() && key.find_first_of("\r\n") == std::string_view::npos && key.find('\0') == std::string_view::npos;
+}
+
+} // namespace
+
 std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out) {
     const auto it = s.providers.find(name);
     if (it == s.providers.end()) return "Unknown provider: " + name;
     const auto& e = it->second;
+    out = {};
     out.name = e.name;
     out.kind = e.kind;
     out.base_url = e.base_url;
-
-    // Priority 1: Direct API key in config file
+    out.bearer = e.auth == credential_mode::bearer;
+    if (e.base_url.empty()) return "No base_url for " + name + " in user .ode/settings.json.";
+    if (e.auth == credential_mode::none) return std::nullopt;
     if (!e.api_key.empty()) {
+        if (!valid_api_key(e.api_key)) return "Invalid api_key for " + name + " in user .ode/settings.json.";
         out.api_key = e.api_key;
         return std::nullopt;
     }
-
-    // Priority 2: Environment variable
-    if (!e.api_key_env.empty() && !env(e.api_key_env).empty()) {
-        out.api_key = env(e.api_key_env);
-        return std::nullopt;
-    }
-
-    // Priority 3: Auth token environment variable
-    if (!e.auth_token_env.empty() && !env(e.auth_token_env).empty()) {
-        out.api_key = env(e.auth_token_env);
-        out.bearer = true;
-        return std::nullopt;
-    }
-
-    // Priority 4: Windows Credential Manager
-#ifdef _WIN32
-    PCREDENTIALW cred = nullptr;
-    const auto target = widen("ode/" + name);
-    if (CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &cred)) {
-        std::unique_ptr<CREDENTIALW, decltype(&CredFree)> owner(cred, CredFree);
-        out.api_key.assign(reinterpret_cast<const char*>(cred->CredentialBlob), cred->CredentialBlobSize);
-        return std::nullopt;
-    }
-#endif
-
-    // Priority 5: Unauthenticated (for local servers)
-    if (e.api_key_env.empty() && e.api_key.empty()) return std::nullopt;
-
-    // No API key found
-    return "No API key for " + name + ". Set " + e.api_key_env + " or run: ode login " + name;
+    if (e.auth == credential_mode::optional) return std::nullopt;
+    return "No API key for " + name + "; run ode login " + name + ".";
 }
 
-bool save_credential(const std::string& provider, const std::string& key) {
-#ifdef _WIN32
-    if (key.empty() || key.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE) return false;
-    auto target = widen("ode/" + provider);
-    CREDENTIALW cred{};
-    cred.Type = CRED_TYPE_GENERIC;
-    cred.TargetName = target.data();
-    cred.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<char*>(key.data()));
-    cred.CredentialBlobSize = static_cast<DWORD>(key.size());
-    cred.Persist = CRED_PERSIST_LOCAL_MACHINE;
-    return CredWriteW(&cred, 0) != 0;
-#else
-    (void)provider;
-    (void)key;
-    return false;
-#endif
-}
-
-bool save_provider_selection(const std::string& provider, const std::string& previous_provider, const fs::path& settings_path) {
-    json data = json::object();
-    if (const auto existing = read_file(settings_path)) {
-        data = json::parse(*existing, nullptr, false, true);
-        if (data.is_discarded() || !data.is_object()) return false;
-    }
-    const auto model = data.find("model");
-    const auto model_provider = data.find("model_provider");
-    if (model != data.end() && model->is_string() &&
-        (model_provider == data.end() || !model_provider->is_string())) {
-        const auto selected = data.find("provider");
-        data["model_provider"] = selected != data.end() && selected->is_string() ? selected->get<std::string>() : previous_provider;
-    }
-    data["provider"] = provider;
-
-    std::error_code ec;
-    fs::create_directories(settings_path.parent_path(), ec);
-    if (ec) return false;
-    auto temporary = settings_path;
-    temporary += ".tmp";
-    {
-        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-        if (!out) return false;
-        out << data.dump(2) << '\n';
-        out.flush();
-        if (!out) {
-            fs::remove(temporary, ec);
-            return false;
-        }
-    }
-    if (!MoveFileExW(temporary.c_str(), settings_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        fs::remove(temporary, ec);
-        return false;
-    }
+bool save_credential(settings& s, const std::string& provider, const std::string& key) {
+    const auto it = s.providers.find(provider);
+    if (it == s.providers.end() || it->second.auth == credential_mode::none ||
+        it->second.base_url.empty() || !valid_api_key(key)) return false;
+    if (!update_store(s.user_settings_path, [&](json& data) -> std::optional<bool> {
+        auto& providers = data["providers"];
+        if (!providers.is_null() && !providers.is_object()) return std::nullopt;
+        auto& entry = providers[provider];
+        if (!entry.is_null() && !entry.is_object()) return std::nullopt;
+        entry["api_key"] = key;
+        return true;
+    })) return false;
+    it->second.api_key = key;
     return true;
 }
 
-bool delete_credential(const std::string& provider) {
+bool delete_credential(settings& s, const std::string& provider) {
+    if (!update_store(s.user_settings_path, [&](json& data) -> std::optional<bool> {
+        const auto providers = data.find("providers");
+        if (providers == data.end() || !providers->is_object()) return false;
+        const auto entry = providers->find(provider);
+        return entry != providers->end() && entry->is_object() && entry->erase("api_key") != 0;
+    })) return false;
+    if (const auto it = s.providers.find(provider); it != s.providers.end()) it->second.api_key.clear();
+    return true;
+}
+
+bool import_windows_credential(settings& s, const std::string& provider) {
     const auto target = widen("ode/" + provider);
-    return CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0) != 0 || GetLastError() == ERROR_NOT_FOUND;
+    PCREDENTIALW credential = nullptr;
+    if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &credential)) return false;
+    std::string key(reinterpret_cast<const char*>(credential->CredentialBlob), credential->CredentialBlobSize);
+    CredFree(credential);
+    const bool saved = save_credential(s, provider, key);
+    SecureZeroMemory(key.data(), key.size());
+    return saved;
+}
+
+bool save_provider_selection(const std::string& provider, const fs::path& settings_path) {
+    return update_store(settings_path, [&](json& data) -> std::optional<bool> {
+        const auto model = data.find("model");
+        const auto model_provider = data.find("model_provider");
+        if (model != data.end() && model->is_string() &&
+            (model_provider == data.end() || !model_provider->is_string())) {
+            const auto selected = data.find("provider");
+            data["model_provider"] = selected != data.end() && selected->is_string() ? selected->get<std::string>() : "anthropic";
+        }
+        data["provider"] = provider;
+        return true;
+    });
 }
 
 std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& workspace) {

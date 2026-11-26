@@ -36,18 +36,20 @@ constexpr const char* usage_text =
     "  ode -p \"prompt\"           print mode: answer to stdout, tool calls to stderr\n"
     "  ode -c                    continue the most recent session here\n"
     "  ode --rpc                 RPC mode: JSONL protocol over stdin/stdout\n"
-    "  ode login [provider]      store an API key in Windows Credential Manager\n"
+    "  ode login [provider]      save or replace api_key in ~/.ode/settings.json\n"
+    "  ode login [provider] --import-windows-credential\n"
+    "                            import an old ode/<provider> Windows credential\n"
     "  ode logout [provider]     remove the saved API key\n"
     "  ode models                list available models from current provider\n"
     "\n"
     "  --model NAME              model id or alias (opus, sonnet, haiku, fable)\n"
-    "  --provider NAME           anthropic, openai, or one from settings.json\n"
+    "  --provider NAME           anthropic, openai, deepseek, or one from ~/.ode/settings.json\n"
     "  --permission MODE         plan | default | yolo\n"
     "  -C DIR                    workspace directory\n"
     "  --no-color                plain output (also NO_COLOR=1)\n"
     "  -v, --version\n"
     "\n"
-    "Settings: ~/.ode/settings.json, .claude/settings.json, .ode/settings.json\n";
+    "Provider settings: ~/.ode/settings.json, .ode/settings.json\n";
 
 std::vector<std::string> utf8_args(int argc, char** argv) {
 #ifdef _WIN32
@@ -100,6 +102,7 @@ int main(int argc, char** argv) {
     std::string prompt, model, provider_name, mode_text;
     fs::path workspace = fs::current_path();
     bool print = false, cont = false, login = false, logout = false, rpc_mode = false, list_models = false;
+    bool import_windows = false;
     if (const char* nc = std::getenv("NO_COLOR"); nc && *nc) ui::color_enabled() = false;
 
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -133,6 +136,8 @@ int main(int argc, char** argv) {
                 ui::color_enabled() = false;
             } else if (a == "login" && i == 0) {
                 login = true;
+            } else if (a == "--import-windows-credential" && login) {
+                import_windows = true;
             } else if (a == "logout" && i == 0) {
                 logout = true;
             } else if (a == "models" && i == 0) {
@@ -162,40 +167,45 @@ int main(int argc, char** argv) {
     a.permissions.deny = a.config.permission_deny;
     if (auto m = parse_mode(a.config.permission_mode)) a.permissions.set_mode(*m);
     for (const auto& w : a.config.warnings) ui::write_stream(true, "ode: " + w + "\n");
-    const auto configured_provider = a.config.provider;
     if (!provider_name.empty()) a.config.provider = provider_name;
 
     if (login || logout) {
         const auto name = prompt.empty() ? a.config.provider : prompt;
         if (name.find_first_of(" \t\r\n") != std::string::npos) return fail("expected a single provider name");
         if (logout) {
-            if (!delete_credential(name)) return fail("could not remove the saved key");
-            ui::write_stream(true, "Cleared Windows Credential Manager entry ode/" + name + "\n");
+            if (!delete_credential(a.config, name)) return fail("could not remove api_key from user .ode/settings.json");
+            ui::write_stream(true, "Removed saved key for " + name + "\n");
             return 0;
         }
-        if (!a.config.providers.contains(name)) return fail("unknown provider " + name);
-        provider_config saved;
-        if (!resolve_provider(a.config, name, saved)) {
-            if (!save_provider_selection(name, configured_provider, ode_home() / "settings.json")) {
-                return fail("saved credentials found, but could not persist the provider selection");
-            }
-            ui::write_stream(true, "Using saved credentials for " + name + "\n");
-            return 0;
+        const auto entry = a.config.providers.find(name);
+        if (entry == a.config.providers.end()) return fail("unknown provider " + name);
+        if (entry->second.auth == credential_mode::none) return fail(name + " is configured for unauthenticated access");
+        if (entry->second.base_url.empty()) return fail("configure base_url for " + name + " in ~/.ode/settings.json");
+        if (import_windows) {
+            if (!import_windows_credential(a.config, name)) return fail("could not import Windows credential ode/" + name);
+            ui::write_stream(true, "Imported credential for " + entry->second.base_url + "\n");
+        } else {
+            ui::write_stream(true, "API key for " + name + ": ");
+            const auto key = read_secret();
+            ui::write_stream(true, "\n");
+            if (!save_credential(a.config, name, key)) return fail("could not save api_key to user .ode/settings.json");
         }
-        ui::write_stream(true, "API key for " + name + ": ");
-        const auto key = read_secret();
-        ui::write_stream(true, "\n");
-        if (key.empty()) return fail("no key entered");
-        if (!save_credential(name, key)) return fail("could not save the key");
-        if (!save_provider_selection(name, configured_provider, ode_home() / "settings.json")) {
+        if (!save_provider_selection(name, a.config.user_settings_path)) {
             return fail("key saved, but could not persist the provider selection");
         }
-        ui::write_stream(true, "Saved credentials and selected " + name + "\n");
+        ui::write_stream(true, "Saved API key and selected " + name + "\n");
         return 0;
     }
 
-    // Initialize provider config early for commands that need it
-    if (auto error = resolve_provider(a.config, a.config.provider, a.provider_cfg)) return fail(*error);
+    // Piped stdin is part of the prompt, as in `git diff | ode -p \"review this\"`.
+    if (!list_models && !rpc_mode && !ui::stdin_is_terminal()) {
+        std::string piped((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
+        if (!piped.empty()) prompt = prompt.empty() ? piped : prompt + "\n\n" + piped;
+        print = true;
+    }
+    if (!a.config.providers.contains(a.config.provider)) return fail("Unknown provider: " + a.config.provider);
+    a.credential_error = resolve_provider(a.config, a.config.provider, a.provider_cfg);
+    if (a.credential_error && (list_models || rpc_mode || print)) return fail(*a.credential_error);
 
     if (list_models) {
         return cmd_models(a, "");
@@ -291,13 +301,6 @@ int main(int argc, char** argv) {
     a.core->system = build_system_prompt(workspace, shell_name(), load_memory(workspace));
     a.core->system += skills_system_prompt(a.skills);
 
-    // Piped stdin is part of the prompt, as in `git diff | ode -p "review this"`.
-    if (!ui::stdin_is_terminal()) {
-        std::string piped((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
-        if (!piped.empty()) prompt = prompt.empty() ? piped : prompt + "\n\n" + piped;
-        print = true;
-    }
-
     std::optional<fs::path> resume;
     if (cont) {
         const auto sessions = list_sessions(workspace);
@@ -326,13 +329,13 @@ int main(int argc, char** argv) {
     }
     if (!ui::terminal::interactive()) return fail("not a terminal; use ode -p \"...\"");
     try {
-        return run_interactive(a, prompt);
-    } catch (const std::exception& e) {
-        return fail(e.what());
         if (mode_text.empty()) {
             if (const auto saved = read_file(ode_home() / "permission_mode.txt")) {
                 if (auto mode = parse_mode(*saved)) a.permissions.set_mode(*mode);
             }
         }
+        return run_interactive(a, prompt);
+    } catch (const std::exception& e) {
+        return fail(e.what());
     }
 }

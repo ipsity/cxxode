@@ -179,8 +179,10 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 - 第三方依赖放在 `third_party/`，随仓库提交，构建时不联网下载。除 `third_party/lua/`（Lua 5.4 源码）外只允许单头文件。
 - 源码、测试、配置里不允许出现本机路径或用户名。运行时状态（会话、命令历史、主题选择、权限档位）只写到 `%USERPROFILE%\.ode\`，不写进工作区，也不进 git。各工作区共用 `command_history.txt`。
 - `/mode` 和 `Shift+Tab` 切换权限档位时保存选择。交互模式启动时按 `--permission`、上次选择、`permissions.defaultMode` 的顺序决定档位。打印和 RPC 模式沿用各自的启动规则。
-- 首次运行时没有任何配置文件也必须能启动。缺少密钥时给出一行可操作的提示，并以退出码 2 退出（2026-11-25 已用空 `USERPROFILE` 验证过）。
-- `ode login [provider]` 和 `ode logout [provider]` 管理 Windows 凭据管理器中的密钥。交互界面的 `/logout` 同时结束当前 provider 的登录状态。启动和 `/login` 按原优先级加载配置文件、环境变量和 Windows 凭据。推荐在 `providers.<name>.model` 设置默认模型。顶层 `model` 归属同一配置层选中的 provider，也可用 `model_provider` 指明归属。命令行 `--model` 只覆盖当次启动。
+- 首次运行没有密钥时，交互界面仍可打开并运行 `/login`，发起模型请求时提示登录。打印、RPC 和模型列表模式在凭据缺失时提示处理方式并以退出码 2 退出。
+- Provider 定义和地址取自内置默认值和 `%USERPROFILE%\.ode\settings.json`。工作区 `.ode/settings.json` 只能为已定义的 provider 选择 provider 和模型。`.claude` 的连接字段和 `ANTHROPIC_*`、`OPENAI_*`、`DEEPSEEK_*` 环境变量不参与连接解析。现有扩展及指令的加载规则继续适用。
+- `ode login [provider]` 和 `/login <provider>` 将密钥以明文写入 `%USERPROFILE%\.ode\settings.json` 的 `providers.<name>.api_key`。这个字段仅在用户级配置生效。`ode logout [provider]` 和 `/logout [provider]` 删除该字段。旧 Windows 凭据可通过 `ode login [provider] --import-windows-credential` 显式导入。
+- 推荐在 `providers.<name>.model` 设置默认模型。顶层 `model` 归属同一配置层选中的 provider，也可用 `model_provider` 指明归属。命令行 `--model` 只覆盖当次启动。
 - Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。
 - 用 CI 的 `windows-latest` 干净镜像代替"另一台机器"做验证，不搭虚拟机。
 - `v*` tag 的构建通过后，GitHub Actions 发布仅含 `ode.exe` 的 `ode-<tag>-windows-x64.zip`。

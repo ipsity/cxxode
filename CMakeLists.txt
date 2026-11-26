@@ -96,7 +96,7 @@ endforeach()
 
 target_link_libraries(ode_platform PUBLIC ode_base winhttp)
 target_link_libraries(ode_ui PUBLIC ode_base)
-target_link_libraries(ode_config PUBLIC ode_base)
+target_link_libraries(ode_config PUBLIC ode_base PRIVATE ode_platform)
 target_link_libraries(ode_provider PUBLIC ode_config ode_platform)
 target_link_libraries(ode_tools PUBLIC ode_base ode_platform)
 target_link_libraries(ode_core PUBLIC ode_provider ode_tools)

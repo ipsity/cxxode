@@ -2,157 +2,89 @@
 #include "platform/http.hpp"
 
 namespace ode {
+namespace {
 
-std::vector<model_info> list_models(const provider_config& config) {
-    std::vector<model_info> models;
+std::vector<model_info> fallback_models(const provider_config& config) {
+    if (config.name == "anthropic" && config.kind == protocol::anthropic) {
+        return {
+            {"claude-opus-4-8", "Claude Opus 4.8", "Most capable model", 200000, true, true},
+            {"claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced performance", 200000, true, true},
+            {"claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast and efficient", 200000, true, true},
+        };
+    }
+    if (config.name == "openai") {
+        return {
+            {"gpt-5", "GPT-5", "Frontier model", 400000, true, true},
+            {"gpt-5-mini", "GPT-5 mini", "Faster, lower-cost model", 400000, true, true},
+            {"gpt-5-nano", "GPT-5 nano", "Smallest, fastest model", 400000, true, true},
+            {"gpt-4.1", "GPT-4.1", "Long-context model", 1047576, true, true},
+        };
+    }
+    if (config.name == "deepseek") {
+        return {
+            {"deepseek-flash", "DeepSeek Flash", "Fast general model", 1048576, true, true},
+            {"deepseek-v4-pro", "DeepSeek V4 Pro", "Flagship model", 1048576, false, true},
+        };
+    }
+    return {};
+}
 
+} // namespace
+
+model_list list_models(const provider_config& config) {
     http_request req;
+    req.method = "GET";
     req.headers = {{"accept", "application/json"}};
+    auto base = config.base_url;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+    const bool anthropic = config.kind == protocol::anthropic;
+    if (anthropic || !base.ends_with("/v1")) base += "/v1";
+    if (!anthropic && base == "https://api.deepseek.com/v1") base.resize(base.size() - 3);
+    req.url = base + "/models";
 
-    switch (config.kind) {
-        case protocol::anthropic:
-            // Anthropic doesn't have a public models list API, but try it anyway
-            // Some proxies (like PassionAPI) implement it
-            {
-                std::string base = config.base_url;
-                while (!base.empty() && base.back() == '/') base.pop_back();
-                req.url = base + "/v1/models";
-                req.method = "GET";
+    if (anthropic) req.headers.emplace_back("anthropic-version", "2023-06-01");
+    if (!config.api_key.empty()) {
+        if (anthropic && !config.bearer) req.headers.emplace_back("x-api-key", config.api_key);
+        else req.headers.emplace_back("authorization", "Bearer " + config.api_key);
+    }
 
-                if (!config.api_key.empty()) {
-                    if (config.bearer) {
-                        req.headers.emplace_back("authorization", "Bearer " + config.api_key);
-                    } else {
-                        req.headers.emplace_back("x-api-key", config.api_key);
-                    }
-                }
+    cancel_token cancel;
+    std::string body;
+    const auto result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
+    if (result.status != 200) {
+        const auto error = result.status == 0 ? "无法连接模型列表接口" : "模型列表请求失败（HTTP " + std::to_string(result.status) + "）";
+        return {fallback_models(config), error};
+    }
 
-                cancel_token cancel;
-                std::string body;
-                http_result result;
-                try {
-                    result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
-                } catch (...) {
-                    // Use the official model fallback when the model endpoint is unreachable.
-                }
-
-                if (result.status == 200) {
-                    try {
-                        auto data = json::parse(body);
-                        if (data.contains("data") && data["data"].is_array()) {
-                            for (const auto& m : data["data"]) {
-                                model_info info;
-                                info.id = m.value("id", "");
-                                info.name = m.value("display_name", info.id);
-                                if (m.contains("context_window")) {
-                                    info.context_window = m["context_window"];
-                                } else if (m.contains("context_length")) {
-                                    info.context_window = m["context_length"];
-                                } else {
-                                    info.context_window = known_model_context_window(config, info.id);
-                                }
-                                info.supports_vision = info.id.find("claude") != std::string::npos;
-                                info.supports_tools = true;
-                                if (!info.id.empty()) {
-                                    models.push_back(std::move(info));
-                                }
-                            }
-                        }
-                    } catch (...) {}
-                }
-
-                // Fallback to known Anthropic models if API call failed
-                if (models.empty()) {
-                    models = {
-                        {"claude-opus-4-8", "Claude Opus 4.8", "Most capable model", 200000, true, true},
-                        {"claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced performance", 200000, true, true},
-                        {"claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast and efficient", 200000, true, true},
-                    };
+    std::vector<model_info> models;
+    const auto data = json::parse(body, nullptr, false);
+    if (const auto entries = data.find("data"); entries != data.end() && entries->is_array()) {
+        for (const auto& model : *entries) {
+            if (!model.is_object()) continue;
+            const auto id = model.find("id");
+            if (id == model.end() || !id->is_string() || id->get_ref<const std::string&>().empty()) continue;
+            model_info info;
+            info.id = id->get_ref<const std::string&>();
+            const auto display_name = model.find("display_name");
+            info.name = display_name != model.end() && display_name->is_string()
+                ? display_name->get_ref<const std::string&>() : info.id;
+            info.context_window = known_model_context_window(config, info.id);
+            for (const auto* key : {"context_window", "context_length"}) {
+                const auto window = model.find(key);
+                if (window != model.end() && window->is_number_integer() && *window > 0) {
+                    info.context_window = window->get<std::size_t>();
+                    break;
                 }
             }
-            break;
-
-        case protocol::openai_chat:
-        case protocol::openai_responses: {
-            // OpenAI and compatible providers have /v1/models endpoint
-            std::string base = config.base_url;
-            while (!base.empty() && base.back() == '/') base.pop_back();
-            if (config.name == "deepseek" && base.ends_with("/v1")) {
-                base.resize(base.size() - 3);
-            } else if (!base.ends_with("/v1")) {
-                base += "/v1";
-            }
-            req.method = "GET";
-            req.url = base + "/models";
-
-            if (!config.api_key.empty()) {
-                req.headers.emplace_back("authorization", "Bearer " + config.api_key);
-            }
-
-            cancel_token cancel;
-            std::string body;
-            http_result result;
-            try {
-                result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
-            } catch (...) {
-                // Use provider model fallbacks when model discovery is unreachable.
-            }
-
-            if (result.status == 200) {
-                try {
-                    auto data = json::parse(body);
-                    if (data.contains("data") && data["data"].is_array()) {
-                        for (const auto& m : data["data"]) {
-                            model_info info;
-                            info.id = m.value("id", "");
-                            info.name = info.id;
-
-                            if (m.contains("context_window")) {
-                                info.context_window = m["context_window"];
-                            } else if (m.contains("context_length")) {
-                                info.context_window = m["context_length"];
-                            } else {
-                                info.context_window = known_model_context_window(config, info.id);
-                            }
-
-                            // Guess capabilities from model name
-                            const auto& id = info.id;
-                            info.supports_vision = id.find("vision") != std::string::npos ||
-                                                   id.starts_with("gpt-4.1") || id.starts_with("gpt-5") ||
-                                                   id.find("gpt-4o") != std::string::npos ||
-                                                   id.find("claude") != std::string::npos;
-                            info.supports_tools = true; // Most modern models support tools
-
-                            if (!info.id.empty()) {
-                                models.push_back(std::move(info));
-                            }
-                        }
-                    }
-                } catch (...) {
-                    // Parse error, return empty list
-                }
-            }
-
-            // If API call failed or returned no models, provide defaults
-            if (models.empty()) {
-                if (config.name == "openai") {
-                    models = {
-                        {"gpt-5", "GPT-5", "Frontier model", 400000, true, true},
-                        {"gpt-5-mini", "GPT-5 mini", "Faster, lower-cost model", 400000, true, true},
-                        {"gpt-5-nano", "GPT-5 nano", "Smallest, fastest model", 400000, true, true},
-                        {"gpt-4.1", "GPT-4.1", "Long-context model", 1047576, true, true},
-                    };
-                } else if (config.name == "deepseek") {
-                    models = {
-                        {"deepseek-flash", "DeepSeek Flash", "Fast general model", 1048576, true, true},
-                        {"deepseek-v4-pro", "DeepSeek V4 Pro", "Flagship model", 1048576, false, true},
-                    };
-                }
-            }
-            break;
+            info.supports_vision = info.id.find("claude") != std::string::npos || (!anthropic &&
+                (info.id.find("vision") != std::string::npos || info.id.starts_with("gpt-4.1") ||
+                 info.id.starts_with("gpt-5") || info.id.find("gpt-4o") != std::string::npos));
+            info.supports_tools = true;
+            models.push_back(std::move(info));
         }
     }
-    return models;
+    if (models.empty()) return {fallback_models(config), "模型列表接口未返回可用模型"};
+    return {std::move(models), {}};
 }
 
 std::size_t known_model_context_window(const provider_config& config, std::string_view model) {

@@ -6,6 +6,8 @@
 #include "provider/models.hpp"
 #include "ui/theme.hpp"
 
+#include <algorithm>
+#include <charconv>
 #include <iostream>
 
 namespace ode {
@@ -244,65 +246,51 @@ bool interactive_ui::command(const std::string& line) {
         if (restored.empty()) note("没有可撤销的改动");
         for (const auto& p : restored) note("已恢复 " + p);
     } else if (name == "/model") {
-        if (arg.empty()) {
-            // Show interactive model selector
-            const auto models = list_models(app_.provider_cfg);
-            if (models.empty()) {
-                note("无可用模型或 provider 不支持列表", tone::error);
+        if (arg.empty() || arg.find_first_not_of("0123456789") == std::string::npos) {
+            auto available = app_.credential_error ? model_list{{}, *app_.credential_error} : list_models(app_.provider_cfg);
+            auto& models = available.models;
+            if (!available.error.empty()) {
+                note(available.error, tone::error);
+                for (const auto& id : {core.model, resolve_model_alias(configured_model(app_.config, app_.config.provider))}) {
+                    if (id.empty() || std::ranges::find(models, id, &model_info::id) != models.end()) continue;
+                    models.push_back({id, id, "配置中的模型", known_model_context_window(app_.provider_cfg, id)});
+                }
+            }
+            const auto select_model = [this](const model_info& model) {
+                app_.set_model(model.id, model.context_window);
+                note("✓ Switched to model: " + app_.core->model);
+            };
+            if (!arg.empty()) {
+                std::size_t num = 0;
+                const auto parsed = std::from_chars(arg.data(), arg.data() + arg.size(), num);
+                if (parsed.ec == std::errc{} && num > 0 && num <= models.size()) select_model(models[num - 1]);
+                else note("模型编号无效，也可用 /model <模型 ID>", tone::error);
+            } else if (models.empty()) {
+                note("可用 /model <模型 ID> 手动指定模型", tone::dim);
             } else {
-                // Build selection items
                 std::vector<std::string> items;
                 std::vector<std::string> details;
                 std::size_t current_index = 0;
-
                 for (std::size_t i = 0; i < models.size(); ++i) {
-                    items.push_back(models[i].id);
-
-                    std::string detail;
-                    if (!models[i].description.empty()) {
-                        detail = models[i].description;
-                    }
-                    if (models[i].context_window > 0) {
+                    const auto& model = models[i];
+                    items.push_back(model.id);
+                    auto detail = model.description;
+                    if (model.context_window > 0) {
                         if (!detail.empty()) detail += " ";
-                        detail += "(" + (models[i].context_window >= 1000000
-                            ? std::to_string(models[i].context_window / 1000000) + "M"
-                            : std::to_string(models[i].context_window / 1000) + "k") + ")";
+                        detail += "(" + (model.context_window >= 1000000
+                            ? std::to_string(model.context_window / 1000000) + "M"
+                            : std::to_string(model.context_window / 1000) + "k") + ")";
                     }
-                    // Set current model as default selection
-                    if (models[i].id == core.model) {
-                        current_index = i;
-                    }
-                    details.push_back(detail);
+                    if (model.id == core.model) current_index = i;
+                    details.push_back(std::move(detail));
                 }
-
-                // Show selection UI
-                selection_ = {
-                    items,
-                    details,
-                    current_index,
-                    "Select a model from " + app_.config.provider + ":",
-                    [this, models](std::size_t index) {
-                        app_.set_model(models[index].id, models[index].context_window);
-                        note("✓ Switched to model: " + app_.core->model);
-                    },
-                    []() { /* Cancel - do nothing */ }
-                };
+                selection_ = {std::move(items), std::move(details), current_index,
+                              "Select a model from " + app_.config.provider + ":",
+                              [models = std::move(models), select_model](std::size_t index) { select_model(models[index]); }, {}};
             }
         } else {
-            // Direct selection by number or name
-            try {
-                const auto num = std::stoul(arg);
-                const auto models = list_models(app_.provider_cfg);
-                if (num > 0 && num <= models.size()) {
-                    app_.set_model(models[num - 1].id, models[num - 1].context_window);
-                    note("✓ Switched to model: " + core.model);
-                } else {
-                    note("Invalid model number", tone::error);
-                }
-            } catch (...) {
-                app_.set_model(arg);
-                note("✓ Switched to model: " + core.model);
-            }
+            app_.set_model(arg);
+            note("✓ Switched to model: " + core.model);
         }
     } else if (name == "/mode") {
         if (auto m = parse_mode(arg)) set_permission_mode(*m);
@@ -417,7 +405,8 @@ void interactive_ui::login_command(std::string_view arg) {
     }
 
     const auto [name, key] = split(std::string(arg));
-    if (!app_.config.providers.contains(name)) {
+    const auto entry = app_.config.providers.find(name);
+    if (entry == app_.config.providers.end()) {
         note("未知 provider，输入 /login 查看可选项", tone::error);
         return;
     }
@@ -425,25 +414,22 @@ void interactive_ui::login_command(std::string_view arg) {
         note("API 密钥应为单行", tone::error);
         return;
     }
-    if (!key.empty()) {
+    if (entry->second.base_url.empty()) {
+        note("请在用户 .ode/settings.json 配置 " + name + " 的 base_url", tone::error);
+    } else if (entry->second.auth == credential_mode::none) {
+        switch_to_saved_provider(name);
+    } else if (!key.empty()) {
         login_ = login_state{name, key};
         save_login();
-    } else if (!switch_to_saved_provider(name)) {
+    } else {
         login_ = login_state{name, {}};
     }
 }
 
 bool interactive_ui::switch_to_saved_provider(const std::string& name) {
-    provider_config resolved;
-    if (resolve_provider(app_.config, name, resolved)) return false;
-
-    const auto previous_provider = app_.config.provider;
-    const bool switching = name != previous_provider;
-    if (auto error = app_.use_provider(name)) {
-        note("无法切换 provider：" + *error, tone::error);
-        return true;
-    }
-    if (!save_provider_selection(name, previous_provider, ode_home() / "settings.json")) {
+    const bool switching = name != app_.config.provider;
+    if (app_.use_provider(name)) return false;
+    if (!save_provider_selection(name, app_.config.user_settings_path)) {
         note("provider 已切换，但无法保存默认选择", tone::error);
     }
     note((switching ? "已切换到 " : "当前 provider：") + name + "，模型：" + app_.core->model, tone::accent);
@@ -458,22 +444,17 @@ void interactive_ui::save_login() {
 
     auto [name, key] = std::move(*login_);
     login_.reset();
-    if (!save_credential(name, key)) {
-        note("保存 Windows 凭据失败，请重新输入 /login", tone::error);
+    if (!save_credential(app_.config, name, key)) {
+        note("无法将密钥保存到用户 .ode/settings.json", tone::error);
         return;
     }
 
-    provider_config resolved;
-    if (!resolve_provider(app_.config, name, resolved) && resolved.api_key != key) {
-        note(name + " 仍优先使用配置文件或环境变量中的密钥");
-    }
-    const auto previous_provider = app_.config.provider;
-    const bool switching = name != previous_provider;
+    const bool switching = name != app_.config.provider;
     if (auto error = app_.use_provider(name)) {
         note("密钥已保存，但切换 provider 失败：" + *error, tone::error);
         return;
     }
-    if (!save_provider_selection(name, previous_provider, ode_home() / "settings.json")) {
+    if (!save_provider_selection(name, app_.config.user_settings_path)) {
         note("密钥已保存并已切换，但无法保存默认 provider", tone::error);
         return;
     }
@@ -486,8 +467,8 @@ void interactive_ui::logout_command(std::string_view arg) {
         return;
     }
     const auto name = arg.empty() ? app_.config.provider : std::string(arg);
-    if (!delete_credential(name)) {
-        note("清除 Windows 凭据失败", tone::error);
+    if (!delete_credential(app_.config, name)) {
+        note("无法从用户 .ode/settings.json 删除密钥", tone::error);
         return;
     }
 
@@ -496,11 +477,7 @@ void interactive_ui::logout_command(std::string_view arg) {
         app_.provider_cfg.bearer = false;
         app_.credential_error = "当前会话已退出，输入 /login 重新登录";
     }
-    note("已清除 " + name + " 的 Windows 凭据", tone::accent);
-    provider_config resolved;
-    if (!resolve_provider(app_.config, name, resolved) && !resolved.api_key.empty()) {
-        note(name + " 的外部密钥会在重新登录或启动时加载");
-    }
+    note("已删除 " + name + " 的密钥", tone::accent);
 }
 
 bool interactive_ui::user_command(const std::string& line) {

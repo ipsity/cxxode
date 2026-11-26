@@ -10,16 +10,13 @@ int cmd_models(app& a, const std::string&) {
     // List available models for current provider
     ui::write_stream(false, "Fetching models from " + a.config.provider + "...\n");
 
-    const auto models = list_models(a.provider_cfg);
-
-    if (models.empty()) {
-        ui::write_stream(true, "No models found or provider doesn't support listing.\n");
-        return 1;
-    }
+    const auto available = list_models(a.provider_cfg);
+    if (!available.error.empty()) ui::write_stream(true, available.error + '\n');
+    if (available.models.empty()) return 1;
 
     ui::write_stream(false, "\nAvailable models:\n\n");
 
-    for (const auto& m : models) {
+    for (const auto& m : available.models) {
         std::string line = "  " + m.id;
         if (!m.description.empty()) {
             line += "  - " + m.description;

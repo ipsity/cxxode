@@ -18,8 +18,12 @@ struct model_info {
     bool supports_tools = false;
 };
 
-// List available models from a provider
-std::vector<model_info> list_models(const provider_config& config);
+struct model_list {
+    std::vector<model_info> models;
+    std::string error;
+};
+
+model_list list_models(const provider_config& config);
 std::size_t known_model_context_window(const provider_config& config, std::string_view model);
 
 } // namespace ode
