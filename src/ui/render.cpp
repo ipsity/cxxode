@@ -18,6 +18,8 @@ std::string sgr(tone t) {
         case tone::accent: return "\x1b[0;38;2;0;212;255m";
         case tone::accent_bold: return "\x1b[0;1;38;2;0;212;255m";
         case tone::error: return "\x1b[0;38;2;255;95;95m";
+        case tone::diff_added: return "\x1b[0;38;2;142;230;174;48;2;22;54;42m";
+        case tone::diff_removed: return "\x1b[0;38;2;255;165;168;48;2;70;29;36m";
     }
     return {};
 }
@@ -52,6 +54,8 @@ std::vector<std::string> layout(const std::vector<span>& spans, int columns, con
     for (const auto& s : spans) {
         std::size_t i = 0;
         const auto text = text::expand_tabs(s.text);
+        const auto boundaries = text::is_ascii(text) ? std::vector<text::cell>{} : text::cells(text);
+        auto boundary = boundaries.begin();
         while (i < text.size()) {
             if (text[i] == '\n') {
                 finish_row();
@@ -65,7 +69,8 @@ std::vector<std::string> layout(const std::vector<span>& spans, int columns, con
             } else if (static_cast<unsigned char>(text[i]) < 0x80) {
                 while (j < text.size() && text[j] != ' ' && text[j] != '\n' && static_cast<unsigned char>(text[j]) < 0x80) ++j;
             } else {
-                j = text::next_boundary(text, i);
+                while (boundary != boundaries.end() && boundary->offset <= i) ++boundary;
+                j = boundary == boundaries.end() ? text.size() : boundary->offset;
                 while (j < text.size() && (static_cast<unsigned char>(text[j]) & 0xC0) == 0x80) ++j;
             }
             const auto word = std::string_view(text).substr(i, j - i);
@@ -80,12 +85,14 @@ std::vector<std::string> layout(const std::vector<span>& spans, int columns, con
             }
             if (used + w > limit) {
                 // Longer than a row: split by grapheme.
-                for (const auto& c : text::cells(word)) {
-                    const auto piece = word.substr(c.offset, text::next_boundary(word, c.offset) - c.offset);
-                    if (used + c.width > limit && row_has_text) finish_row();
+                const auto cells = text::cells(word);
+                for (auto cell = cells.begin(); cell != cells.end(); ++cell) {
+                    const auto next = cell + 1;
+                    const auto end = next == cells.end() ? word.size() : next->offset;
+                    if (used + cell->width > limit && row_has_text) finish_row();
                     set_tone(s.style);
-                    row += piece;
-                    used += c.width;
+                    row += word.substr(cell->offset, end - cell->offset);
+                    used += cell->width;
                     row_has_text = true;
                 }
             } else {

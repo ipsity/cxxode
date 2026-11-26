@@ -92,6 +92,7 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         if (events.request_started) events.request_started();
         stream_events stream;
         stream.text = events.text;
+        if (events.tool_preparing) stream.tool_started = events.tool_preparing;
         stream.thinking = [&events](std::string_view text, std::string_view sig) {
             if (events.thinking) events.thinking(text, sig);
         };

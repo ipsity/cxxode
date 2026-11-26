@@ -60,6 +60,7 @@ void interactive_ui::apply(ev_text& e) {
         if (first == std::string::npos) return;
         e.text.erase(0, first);
     }
+    section("assistant");
     stream_ += e.text;
     flush_stream(false);
 }
@@ -107,17 +108,74 @@ void interactive_ui::apply(ev_thinking& e) {
     }
 }
 
+void interactive_ui::apply(ev_request&) {
+    flush_thinking(true);
+    flush_stream(true);
+    preparing_tool_.clear();
+    thinking_ = true;
+}
+
+void interactive_ui::apply(ev_tool_preparing& e) {
+    preparing_tool_ = std::move(e.name);
+    thinking_ = false;
+}
+
+void interactive_ui::show_shell_command(std::string_view command) {
+    if (command.empty()) return;
+    section("tool");
+    const ui::prefix first{"   " + paint(tone::dim, "│ $ "), 7};
+    const ui::prefix next{"   " + paint(tone::dim, "│   "), 7};
+    screen_.commit(ui::layout({{std::string(command), tone::accent}}, size_.columns - 1, first, next));
+}
+
+std::vector<std::string> interactive_ui::tool_detail_rows(std::string_view line, tone style) const {
+    if (line.ends_with('\r')) line.remove_suffix(1);
+    if (const auto last = line.rfind('\r'); last != std::string_view::npos) line.remove_prefix(last + 1);
+    const auto prefix = "   " + paint(tone::dim, "│ ");
+    auto rows = text::wrap_line(line, size_.columns - 6);
+    for (auto& row : rows) row = prefix + paint(style, row);
+    return rows;
+}
+
+void interactive_ui::flush_command_output(bool all) {
+    std::size_t start = 0;
+    for (auto end = progress_tail_.find('\n'); end != std::string::npos; end = progress_tail_.find('\n', start)) {
+        screen_.commit(tool_detail_rows(std::string_view(progress_tail_).substr(start, end - start), tone::dim));
+        start = end + 1;
+    }
+    progress_tail_.erase(0, start);
+    if (all && !progress_tail_.empty()) {
+        screen_.commit(tool_detail_rows(progress_tail_, tone::dim));
+        progress_tail_.clear();
+    }
+}
+
 void interactive_ui::apply(ev_tool_start& e) {
+    preparing_tool_.clear();
     thinking_ = false;
     flush_thinking(true);
     flush_stream(true);
     running_.push_back({e.name, e.label, steady::now()});
-    progress_tail_.clear();
+    if (e.name == "Bash") {
+        command_output_bytes_ = 0;
+        command_output_truncated_ = false;
+        show_shell_command(e.command);
+    }
 }
 
 void interactive_ui::apply(ev_progress& e) {
-    progress_tail_ += e.text;
-    if (progress_tail_.size() > 4096) progress_tail_.erase(0, progress_tail_.size() - 4096);
+    constexpr std::size_t output_limit = 30000;
+    if (command_output_truncated_) return;
+    auto count = std::min(e.text.size(), output_limit - command_output_bytes_);
+    if (count < e.text.size()) {
+        while (count > 0 && (static_cast<unsigned char>(e.text[count]) & 0xc0) == 0x80) --count;
+        command_output_truncated_ = true;
+    }
+    progress_tail_.append(e.text, 0, count);
+    command_output_bytes_ += count;
+    flush_command_output(command_output_truncated_);
+    if (command_output_truncated_)
+        screen_.commit(tool_detail_rows("… 输出已截断，Ctrl+O 查看工具保留的输出", tone::dim));
 }
 
 void interactive_ui::apply(ev_tool_done& e) {
@@ -127,9 +185,9 @@ void interactive_ui::apply(ev_tool_done& e) {
             break;
         }
     }
-    if (running_.empty()) progress_tail_.clear();
+    const bool bash = e.name == "Bash";
+    if (bash) flush_command_output(true);
 
-    // Day 8: Record tool usage for suggestion learning
     app_.suggestion_engine.record_tool_use(e.name);
 
     section("tool");
@@ -137,26 +195,22 @@ void interactive_ui::apply(ev_tool_done& e) {
     const auto head = std::string(ui::verb(e.name));
     const auto summary = e.summary.empty() ? std::string{} : "  " + e.summary;
     const int fixed = 4 + text::width(head) + text::width(summary);
-    const auto label = text::keep_head(e.label, std::max(8, columns - fixed));
+    const auto label = bash ? std::string{} : text::keep_head(e.label, std::max(8, columns - fixed));
     const auto dot = paint(e.error ? tone::error : tone::dim, "●");
 
-    // Show tool completion with label (command/file)
-    screen_.commit(" " + dot + " " + paint(tone::dim, head + " ") + paint(tone::accent, label) + paint(e.error ? tone::error : tone::dim, summary));
+    screen_.commit(" " + dot + " " + paint(tone::dim, head) +
+                   (label.empty() ? "" : " " + paint(tone::accent, label)) + paint(e.error ? tone::error : tone::dim, summary));
 
-    // Show full command for Bash
-    if (e.name == "Bash" && !e.label.empty() && e.label.size() < 200) {
-        screen_.commit("   " + paint(tone::dim, "│ $ ") + paint(tone::accent, e.label));
-    }
-
-    // Show detail (diff/output)
     if (!e.detail.empty()) {
         std::size_t start = 0;
         while (start < e.detail.size()) {
             auto end = e.detail.find('\n', start);
             if (end == std::string::npos) end = e.detail.size();
             const auto line = std::string_view(e.detail).substr(start, end - start);
-            const auto t = line.starts_with("-") ? tone::error : line.starts_with("+") ? tone::accent : tone::dim;
-            screen_.commit("   " + paint(tone::dim, "│ ") + paint(t, text::keep_head(text::expand_tabs(line), columns - 6)));
+            auto style = tone::dim;
+            if (line.starts_with("- ")) style = tone::diff_removed;
+            else if (line.starts_with("+ ")) style = tone::diff_added;
+            screen_.commit(tool_detail_rows(line, style));
             start = end + 1;
         }
     }
@@ -167,7 +221,7 @@ void interactive_ui::apply(ev_tool_done& e) {
         auto error_info = app_.error_handler_.analyze(e.full, e.name, e.label);
 
         // Show friendly error message
-        if (e.name != "Bash") {
+        if (!bash) {
             screen_.commit("   " + paint(tone::error, "❌ " + error_info.friendly_message));
         }
 
@@ -182,9 +236,8 @@ void interactive_ui::apply(ev_tool_done& e) {
             }
         }
 
-        // For Bash, still show original output (more context needed)
-        if (e.name == "Bash") {
-            note(text::keep_head(ui::one_line(e.full), columns - 4), tone::error);
+        if (bash && command_output_bytes_ == 0) {
+            note(e.full, tone::error);
         }
     }
     last_tool_full_ = e.full;
@@ -195,6 +248,7 @@ void interactive_ui::apply(ev_ask& e) {
         e.reply->set_value(answer::no);
         return;
     }
+    preparing_tool_.clear();
     flush_thinking(true);
     flush_stream(true);
 
@@ -255,8 +309,9 @@ void interactive_ui::apply(ev_notice& e) {
 void interactive_ui::apply(ev_done& e) {
     flush_thinking(true);
     flush_stream(true);
+    flush_command_output(true);
     running_.clear();
-    progress_tail_.clear();
+    preparing_tool_.clear();
     busy_ = false;
     thinking_ = false;
     if (worker_.joinable()) worker_.join();

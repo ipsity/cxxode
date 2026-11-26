@@ -17,6 +17,7 @@ struct agent_events {
     std::function<void()> request_started;
     std::function<void(std::string_view)> text;
     std::function<void(std::string_view text, std::string_view signature)> thinking;
+    std::function<void(std::string_view)> tool_preparing;
     std::function<void(const tool&, const json& input)> tool_started;
     std::function<void(std::string_view)> tool_progress;
     std::function<void(const tool&, const json& input, const tool_output&)> tool_finished;

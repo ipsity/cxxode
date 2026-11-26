@@ -77,14 +77,27 @@ TEST_CASE("edit preserves CRLF, requires uniqueness and backs up") {
     CHECK_FALSE(r.is_error);
     CHECK(f.dir.get("c.txt") == "a = 2\r\nb = 1\r\n");
     CHECK(r.summary == "+2 -2");
+    CHECK(r.detail == "- a = 1\n- b\n+ a = 2\n+ b\n");
     r = f.run("Edit", {{"file_path", "c.txt"}, {"old_string", " = "}, {"new_string", ": "}, {"replace_all", true}});
     CHECK(f.dir.get("c.txt") == "a: 2\r\nb: 1\r\n");
 
-    f.run("Write", {{"file_path", "new/d.txt"}, {"content", "x"}});
+    r = f.run("Write", {{"file_path", "new/d.txt"}, {"content", "x"}});
     CHECK(f.dir.get("new/d.txt") == "x");
+    CHECK(r.detail == "+ x\n");
     restore(f.backup, f.dir.path);
     CHECK(f.dir.get("c.txt") == "a = 1\r\nb = 1\r\n");
     CHECK_FALSE(fs::exists(f.dir.path / "new/d.txt"));
+}
+
+TEST_CASE("overwrite preview includes additions after many removed lines") {
+    fixture f;
+    f.dir.put("m.txt", "header\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\nfooter\r\n");
+    auto r = f.run("Write", {{"file_path", "m.txt"}, {"content", "header\r\nnew\r\nfooter\r\n"}});
+    REQUIRE_FALSE(r.is_error);
+    CHECK(r.detail.starts_with("- 1\n"));
+    CHECK(r.detail.ends_with("… -1 more lines\n+ new\n"));
+    CHECK(r.detail.find("header") == std::string::npos);
+    CHECK(r.detail.find("footer") == std::string::npos);
 }
 
 TEST_CASE("edit refuses a file changed since it was read") {

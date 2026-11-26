@@ -20,9 +20,8 @@ void remember(tool_context& ctx, const fs::path& path) {
     if (auto s = stamp(path)) (*ctx.seen)[path] = *s;
 }
 
-void back_up(tool_context& ctx, const fs::path& path) {
-    if (!ctx.backup || ctx.backup->originals.contains(path)) return;
-    ctx.backup->originals[path] = fs::exists(path) ? read_file(path) : std::nullopt;
+void back_up(tool_context& ctx, const fs::path& path, std::optional<std::string> original) {
+    if (ctx.backup) ctx.backup->originals.try_emplace(path, std::move(original));
 }
 
 bool write_all(const fs::path& path, const std::string& content) {
@@ -38,31 +37,63 @@ std::size_t count_lines(std::string_view text) {
     return static_cast<std::size_t>(std::count(text.begin(), text.end(), '\n')) + (text.back() == '\n' ? 0 : 1);
 }
 
-// Short preview of a replacement for the UI: removed then added lines, at most 8.
 std::string preview(std::string_view removed, std::string_view added) {
     std::string out;
-    int shown = 0, hidden = 0;
     const auto emit = [&](std::string_view text, char sign) {
-        std::size_t start = 0;
-        while (start < text.size()) {
-            auto end = text.find('\n', start);
-            if (end == std::string_view::npos) end = text.size();
-            if (shown < 8) {
-                out += sign;
-                out += ' ';
-                out.append(text.substr(start, end - start));
-                out += '\n';
-                ++shown;
-            } else {
-                ++hidden;
+        constexpr int max_preview_lines = 8;
+        int shown = 0;
+        while (!text.empty() && shown < max_preview_lines) {
+            const auto end = text.find('\n');
+            auto line = text.substr(0, end);
+            if (line.ends_with('\r')) line.remove_suffix(1);
+            auto length = std::min(line.size(), max_line_chars);
+            if (length < line.size()) {
+                while (length > 0 && (static_cast<unsigned char>(line[length]) & 0xc0) == 0x80) --length;
             }
-            start = end + 1;
+            out += sign;
+            out += ' ';
+            out.append(line.substr(0, length));
+            if (length < line.size()) out += "…";
+            out += '\n';
+            text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
+            ++shown;
+        }
+        if (!text.empty()) {
+            out += "… ";
+            out += sign;
+            out += std::to_string(count_lines(text)) + " more lines\n";
         }
     };
     emit(removed, '-');
     emit(added, '+');
-    if (hidden) out += "… " + std::to_string(hidden) + " more lines\n";
     return out;
+}
+
+std::string rewrite_preview(std::string_view before, std::string_view after) {
+    if (before.find('\0') != std::string_view::npos || after.find('\0') != std::string_view::npos)
+        return "Binary file; diff not shown.\n";
+    while (!before.empty() && !after.empty()) {
+        const auto line = [](std::string_view text) {
+            const auto end = text.find('\n');
+            return end == std::string_view::npos ? text : text.substr(0, end + 1);
+        };
+        const auto old_line = line(before);
+        if (old_line != line(after)) break;
+        before.remove_prefix(old_line.size());
+        after.remove_prefix(old_line.size());
+    }
+    while (!before.empty() && !after.empty()) {
+        const auto line = [](std::string_view text) {
+            if (text.size() <= 1) return text;
+            const auto start = text.rfind('\n', text.size() - 2);
+            return start == std::string_view::npos ? text : text.substr(start + 1);
+        };
+        const auto old_line = line(before);
+        if (old_line != line(after)) break;
+        before.remove_suffix(old_line.size());
+        after.remove_suffix(old_line.size());
+    }
+    return preview(before, after);
 }
 
 std::string replace_newlines(std::string_view text, bool crlf) {
@@ -132,12 +163,15 @@ tool_output write_tool(const json& input, tool_context& ctx) {
     if (!input.contains("content") || !input["content"].is_string()) return fail("content is required.");
     const auto content = input["content"].get<std::string>();
     const bool existed = fs::exists(path);
-    back_up(ctx, path);
+    auto original = existed ? read_file(path) : std::nullopt;
+    auto detail = rewrite_preview(original ? std::string_view(*original) : std::string_view{}, content);
+    if (existed && !original) detail.insert(0, "Original content could not be read.\n");
+    back_up(ctx, path, std::move(original));
     if (!write_all(path, content)) return fail("Could not write " + display_path(ctx.root, path));
     remember(ctx, path);
     const auto lines = count_lines(content);
     return {(existed ? "Overwrote " : "Created ") + display_path(ctx.root, path) + " (" + std::to_string(lines) + " lines).",
-            false, (existed ? "overwrote " : "created ") + std::to_string(lines) + " lines", {}};
+            false, (existed ? "overwrote " : "created ") + std::to_string(lines) + " lines", std::move(detail)};
 }
 
 tool_output edit_tool(const json& input, tool_context& ctx) {
@@ -174,7 +208,7 @@ tool_output edit_tool(const json& input, tool_context& ctx) {
         if (!all) break;
     }
     updated.append(*content, from);
-    back_up(ctx, path);
+    back_up(ctx, path, std::move(content));
     if (!write_all(path, updated)) return fail("Could not write " + display_path(ctx.root, path));
     remember(ctx, path);
 

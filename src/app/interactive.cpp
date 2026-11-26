@@ -5,6 +5,15 @@ namespace ode {
 
 using namespace std::chrono_literals;
 
+namespace {
+
+std::string_view bash_command(const json& input) {
+    const auto command = input.find("command");
+    return command != input.end() && command->is_string() ? command->get_ref<const std::string&>() : std::string_view{};
+}
+
+} // namespace
+
 interactive_ui::interactive_ui(app& a, ui::terminal& term) : app_(a), term_(term), screen_(term) {
     size_ = term_.dimensions();
     branch_ = git_branch(app_.root);
@@ -55,10 +64,16 @@ agent_events interactive_ui::make_events() {
     ev.thinking = [this](std::string_view text, std::string_view) {
         if (!text.empty()) push(ev_thinking{std::string(text)});
     };
-    ev.tool_started = [this](const tool& t, const json& in) { push(ev_tool_start{t.name, tool_label(t, in, app_.root)}); };
+    ev.tool_preparing = [this](std::string_view name) { push(ev_tool_preparing{std::string(name)}); };
+    ev.tool_started = [this](const tool& t, const json& in) {
+        const auto command = t.name == "Bash" ? bash_command(in) : std::string_view{};
+        const auto label = t.name == "Bash" ? ui::one_line(command) : tool_label(t, in, app_.root);
+        push(ev_tool_start{t.name, label, std::string(command)});
+    };
     ev.tool_progress = [this](std::string_view s) { push(ev_progress{std::string(s)}); };
     ev.tool_finished = [this](const tool& t, const json& in, const tool_output& o) {
-        push(ev_tool_done{t.name, tool_label(t, in, app_.root), o.summary, o.detail, o.text, o.is_error});
+        const auto label = t.name == "Bash" ? ui::one_line(bash_command(in)) : tool_label(t, in, app_.root);
+        push(ev_tool_done{t.name, label, o.summary, o.detail, o.text, o.is_error});
     };
     ev.ask = [this](const tool& t, const json& in) {
         auto promise = std::make_shared<std::promise<answer>>();
@@ -138,11 +153,7 @@ void interactive_ui::show_session_history() {
                 section("assistant");
                 print_markdown(block.text);
             } else if (block.type == block::kind::tool_use && block.name == "Bash") {
-                const auto command = block.input.find("command");
-                if (command != block.input.end() && command->is_string()) {
-                    section("tool");
-                    note("$ " + ui::one_line(command->get_ref<const std::string&>()));
-                }
+                show_shell_command(bash_command(block.input));
             }
         }
     }

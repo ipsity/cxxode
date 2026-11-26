@@ -25,7 +25,7 @@ namespace {
 
 const char* anthropic_tool_stream =
     "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n"
-    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"Well, \"}}\n\n"
     "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi \"}}\n\n"
     "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
     "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read\",\"input\":{}}}\n\n"
@@ -44,7 +44,8 @@ TEST_CASE("anthropic stream with tool call") {
     auto r = decode_stream(protocol::anthropic, full, ev);
     CHECK(r.complete);
     CHECK(r.stop == stop_reason::tool_use);
-    CHECK(shown == "Hi ");
+    CHECK(shown == "Well, Hi ");
+    CHECK(shown == r.content.plain_text());
     CHECK(r.tokens.input == 10);
     CHECK(r.tokens.output == 7);
     auto calls = r.content.tool_uses();

@@ -54,6 +54,7 @@ public:
                 b.type = block::kind::thinking;
             } else if (kind == "text") {
                 b.text = cb.value("text", "");
+                if (!b.text.empty() && events_.text) events_.text(b.text);
             } else {
                 b.type = block::kind::opaque;
                 b.name = "anthropic";
