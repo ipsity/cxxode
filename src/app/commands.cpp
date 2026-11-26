@@ -1,4 +1,5 @@
 #include "app/interactive.hpp"
+#include "base/files.hpp"
 #include "ext/commands.hpp"
 #include "ext/discovery.hpp"
 #include "ext/lua/host.hpp"
@@ -263,7 +264,9 @@ bool interactive_ui::command(const std::string& line) {
                     }
                     if (models[i].context_window > 0) {
                         if (!detail.empty()) detail += " ";
-                        detail += "(" + std::to_string(models[i].context_window / 1000) + "k)";
+                        detail += "(" + (models[i].context_window >= 1000000
+                            ? std::to_string(models[i].context_window / 1000000) + "M"
+                            : std::to_string(models[i].context_window / 1000) + "k") + ")";
                     }
                     // Set current model as default selection
                     if (models[i].id == core.model) {
@@ -279,7 +282,7 @@ bool interactive_ui::command(const std::string& line) {
                     current_index,
                     "Select a model from " + app_.config.provider + ":",
                     [this, models](std::size_t index) {
-                        app_.set_model(models[index].id);
+                        app_.set_model(models[index].id, models[index].context_window);
                         note("✓ Switched to model: " + app_.core->model);
                     },
                     []() { /* Cancel - do nothing */ }
@@ -291,7 +294,7 @@ bool interactive_ui::command(const std::string& line) {
                 const auto num = std::stoul(arg);
                 const auto models = list_models(app_.provider_cfg);
                 if (num > 0 && num <= models.size()) {
-                    app_.set_model(models[num - 1].id);
+                    app_.set_model(models[num - 1].id, models[num - 1].context_window);
                     note("✓ Switched to model: " + core.model);
                 } else {
                     note("Invalid model number", tone::error);
@@ -407,7 +410,7 @@ void interactive_ui::login_command(std::string_view arg) {
             providers.items.push_back(name);
         }
         providers.on_select = [this, names = providers.items](std::size_t index) {
-            login_ = login_state{names[index], {}};
+            if (!switch_to_saved_provider(names[index])) login_ = login_state{names[index], {}};
         };
         selection_ = std::move(providers);
         return;
@@ -422,8 +425,29 @@ void interactive_ui::login_command(std::string_view arg) {
         note("API 密钥应为单行", tone::error);
         return;
     }
-    login_ = login_state{name, key};
-    if (!key.empty()) save_login();
+    if (!key.empty()) {
+        login_ = login_state{name, key};
+        save_login();
+    } else if (!switch_to_saved_provider(name)) {
+        login_ = login_state{name, {}};
+    }
+}
+
+bool interactive_ui::switch_to_saved_provider(const std::string& name) {
+    provider_config resolved;
+    if (resolve_provider(app_.config, name, resolved)) return false;
+
+    const auto previous_provider = app_.config.provider;
+    const bool switching = name != previous_provider;
+    if (auto error = app_.use_provider(name)) {
+        note("无法切换 provider：" + *error, tone::error);
+        return true;
+    }
+    if (!save_provider_selection(name, previous_provider, ode_home() / "settings.json")) {
+        note("provider 已切换，但无法保存默认选择", tone::error);
+    }
+    note((switching ? "已切换到 " : "当前 provider：") + name + "，模型：" + app_.core->model, tone::accent);
+    return true;
 }
 
 void interactive_ui::save_login() {
@@ -439,12 +463,21 @@ void interactive_ui::save_login() {
         return;
     }
 
-    note("已保存 " + name + " 的 Windows 凭据", tone::accent);
     provider_config resolved;
     if (!resolve_provider(app_.config, name, resolved) && resolved.api_key != key) {
         note(name + " 仍优先使用配置文件或环境变量中的密钥");
     }
-    if (name == app_.config.provider) app_.refresh_credentials();
+    const auto previous_provider = app_.config.provider;
+    const bool switching = name != previous_provider;
+    if (auto error = app_.use_provider(name)) {
+        note("密钥已保存，但切换 provider 失败：" + *error, tone::error);
+        return;
+    }
+    if (!save_provider_selection(name, previous_provider, ode_home() / "settings.json")) {
+        note("密钥已保存并已切换，但无法保存默认 provider", tone::error);
+        return;
+    }
+    note((switching ? "已切换到 " : "已更新当前 provider ") + name + "，模型：" + app_.core->model, tone::accent);
 }
 
 void interactive_ui::logout_command(std::string_view arg) {

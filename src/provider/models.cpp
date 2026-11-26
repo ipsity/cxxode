@@ -29,7 +29,12 @@ std::vector<model_info> list_models(const provider_config& config) {
 
                 cancel_token cancel;
                 std::string body;
-                const auto result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
+                http_result result;
+                try {
+                    result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
+                } catch (...) {
+                    // Use the official model fallback when the model endpoint is unreachable.
+                }
 
                 if (result.status == 200) {
                     try {
@@ -39,10 +44,12 @@ std::vector<model_info> list_models(const provider_config& config) {
                                 model_info info;
                                 info.id = m.value("id", "");
                                 info.name = m.value("display_name", info.id);
-                                if (m.contains("context_length")) {
+                                if (m.contains("context_window")) {
+                                    info.context_window = m["context_window"];
+                                } else if (m.contains("context_length")) {
                                     info.context_window = m["context_length"];
                                 } else {
-                                    info.context_window = 200000; // Claude default
+                                    info.context_window = known_model_context_window(config, info.id);
                                 }
                                 info.supports_vision = info.id.find("claude") != std::string::npos;
                                 info.supports_tools = true;
@@ -60,7 +67,6 @@ std::vector<model_info> list_models(const provider_config& config) {
                         {"claude-opus-4-8", "Claude Opus 4.8", "Most capable model", 200000, true, true},
                         {"claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced performance", 200000, true, true},
                         {"claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fast and efficient", 200000, true, true},
-                        {"claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", "Previous generation", 200000, true, true},
                     };
                 }
             }
@@ -71,7 +77,11 @@ std::vector<model_info> list_models(const provider_config& config) {
             // OpenAI and compatible providers have /v1/models endpoint
             std::string base = config.base_url;
             while (!base.empty() && base.back() == '/') base.pop_back();
-            if (!base.ends_with("/v1")) base += "/v1";
+            if (config.name == "deepseek" && base.ends_with("/v1")) {
+                base.resize(base.size() - 3);
+            } else if (!base.ends_with("/v1")) {
+                base += "/v1";
+            }
             req.method = "GET";
             req.url = base + "/models";
 
@@ -81,7 +91,12 @@ std::vector<model_info> list_models(const provider_config& config) {
 
             cancel_token cancel;
             std::string body;
-            const auto result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
+            http_result result;
+            try {
+                result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
+            } catch (...) {
+                // Use provider model fallbacks when model discovery is unreachable.
+            }
 
             if (result.status == 200) {
                 try {
@@ -92,14 +107,18 @@ std::vector<model_info> list_models(const provider_config& config) {
                             info.id = m.value("id", "");
                             info.name = info.id;
 
-                            // Extract context window if available
-                            if (m.contains("context_length")) {
+                            if (m.contains("context_window")) {
+                                info.context_window = m["context_window"];
+                            } else if (m.contains("context_length")) {
                                 info.context_window = m["context_length"];
+                            } else {
+                                info.context_window = known_model_context_window(config, info.id);
                             }
 
                             // Guess capabilities from model name
                             const auto& id = info.id;
                             info.supports_vision = id.find("vision") != std::string::npos ||
+                                                   id.starts_with("gpt-4.1") || id.starts_with("gpt-5") ||
                                                    id.find("gpt-4o") != std::string::npos ||
                                                    id.find("claude") != std::string::npos;
                             info.supports_tools = true; // Most modern models support tools
@@ -116,31 +135,43 @@ std::vector<model_info> list_models(const provider_config& config) {
 
             // If API call failed or returned no models, provide defaults
             if (models.empty()) {
-                if (config.name == "groq") {
+                if (config.name == "openai") {
                     models = {
-                        {"llama-3.3-70b-versatile", "Llama 3.3 70B", "Fast inference", 32768, false, true},
-                        {"llama-3.1-70b-versatile", "Llama 3.1 70B", "Versatile model", 32768, false, true},
-                        {"mixtral-8x7b-32768", "Mixtral 8x7B", "MoE model", 32768, false, true},
-                    };
-                } else if (config.name == "openai") {
-                    models = {
-                        {"gpt-4o", "GPT-4o", "Multimodal flagship", 128000, true, true},
-                        {"gpt-4o-mini", "GPT-4o Mini", "Fast and affordable", 128000, true, true},
-                        {"gpt-4-turbo", "GPT-4 Turbo", "Previous generation", 128000, true, true},
-                        {"gpt-3.5-turbo", "GPT-3.5 Turbo", "Fast and cheap", 16385, false, true},
+                        {"gpt-5", "GPT-5", "Frontier model", 400000, true, true},
+                        {"gpt-5-mini", "GPT-5 mini", "Faster, lower-cost model", 400000, true, true},
+                        {"gpt-5-nano", "GPT-5 nano", "Smallest, fastest model", 400000, true, true},
+                        {"gpt-4.1", "GPT-4.1", "Long-context model", 1047576, true, true},
                     };
                 } else if (config.name == "deepseek") {
                     models = {
-                        {"deepseek-chat", "DeepSeek Chat", "General chat model", 64000, false, true},
-                        {"deepseek-coder", "DeepSeek Coder", "Code-specialized", 64000, false, true},
+                        {"deepseek-flash", "DeepSeek Flash", "Fast general model", 1048576, true, true},
+                        {"deepseek-v4-pro", "DeepSeek V4 Pro", "Flagship model", 1048576, false, true},
                     };
                 }
             }
             break;
         }
     }
-
     return models;
+}
+
+std::size_t known_model_context_window(const provider_config& config, std::string_view model) {
+    if (config.name == "deepseek" &&
+        (model == "deepseek-flash" || model == "deepseek-v4-pro" ||
+         model == "deepseek-v4-flash" || model == "deepseek-v4-flash-vision-exp")) {
+        return 1048576;
+    }
+    if (config.name == "anthropic" &&
+        (model == "claude-opus-4-8" || model == "claude-opus-4-7" ||
+         model == "claude-sonnet-4-6" || model == "claude-haiku-4-5-20251001")) {
+        return 200000;
+    }
+    if (config.name == "openai") {
+        if (model.starts_with("gpt-4.1")) return 1047576;
+        if (model.starts_with("gpt-5")) return 400000;
+        if (model.starts_with("gpt-4o")) return 128000;
+    }
+    return 0;
 }
 
 } // namespace ode

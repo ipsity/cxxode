@@ -42,7 +42,7 @@ struct provider_entry {
 
 struct settings {
     std::string provider = "anthropic";
-    std::string model;
+    std::map<std::string, std::string> model_overrides;
     std::map<std::string, provider_entry> providers;
     // Permission rules as written in settings.json. main.cpp turns these into a
     // permission_rules, which lives in core and must not be known here.
@@ -57,12 +57,15 @@ struct settings {
 
 // Merges ~/.ode, ~/.claude and the workspace's .claude/.ode settings files.
 settings load_settings(const std::filesystem::path& workspace);
+std::string configured_model(const settings& s, const std::string& provider);
 
 // Resolves the API key: environment variable first, then Windows Credential Manager.
 // Returns an error message on failure.
 std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out);
 bool save_credential(const std::string& provider, const std::string& key);
 bool delete_credential(const std::string& provider);
+bool save_provider_selection(const std::string& provider, const std::string& previous_provider,
+                             const std::filesystem::path& settings_path);
 
 // Claude Code aliases: opus, sonnet, haiku, fable. ANTHROPIC_DEFAULT_<NAME>_MODEL overrides
 // the built-in id, so a gateway mapping set up for Claude Code applies unchanged.

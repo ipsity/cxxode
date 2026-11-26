@@ -3,6 +3,7 @@
 #include "provider/provider.hpp"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ode {
@@ -19,5 +20,6 @@ struct model_info {
 
 // List available models from a provider
 std::vector<model_info> list_models(const provider_config& config);
+std::size_t known_model_context_window(const provider_config& config, std::string_view model);
 
 } // namespace ode

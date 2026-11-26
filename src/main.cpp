@@ -162,6 +162,7 @@ int main(int argc, char** argv) {
     a.permissions.deny = a.config.permission_deny;
     if (auto m = parse_mode(a.config.permission_mode)) a.permissions.set_mode(*m);
     for (const auto& w : a.config.warnings) ui::write_stream(true, "ode: " + w + "\n");
+    const auto configured_provider = a.config.provider;
     if (!provider_name.empty()) a.config.provider = provider_name;
 
     if (login || logout) {
@@ -173,12 +174,23 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (!a.config.providers.contains(name)) return fail("unknown provider " + name);
+        provider_config saved;
+        if (!resolve_provider(a.config, name, saved)) {
+            if (!save_provider_selection(name, configured_provider, ode_home() / "settings.json")) {
+                return fail("saved credentials found, but could not persist the provider selection");
+            }
+            ui::write_stream(true, "Using saved credentials for " + name + "\n");
+            return 0;
+        }
         ui::write_stream(true, "API key for " + name + ": ");
         const auto key = read_secret();
         ui::write_stream(true, "\n");
         if (key.empty()) return fail("no key entered");
         if (!save_credential(name, key)) return fail("could not save the key");
-        ui::write_stream(true, "Saved to Windows Credential Manager as ode/" + name + "\n");
+        if (!save_provider_selection(name, configured_provider, ode_home() / "settings.json")) {
+            return fail("key saved, but could not persist the provider selection");
+        }
+        ui::write_stream(true, "Saved credentials and selected " + name + "\n");
         return 0;
     }
 
@@ -275,8 +287,7 @@ int main(int argc, char** argv) {
         return warnings;
     };
 
-    const auto& entry = a.config.providers.at(a.config.provider);
-    a.set_model(!model.empty() ? model : !a.config.model.empty() ? a.config.model : entry.default_model);
+    a.set_model(model.empty() ? configured_model(a.config, a.config.provider) : model);
     a.core->system = build_system_prompt(workspace, shell_name(), load_memory(workspace));
     a.core->system += skills_system_prompt(a.skills);
 

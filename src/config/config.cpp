@@ -3,11 +3,19 @@
 #include "base/text.hpp"
 
 #include <cstdlib>
+#include <fstream>
 #include <memory>
 
 #ifdef _WIN32
-#include "base/utf.hpp"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <wincred.h>
+#include "base/utf.hpp"
 #endif
 
 namespace ode {
@@ -22,7 +30,6 @@ std::string env(const std::string& name) {
 
 void merge(settings& s, const json& j) {
     if (j.contains("provider") && j["provider"].is_string()) s.provider = j["provider"];
-    if (j.contains("model") && j["model"].is_string()) s.model = j["model"];
     if (j.contains("env") && j["env"].is_object()) {
         for (const auto& [k, v] : j["env"].items()) {
             if (!v.is_string()) continue;
@@ -40,9 +47,17 @@ void merge(settings& s, const json& j) {
             if (auto k = parse_protocol(p.value("protocol", ""))) e.kind = *k;
             e.base_url = p.value("base_url", e.base_url);
             e.api_key_env = p.value("api_key_env", e.api_key_env);
-            e.default_model = p.value("model", e.default_model);
+            if (const auto model = p.find("model"); model != p.end() && model->is_string()) {
+                e.default_model = model->get<std::string>();
+                s.model_overrides.erase(name);
+            }
             e.api_key = p.value("api_key", e.api_key);  // Parse direct API key
         }
+    }
+    if (j.contains("model") && j["model"].is_string()) {
+        const auto provider = j.find("model_provider");
+        const auto& owner = provider != j.end() && provider->is_string() ? provider->get_ref<const std::string&>() : s.provider;
+        s.model_overrides[owner] = j["model"].get<std::string>();
     }
     if (j.contains("permissions") && j["permissions"].is_object()) {
         const auto& p = j["permissions"];
@@ -164,21 +179,11 @@ settings load_settings(const fs::path& workspace) {
                                 "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "claude-sonnet-4-6"};
     s.providers["openai"] = {"openai", protocol::openai_chat,
                              env("OPENAI_BASE_URL").empty() ? "https://api.openai.com/v1" : env("OPENAI_BASE_URL"),
-                             "OPENAI_API_KEY", "", "gpt-4o"};
+                             "OPENAI_API_KEY", "", "gpt-5"};
 
-    // OpenAI-compatible providers
-    s.providers["groq"] = {"groq", protocol::openai_chat,
-                           env("GROQ_BASE_URL").empty() ? "https://api.groq.com/openai/v1" : env("GROQ_BASE_URL"),
-                           "GROQ_API_KEY", "", "llama-3.3-70b-versatile"};
-    s.providers["together"] = {"together", protocol::openai_chat,
-                               env("TOGETHER_BASE_URL").empty() ? "https://api.together.xyz/v1" : env("TOGETHER_BASE_URL"),
-                               "TOGETHER_API_KEY", "", "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"};
-    s.providers["fireworks"] = {"fireworks", protocol::openai_chat,
-                                env("FIREWORKS_BASE_URL").empty() ? "https://api.fireworks.ai/inference/v1" : env("FIREWORKS_BASE_URL"),
-                                "FIREWORKS_API_KEY", "", "accounts/fireworks/models/llama-v3p1-70b-instruct"};
     s.providers["deepseek"] = {"deepseek", protocol::openai_chat,
                                env("DEEPSEEK_BASE_URL").empty() ? "https://api.deepseek.com/v1" : env("DEEPSEEK_BASE_URL"),
-                               "DEEPSEEK_API_KEY", "", "deepseek-chat"};
+                               "DEEPSEEK_API_KEY", "", "deepseek-flash"};
 
     // Claude Code's own model variables, so an existing gateway setup works unchanged.
     for (const auto* var : {"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_MODEL"}) {
@@ -201,6 +206,12 @@ settings load_settings(const fs::path& workspace) {
         s.provider = "anthropic";
     }
     return s;
+}
+
+std::string configured_model(const settings& s, const std::string& provider) {
+    const auto override = s.model_overrides.find(provider);
+    if (override != s.model_overrides.end() && !override->second.empty()) return override->second;
+    return s.providers.at(provider).default_model;
 }
 
 std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out) {
@@ -264,6 +275,43 @@ bool save_credential(const std::string& provider, const std::string& key) {
     (void)key;
     return false;
 #endif
+}
+
+bool save_provider_selection(const std::string& provider, const std::string& previous_provider, const fs::path& settings_path) {
+    json data = json::object();
+    if (const auto existing = read_file(settings_path)) {
+        data = json::parse(*existing, nullptr, false, true);
+        if (data.is_discarded() || !data.is_object()) return false;
+    }
+    const auto model = data.find("model");
+    const auto model_provider = data.find("model_provider");
+    if (model != data.end() && model->is_string() &&
+        (model_provider == data.end() || !model_provider->is_string())) {
+        const auto selected = data.find("provider");
+        data["model_provider"] = selected != data.end() && selected->is_string() ? selected->get<std::string>() : previous_provider;
+    }
+    data["provider"] = provider;
+
+    std::error_code ec;
+    fs::create_directories(settings_path.parent_path(), ec);
+    if (ec) return false;
+    auto temporary = settings_path;
+    temporary += ".tmp";
+    {
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        out << data.dump(2) << '\n';
+        out.flush();
+        if (!out) {
+            fs::remove(temporary, ec);
+            return false;
+        }
+    }
+    if (!MoveFileExW(temporary.c_str(), settings_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        fs::remove(temporary, ec);
+        return false;
+    }
+    return true;
 }
 
 bool delete_credential(const std::string& provider) {

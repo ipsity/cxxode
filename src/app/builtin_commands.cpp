@@ -25,7 +25,9 @@ int cmd_models(app& a, const std::string&) {
             line += "  - " + m.description;
         }
         if (m.context_window > 0) {
-            line += "  (" + std::to_string(m.context_window / 1000) + "k context)";
+            line += "  (" + (m.context_window >= 1000000
+                ? std::to_string(m.context_window / 1000000) + "M"
+                : std::to_string(m.context_window / 1000) + "k") + " context)";
         }
         ui::write_stream(false, line + "\n");
     }

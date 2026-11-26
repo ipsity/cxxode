@@ -59,7 +59,8 @@ struct app {
 
     // Opens a new session file, or appends to `resume` after loading it.
     bool open_session(const std::optional<fs::path>& resume);
-    void set_model(const std::string& requested);
+    void set_model(const std::string& requested, std::size_t context_window = 0);
+    std::optional<std::string> use_provider(const std::string& name);
     void refresh_credentials();
 };
 

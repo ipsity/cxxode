@@ -56,6 +56,7 @@ private:
     void handle_login(const ui::key& k);
     void login_command(std::string_view arg);
     void logout_command(std::string_view arg);
+    bool switch_to_saved_provider(const std::string& name);
     void save_login();
     void start_turn(std::string text, std::vector<std::string> allowed_tools = {});
     void start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact, bool needs_provider = true);

@@ -1,14 +1,29 @@
 #include "app/app.hpp"
+#include "provider/models.hpp"
 #include "app/interactive.hpp"
 #include "ui/term.hpp"
 #include "ui/welcome.hpp"
 
 namespace ode {
 
-void app::refresh_credentials() {
+std::optional<std::string> app::use_provider(const std::string& name) {
     provider_config resolved;
-    credential_error = resolve_provider(config, config.provider, resolved);
+    if (auto error = resolve_provider(config, name, resolved)) {
+        if (name == config.provider) credential_error = *error;
+        return error;
+    }
+    const bool changed = name != config.provider;
+    config.provider = name;
+    // The main agent and Task tools share the client, which reads this config on each request.
     provider_cfg = std::move(resolved);
+    if (!model_provider) model_provider = make_provider(provider_cfg);
+    credential_error.reset();
+    if (changed && core) set_model(configured_model(config, name));
+    return std::nullopt;
+}
+
+void app::refresh_credentials() {
+    (void)use_provider(config.provider);
 }
 
 bool app::open_session(const std::optional<fs::path>& resume) {
@@ -29,11 +44,12 @@ bool app::open_session(const std::optional<fs::path>& resume) {
     return log.is_open();
 }
 
-void app::set_model(const std::string& requested) {
+void app::set_model(const std::string& requested, std::size_t context_window) {
     const auto model = resolve_model_alias(requested);
     core->model = model;
-    // Opus/Sonnet 4.x and later accept a 1M window only on request; 200k is the safe default.
-    core->context_window = model.find("[1m]") != std::string::npos ? 1000000 : 200000;
+    if (context_window == 0) context_window = known_model_context_window(provider_cfg, model);
+    core->context_window = context_window != 0 ? context_window
+                                               : (model.find("[1m]") != std::string::npos ? 1000000 : 200000);
     if (log.is_open()) log.append({{"v", 1}, {"type", "meta"}, {"model", model}});
 }
 
