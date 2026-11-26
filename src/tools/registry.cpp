@@ -39,7 +39,7 @@ std::vector<tool> tool_registry::model_tools() const {
     return result;
 }
 
-std::vector<tool_search_result> tool_registry::search_and_activate(std::string_view query, std::size_t limit) {
+std::vector<tool_search_result> tool_registry::search(std::string_view query, std::size_t limit, bool activate) {
     const auto terms = words(query);
     if (terms.empty() || limit == 0) return {};
 
@@ -50,7 +50,8 @@ std::vector<tool_search_result> tool_registry::search_and_activate(std::string_v
     std::vector<match> matches;
     for (std::size_t i = 0; i < tools_.size(); ++i) {
         const auto& candidate = tools_[i];
-        if (candidate.exposure != tool_exposure::deferred || activated_[i]) continue;
+        if (candidate.name == "codemode" || candidate.name == "tool_search" ||
+            (activate && (candidate.exposure != tool_exposure::deferred || activated_[i]))) continue;
         const auto name_words = words(candidate.name);
         const auto description_words = words(candidate.description);
         std::size_t score = 0;
@@ -70,8 +71,8 @@ std::vector<tool_search_result> tool_registry::search_and_activate(std::string_v
     result.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         const auto& matched = matches[i];
-        activated_[matched.index] = true;
-        result.push_back({tools_[matched.index].name, tools_[matched.index].description});
+        if (activate) activated_[matched.index] = true;
+        result.push_back({tools_[matched.index].name, tools_[matched.index].description, tools_[matched.index].schema});
     }
     return result;
 }
@@ -94,7 +95,7 @@ tool make_tool_search_tool() {
         if (!context.search_tools) return tool_output{"Tool search is unavailable.", true, "failed", {}};
         const auto query = input.value("query", std::string{});
         const auto limit = static_cast<std::size_t>(std::clamp<std::int64_t>(input.value("limit", std::int64_t{5}), 1, 20));
-        const auto matches = context.search_tools(query, limit);
+        const auto matches = context.search_tools(query, limit, true);
         if (matches.empty()) return tool_output{"No matching deferred tools found.", false, "0 tools", {}};
         std::string text = "Available on the next model turn:\n";
         for (const auto& match : matches) {

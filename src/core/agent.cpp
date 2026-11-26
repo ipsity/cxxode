@@ -250,7 +250,8 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
 
 void agent::run_tool_batch(std::span<const block* const> calls, agent_events& events, cancel_token& cancel,
                            message& results, turn_backup& backup, std::span<const std::string> allowed_tools,
-                           bool file_writes) {
+                           bool file_writes, std::span<tool_output> outputs,
+                           std::optional<std::chrono::steady_clock::time_point> deadline) {
     // Each call records its own file stamps and backups until its result is collected.
     std::mutex callback_mutex;
     agent_events serial = events;
@@ -279,29 +280,111 @@ void agent::run_tool_batch(std::span<const block* const> calls, agent_events& ev
     for (std::size_t i = 0; i < calls.size(); ++i) {
         const auto run = [&, i] {
             if (cancel.cancelled()) return tool_output{"[Interrupted by the user]", true, {}, {}};
-            return run_one(*calls[i], serial, cancel, backups[i], stamps[i], allowed_tools);
+            return run_one(*calls[i], serial, cancel, backups[i], stamps[i], allowed_tools, deadline);
         };
         // A deferred call still returns a result if the system cannot start another thread.
         pending.push_back(std::async(std::launch::async | std::launch::deferred, run));
     }
     for (std::size_t i = 0; i < calls.size(); ++i) {
         auto out = pending[i].get();
+        if (!outputs.empty()) outputs[i] = out;
         results.blocks.push_back(block::make_tool_result(calls[i]->id, std::move(out.text), out.is_error));
         for (auto& [path, original] : backups[i].originals) backup.remember(path, std::move(original));
         for (const auto& [path, stamp] : stamps[i]) seen_[path] = stamp;
     }
 }
 
+std::vector<tool_output> agent::invoke_tool_batch(const std::vector<tool_invocation>& requests,
+                                                  agent_events& events, cancel_token& cancel,
+                                                  turn_backup& backup, std::map<fs::path, file_stamp>& seen,
+                                                  std::span<const std::string> allowed_tools,
+                                                  std::optional<std::chrono::steady_clock::time_point> deadline) {
+    std::vector<tool_output> outputs(requests.size());
+    std::size_t begin = 0;
+    while (begin < requests.size()) {
+        if (cancel.cancelled()) {
+            outputs[begin++] = {"[Interrupted by the user]", true, "已取消", {}};
+            continue;
+        }
+        if (requests[begin].name == "codemode") {
+            outputs[begin++] = {"CodeMode scripts cannot invoke codemode recursively.", true, "拒绝递归", {}};
+            continue;
+        }
+        const auto* first = find_tool(requests[begin].name);
+        std::size_t end = begin + 1;
+        const bool file_writes = first && first->access == tool_access::write;
+        const bool mcp_calls = requests[begin].name.starts_with("mcp__");
+        if (first && first->access == tool_access::read) {
+            while (end < requests.size() && end - begin < max_parallel_tools) {
+                const auto* next = find_tool(requests[end].name);
+                if (!next || next->access != tool_access::read || requests[end].name == "codemode") break;
+                ++end;
+            }
+        } else if (mcp_calls) {
+            while (end < requests.size() && end - begin < max_parallel_tools &&
+                   requests[end].name.starts_with("mcp__") && find_tool(requests[end].name)) ++end;
+        } else if (file_writes && !hooks_.pre_tool && !hooks_.post_tool) {
+            std::vector<write_target> targets;
+            const auto target_for = [&](std::size_t index) -> std::optional<write_target> {
+                const auto* candidate = find_tool(requests[index].name);
+                if (!candidate || !candidate->parallel_file_write ||
+                    !tool_input_error(*candidate, requests[index].input).empty()) return std::nullopt;
+                {
+                    std::lock_guard lock(permission_mutex_);
+                    if (rules_.check(*candidate, requests[index].input, root_, allowed_tools) != verdict::allow) return std::nullopt;
+                }
+                const auto path = requests[index].input.value("file_path", std::string{});
+                if (path.empty()) return std::nullopt;
+                return parallel_write_target(root_, resolve(root_, path));
+            };
+            if (auto target = target_for(begin)) {
+                targets.push_back(std::move(*target));
+                while (end < requests.size() && end - begin < max_parallel_tools) {
+                    auto next = target_for(end);
+                    if (!next || !std::ranges::all_of(targets, [&](const write_target& prior) {
+                            return independent_write_targets(prior, *next);
+                        })) break;
+                    targets.push_back(std::move(*next));
+                    ++end;
+                }
+            }
+        }
+
+        if (end - begin == 1) {
+            const auto call = block::make_tool_use(std::to_string(begin), requests[begin].name, requests[begin].input);
+            outputs[begin] = run_one(call, events, cancel, backup, seen, allowed_tools, deadline);
+        } else {
+            std::vector<block> blocks;
+            std::vector<const block*> calls;
+            blocks.reserve(end - begin);
+            calls.reserve(end - begin);
+            for (std::size_t i = begin; i < end; ++i) {
+                blocks.push_back(block::make_tool_use(std::to_string(i), requests[i].name, requests[i].input));
+            }
+            for (const auto& call : blocks) calls.push_back(&call);
+            message ignored;
+            run_tool_batch(calls, events, cancel, ignored, backup, allowed_tools, file_writes,
+                           std::span(outputs).subspan(begin, end - begin), deadline);
+        }
+        begin = end;
+    }
+    return outputs;
+}
+
 tool_output agent::run_one(const block& call, agent_events& events, cancel_token& cancel, turn_backup& backup,
-                           std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools) {
+                           std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools,
+                           std::optional<std::chrono::steady_clock::time_point> deadline) {
     const auto* t = find_tool(call.name);
     if (!t) return {"Unknown tool: " + call.name, true, "未知工具", {}};
-    return run_tool(*t, call.input, events, cancel, &backup, seen, allowed_tools);
+    return run_tool(*t, call.input, events, cancel, &backup, seen, allowed_tools, deadline);
 }
 
 tool_output agent::run_tool(const tool& t, const json& input, agent_events& events, cancel_token& cancel,
                             turn_backup* backup, std::map<fs::path, file_stamp>& seen,
-                            std::span<const std::string> allowed_tools) {
+                            std::span<const std::string> allowed_tools,
+                            std::optional<std::chrono::steady_clock::time_point> deadline) {
+    if (deadline && std::chrono::steady_clock::now() >= *deadline)
+        return {"CodeMode execution deadline exceeded", true, "timeout", {}};
     if (auto error = tool_input_error(t, input); !error.empty()) return {std::move(error), true, "参数错误", {}};
     tool_output out;
     const auto blocked = [&](std::string reason) {
@@ -343,7 +426,8 @@ tool_output agent::run_tool(const tool& t, const json& input, agent_events& even
     }
 
     if (events.tool_started) events.tool_started(t, input);
-    auto ctx = make_context(t.access, events, cancel, backup, seen, allowed_tools);
+    auto ctx = make_context(t.access, events, cancel, backup, seen, allowed_tools,
+                            t.delegates_tool_permissions, deadline);
     const auto started = std::chrono::steady_clock::now();
     try {
         out = t.run(input, ctx);
@@ -366,18 +450,34 @@ tool_output agent::run_tool(const tool& t, const json& input, agent_events& even
 }
 
 tool_context agent::make_context(tool_access access, agent_events& events, cancel_token& cancel, turn_backup* backup,
-                                 std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools) {
-    return {root_, &cancel, access == tool_access::read ? nullptr : backup, &seen, events.tool_progress,
-            events.ask, allowed_tools, [this, access, &events, &cancel, backup, &seen, allowed_tools]
-            (std::string_view name, const json& input) -> tool_output {
+                                 std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools,
+                                 bool delegates_tool_permissions,
+                                 std::optional<std::chrono::steady_clock::time_point> deadline) {
+    return {root_, &cancel, access == tool_access::read && !delegates_tool_permissions ? nullptr : backup,
+            &seen, events.tool_progress, events.ask, allowed_tools, deadline,
+            [this, access, delegates_tool_permissions, &events, &cancel, backup, &seen, allowed_tools]
+            (std::string_view name, const json& input,
+             std::optional<std::chrono::steady_clock::time_point> child_deadline) -> tool_output {
                 if (cancel.cancelled()) return {"[Interrupted by the user]", true, "已取消", {}};
+                if (name == "codemode") return {"CodeMode scripts cannot invoke codemode recursively.", true, "拒绝递归", {}};
                 const auto builtin = find_tool(name);
                 if (!builtin) return {"Tool is unavailable: " + std::string(name), true, "不可用", {}};
-                if (builtin->access > access) return {"Operation exceeds the tool's declared access.", true, "已拒绝", {}};
-                return run_tool(*builtin, input, events, cancel, backup, seen, allowed_tools);
+                if (!delegates_tool_permissions && builtin->access > access)
+                    return {"Operation exceeds the tool's declared access.", true, "已拒绝", {}};
+                return run_tool(*builtin, input, events, cancel, backup, seen, allowed_tools, child_deadline);
             }, events.notice,
-            [this](std::string_view query, std::size_t limit) {
-                return tools_.search_and_activate(query, limit);
+            [this](std::string_view query, std::size_t limit, bool activate) {
+                return tools_.search(query, limit, activate);
+            },
+            [this](std::string_view name) -> std::optional<tool_search_result> {
+                const auto* found = find_tool(name);
+                if (!found || found->name == "codemode") return std::nullopt;
+                return tool_search_result{found->name, found->description, found->schema};
+            },
+            [this, &events, &cancel, backup, &seen, allowed_tools]
+            (const std::vector<tool_invocation>& calls,
+             std::optional<std::chrono::steady_clock::time_point> child_deadline) {
+                return invoke_tool_batch(calls, events, cancel, *backup, seen, allowed_tools, child_deadline);
             }};
 }
 

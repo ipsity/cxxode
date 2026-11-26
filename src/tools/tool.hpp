@@ -33,7 +33,16 @@ struct file_stamp {
 enum class answer { yes, no, always };
 struct tool;
 struct tool_output;
-struct tool_search_result;
+struct tool_search_result {
+    std::string name;
+    std::string description;
+    json schema;
+};
+
+struct tool_invocation {
+    std::string name;
+    json input;
+};
 
 struct tool_context {
     fs::path root;
@@ -43,9 +52,13 @@ struct tool_context {
     std::function<void(std::string_view)> output;     // live bash output
     std::function<answer(const tool&, const json&)> ask{};
     std::span<const std::string> allowed_tools{};
-    std::function<tool_output(std::string_view, const json&)> invoke_builtin{};
+    std::optional<std::chrono::steady_clock::time_point> deadline;
+    std::function<tool_output(std::string_view, const json&, std::optional<std::chrono::steady_clock::time_point>)> invoke_tool{};
     std::function<void(std::string_view)> notice{};
-    std::function<std::vector<tool_search_result>(std::string_view, std::size_t)> search_tools{};
+    std::function<std::vector<tool_search_result>(std::string_view, std::size_t, bool)> search_tools{};
+    std::function<std::optional<tool_search_result>(std::string_view)> describe_tool{};
+    std::function<std::vector<tool_output>(const std::vector<tool_invocation>&,
+                                          std::optional<std::chrono::steady_clock::time_point>)> invoke_tools{};
 };
 
 struct tool_output {
@@ -57,7 +70,7 @@ struct tool_output {
 };
 
 enum class tool_access { read, write, execute };
-enum class tool_exposure { direct, deferred };
+enum class tool_exposure { direct, deferred, codemode };
 
 struct tool {
     std::string name;
@@ -69,11 +82,7 @@ struct tool {
     std::function<std::string(const json& input)> label;
     bool parallel_file_write = false;
     tool_exposure exposure = tool_exposure::direct;
-};
-
-struct tool_search_result {
-    std::string name;
-    std::string description;
+    bool delegates_tool_permissions = false;
 };
 
 class tool_registry {
@@ -83,7 +92,7 @@ public:
     const tool* find(std::string_view name) const;
     const std::vector<tool>& all() const { return tools_; }
     std::vector<tool> model_tools() const;
-    std::vector<tool_search_result> search_and_activate(std::string_view query, std::size_t limit);
+    std::vector<tool_search_result> search(std::string_view query, std::size_t limit, bool activate);
 
 private:
     std::vector<tool> tools_;

@@ -9,7 +9,8 @@ namespace ode {
 
 tool_setup build_tool_registry(const std::vector<skill>& skills,
                               const std::vector<std::shared_ptr<mcp_client>>& mcp_clients,
-                              std::vector<tool> lua_tools, const std::vector<agent_config>& agents,
+                              std::vector<tool> lua_tools, tool codemode_tool,
+                              const std::vector<agent_config>& agents,
                               provider& model_provider, permission_rules& permissions,
                               std::function<std::string()> parent_model,
                               std::vector<hook_config> configured_hooks,
@@ -30,12 +31,13 @@ tool_setup build_tool_registry(const std::vector<skill>& skills,
     append(make_skill_tools(skills));
     append(make_mcp_tools(mcp_clients));
     std::erase_if(lua_tools, [&](const tool& candidate) {
-        const bool conflict = candidate.name == "Task" || candidate.name == "tool_search" ||
+        const bool conflict = candidate.name == "Task" || candidate.name == "tool_search" || candidate.name == "codemode" ||
             std::ranges::find(tools, candidate.name, &tool::name) != tools.end();
         if (conflict) warnings.push_back("Lua tool name is reserved: " + candidate.name);
         return conflict;
     });
     append(std::move(lua_tools));
+    append({std::move(codemode_tool)});
     if (std::ranges::any_of(tools, [](const tool& candidate) {
             return candidate.exposure == tool_exposure::deferred;
         })) {
