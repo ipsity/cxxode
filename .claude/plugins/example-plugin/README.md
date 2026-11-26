@@ -4,32 +4,19 @@ This is an example plugin for cxxode demonstrating the plugin system.
 
 ## Contents
 
-- **skills/example-skill.md** - An example skill
-- **commands/** - (empty, but could contain custom commands)
-- **agents/** - (empty, but could contain subagent configs)
+- **skills/example-skill.md** is an example skill.
+- **ode/init.lua** registers the `/lua-example` command.
 
 ## Installation
 
-Copy this directory to `~/.ode/plugins/` or `~/.claude/plugins/`:
+From the repository root in PowerShell, copy the plugin into your ode profile.
 
-```bash
-cp -r .claude/plugins/example-plugin ~/.ode/plugins/
+```powershell
+$plugins = Join-Path $env:USERPROFILE '.ode\plugins'
+New-Item -ItemType Directory -Force -Path $plugins | Out-Null
+Copy-Item -Recurse -Force .claude\plugins\example-plugin -Destination $plugins
 ```
 
-Or symlink it for development:
+Start `ode` and enter `/lua-example`. The command prints `Lua 插件已加载` without calling a model. Use `/reload` after editing the installed script.
 
-```bash
-ln -s $(pwd)/.claude/plugins/example-plugin ~/.ode/plugins/example-plugin
-```
-
-## Usage
-
-After installation, restart ode. The `example-skill` will be available:
-
-```
-> ode "Use the example-skill"
-```
-
-## Plugin Structure
-
-See docs/M4_FEATURES.md for complete documentation on creating plugins.
+See [Lua 扩展](../../../docs/ARCHITECTURE.md#6-lua-扩展) for the available Lua APIs.

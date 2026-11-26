@@ -93,7 +93,9 @@ user text
 - 子 agent 沿用主 agent 的工具权限规则和前后置 Hooks，由当前前端处理权限询问，文件备份归入主回合。
 - session 是只追加的 JSONL 文件，崩溃最多丢失最后一行。
 
-交互界面在终端备用屏幕上绘制。启动时把原屏幕可见的命令和输出放到对话区开头，恢复会话时接着显示会话中的消息。对话从窗口顶部向下排，填满后跟随新输出。滚轮或 Page Up / Page Down 只移动对话视窗，向上翻阅时保留当前起始行，向下翻到底后继续跟随。输入框和状态栏固定在窗口底部。
+交互界面在终端备用屏幕上绘制。启动时把原屏幕可见的命令和输出放到对话区开头，恢复会话时接着显示会话中的消息。对话从窗口顶部向下排，填满后跟随新输出。滚轮或 Page Up / Page Down 只移动对话视窗，向上翻阅时保留当前起始行，向下翻到底后继续跟随。输入框和状态栏固定在窗口底部。打开 `/` 命令面板时，输入框上移并在下方显示候选项。
+
+模型文本和 Bash 输出收到后逐段刷新，未换行的内容也显示。Bash 命令单独显示，已输出的行留在对话区。Write 和 Edit 成功后显示有行数上限的增删预览。
 
 ## 5. 扩展兼容规格
 
@@ -177,7 +179,7 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 - 第三方依赖放在 `third_party/`，随仓库提交，构建时不联网下载。除 `third_party/lua/`（Lua 5.4 源码）外只允许单头文件。
 - 源码、测试、配置里不允许出现本机路径或用户名。运行时状态（会话、命令历史、主题选择）只写到 `%USERPROFILE%\.ode\`，不写进工作区，也不进 git。各工作区共用 `command_history.txt`。
 - 首次运行时没有任何配置文件也必须能启动。缺少密钥时给出一行可操作的提示，并以退出码 2 退出（2026-11-25 已用空 `USERPROFILE` 验证过）。
-- `ode login [provider]` 和 `ode logout [provider]` 管理 Windows 凭据管理器中的密钥。交互界面的 `/logout` 同时结束当前 provider 的登录状态。启动和 `/login` 按原优先级加载配置文件、环境变量和 Windows 凭据。
+- `ode login [provider]` 和 `ode logout [provider]` 管理 Windows 凭据管理器中的密钥。交互界面的 `/logout` 同时结束当前 provider 的登录状态。启动和 `/login` 按原优先级加载配置文件、环境变量和 Windows 凭据。推荐在 `providers.<name>.model` 设置默认模型。顶层 `model` 归属同一配置层选中的 provider，也可用 `model_provider` 指明归属。命令行 `--model` 只覆盖当次启动。
 - Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。
 - 用 CI 的 `windows-latest` 干净镜像代替"另一台机器"做验证，不搭虚拟机。
 - `v*` tag 的构建通过后，GitHub Actions 发布仅含 `ode.exe` 的 `ode-<tag>-windows-x64.zip`。
