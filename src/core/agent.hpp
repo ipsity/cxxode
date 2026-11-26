@@ -84,9 +84,9 @@ public:
     // Restores files changed by the most recent turn that changed files.
     std::vector<std::string> undo(std::vector<std::string>* failed = nullptr);
     bool can_undo() const { return !backups_.empty(); }
-    const std::vector<tool>& tools() const { return tools_; }
+    const std::vector<tool>& tools() const { return tools_.all(); }
     const tool* find_tool(std::string_view name) const;
-    void set_extensions(std::vector<tool> tools, agent_hooks hooks);
+    void set_extensions(tool_registry tools, agent_hooks hooks);
     tool_output run_local(const std::function<tool_output(tool_context&)>& action,
                           agent_events& events, cancel_token& cancel);
 
@@ -110,7 +110,7 @@ private:
                               std::span<const std::string> allowed_tools);
 
     provider& provider_;
-    std::vector<tool> tools_;
+    tool_registry tools_;
     permission_rules& rules_;
     std::mutex permission_mutex_;
     fs::path root_;

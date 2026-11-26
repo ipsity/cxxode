@@ -30,8 +30,7 @@ agent::agent(provider& model_provider, std::vector<tool> tools, permission_rules
     : provider_(model_provider), tools_(std::move(tools)), rules_(rules), root_(std::move(root)), hooks_(std::move(hooks)) {}
 
 const tool* agent::find_tool(std::string_view name) const {
-    for (const auto& t : tools_) if (t.name == name) return &t;
-    return nullptr;
+    return tools_.find(name);
 }
 
 model_request agent::request() const {
@@ -39,7 +38,7 @@ model_request agent::request() const {
     r.model = model;
     r.system = system;
     r.messages = messages;
-    for (const auto& t : tools_) r.tools.push_back({t.name, t.description, t.schema});
+    for (const auto& t : tools_.model_tools()) r.tools.push_back({t.name, t.description, t.schema});
     return r;
 }
 
@@ -376,7 +375,10 @@ tool_context agent::make_context(tool_access access, agent_events& events, cance
                 if (!builtin) return {"Tool is unavailable: " + std::string(name), true, "不可用", {}};
                 if (builtin->access > access) return {"Operation exceeds the tool's declared access.", true, "已拒绝", {}};
                 return run_tool(*builtin, input, events, cancel, backup, seen, allowed_tools);
-            }, events.notice};
+            }, events.notice,
+            [this](std::string_view query, std::size_t limit) {
+                return tools_.search_and_activate(query, limit);
+            }};
 }
 
 tool_output agent::run_local(const std::function<tool_output(tool_context&)>& action,
@@ -393,7 +395,7 @@ tool_output agent::run_local(const std::function<tool_output(tool_context&)>& ac
     return out;
 }
 
-void agent::set_extensions(std::vector<tool> tools, agent_hooks hooks) {
+void agent::set_extensions(tool_registry tools, agent_hooks hooks) {
     tools_ = std::move(tools);
     hooks_ = std::move(hooks);
 }

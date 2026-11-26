@@ -60,6 +60,7 @@ TEST_CASE("newline JSON-RPC handshake lists and calls a tool") {
     const auto tools = make_mcp_tools({client});
     REQUIRE(tools.size() == 1);
     CHECK(tools[0].name == "mcp__fixture__echo");
+    CHECK(tools[0].exposure == tool_exposure::deferred);
     auto validated = tools[0];
     validated.schema = {{"type", "object"}, {"properties", {{"text", {{"type", "string"}}}}},
                         {"required", {"text"}}, {"additionalProperties", false}};
@@ -71,4 +72,12 @@ TEST_CASE("newline JSON-RPC handshake lists and calls a tool") {
     const auto output = tools[0].run({{"text", "pong"}}, ctx);
     CHECK_FALSE(output.is_error);
     CHECK(output.text.find("pong") != std::string::npos);
+
+    cfg.name = "direct_fixture";
+    cfg.exposure = tool_exposure::direct;
+    auto direct_client = std::make_shared<mcp_client>(cfg);
+    REQUIRE(direct_client->initialize(std::chrono::seconds(5)));
+    const auto direct_tools = make_mcp_tools({direct_client});
+    REQUIRE(direct_tools.size() == 1);
+    CHECK(direct_tools[0].exposure == tool_exposure::direct);
 }

@@ -175,6 +175,7 @@ std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>&
             if (!client->server_name().empty()) t.description += " (MCP server: " + client->server_name() + ")";
             t.schema = mcp_tool.schema.is_object() ? mcp_tool.schema : json::object();
             t.access = tool_access::execute;
+            t.exposure = client->exposure();
             t.label = [name = mcp_tool.name](const json&) { return name; };
 
             const auto original_name = mcp_tool.name;

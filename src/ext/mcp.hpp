@@ -21,6 +21,7 @@ public:
         std::vector<std::string> args;
         std::map<std::string, std::string> env;
         fs::path working_dir;
+        tool_exposure exposure = tool_exposure::deferred;
     };
 
     struct mcp_tool_info {
@@ -43,6 +44,7 @@ public:
     tool_output call_tool(const std::string& name, const json& arguments);
 
     const std::string& server_name() const { return config_.name; }
+    tool_exposure exposure() const { return config_.exposure; }
     const std::string& error() const { return error_; }
     bool is_running() const { return process_ && process_->is_running(); }
 

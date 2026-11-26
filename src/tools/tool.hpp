@@ -33,6 +33,7 @@ struct file_stamp {
 enum class answer { yes, no, always };
 struct tool;
 struct tool_output;
+struct tool_search_result;
 
 struct tool_context {
     fs::path root;
@@ -44,6 +45,7 @@ struct tool_context {
     std::span<const std::string> allowed_tools{};
     std::function<tool_output(std::string_view, const json&)> invoke_builtin{};
     std::function<void(std::string_view)> notice{};
+    std::function<std::vector<tool_search_result>(std::string_view, std::size_t)> search_tools{};
 };
 
 struct tool_output {
@@ -55,6 +57,7 @@ struct tool_output {
 };
 
 enum class tool_access { read, write, execute };
+enum class tool_exposure { direct, deferred };
 
 struct tool {
     std::string name;
@@ -65,9 +68,30 @@ struct tool {
     // Short label for the UI and permission prompt, e.g. the path or the command.
     std::function<std::string(const json& input)> label;
     bool parallel_file_write = false;
+    tool_exposure exposure = tool_exposure::direct;
+};
+
+struct tool_search_result {
+    std::string name;
+    std::string description;
+};
+
+class tool_registry {
+public:
+    explicit tool_registry(std::vector<tool> tools = {});
+
+    const tool* find(std::string_view name) const;
+    const std::vector<tool>& all() const { return tools_; }
+    std::vector<tool> model_tools() const;
+    std::vector<tool_search_result> search_and_activate(std::string_view query, std::size_t limit);
+
+private:
+    std::vector<tool> tools_;
+    std::vector<bool> activated_;
 };
 
 std::vector<tool> builtin_tools();
+tool make_tool_search_tool();
 std::string tool_input_error(const tool& t, const json& input);
 // Shell the Bash tool uses on this machine: "bash" or "powershell".
 std::string shell_name();

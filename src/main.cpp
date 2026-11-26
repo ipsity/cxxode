@@ -1,5 +1,6 @@
 #include "app/app.hpp"
 #include "app/builtin_commands.hpp"
+#include "app/tool_registry.hpp"
 #include "ext/commands.hpp"
 #include "app/rpc.hpp"
 #include "core/version.hpp"
@@ -233,6 +234,13 @@ int main(int argc, char** argv) {
             cfg.name = name;
             cfg.command = config.value("command", "");
             if (cfg.command.empty()) continue;
+            if (const auto exposure = config.find("exposure"); exposure != config.end()) {
+                if (exposure->is_string() && exposure->get<std::string>() == "direct") {
+                    cfg.exposure = tool_exposure::direct;
+                } else if (!exposure->is_string() || exposure->get<std::string>() != "deferred") {
+                    ui::write_stream(true, "ode: invalid MCP exposure for " + name + "; using deferred\n");
+                }
+            }
             if (config.contains("args") && config["args"].is_array()) {
                 for (const auto& arg : config["args"]) {
                     if (arg.is_string()) cfg.args.push_back(arg);
@@ -257,32 +265,17 @@ int main(int argc, char** argv) {
     a.agents = load_agents(workspace);
 
     const auto assemble_extensions = [&](std::vector<std::string>& warnings) {
-        auto tools = builtin_tools();
-        const auto append = [&tools](std::vector<tool> more) {
-            tools.insert(tools.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
-        };
-        append(make_skill_tools(a.skills));
-        append(make_mcp_tools(a.mcp_clients));
-        auto lua_tools = lua.tools();
-        std::erase_if(lua_tools, [&](const tool& t) {
-            const bool conflict = t.name == "Task" ||
-                std::ranges::find(tools, t.name, &tool::name) != tools.end();
-            if (conflict) warnings.push_back("Lua tool name is reserved: " + t.name);
-            return conflict;
-        });
-        append(std::move(lua_tools));
         script_hooks script;
         if (lua.has_hooks()) {
             script = [&lua](hook_type type, const json& input, cancel_token& cancel) {
                 return lua.run_hooks(type, input, cancel, parse_hook_output);
             };
         }
-        auto hooks = make_agent_hooks(a.config.hooks, [&a] {
+        auto setup = build_tool_registry(a.skills, a.mcp_clients, lua.tools(), a.agents,
+            *a.model_provider, a.permissions, [&a] { return a.core->model; }, a.config.hooks, [&a] {
             return hook_session{a.session_id, a.log.path(), a.root};
-        }, std::move(script));
-        // A subagent receives every registered tool except Task itself.
-        append(make_task_tools(a.agents, *a.model_provider, tools, a.permissions, [&a] { return a.core->model; }, hooks));
-        a.core->set_extensions(std::move(tools), std::move(hooks));
+        }, std::move(script), warnings);
+        a.core->set_extensions(std::move(setup.registry), std::move(setup.hooks));
     };
     a.core = std::make_unique<agent>(*a.model_provider, std::vector<tool>{}, a.permissions, workspace);
     a.reload_lua = [&](cancel_token& cancel) {
