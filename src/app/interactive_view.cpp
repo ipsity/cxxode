@@ -198,8 +198,9 @@ std::vector<std::string> interactive_ui::palette_rows(int columns, std::size_t c
 
 std::string interactive_ui::status_line(int columns) const {
     const auto mode = app_.core ? app_.permissions.mode() : permission_mode::normal;
-    std::string right = std::string(mode_name(mode)) + " · " + app_.provider_cfg.name + " / " + app_.core->model;
-    if (usage_.context) {
+    std::string right = std::string(mode_name(mode)) + " · " + app_.provider_cfg.name;
+    right += app_.credential_error ? " / 未登录" : " / " + app_.core->model;
+    if (!app_.credential_error && usage_.context) {
         right += " · " + short_count(usage_.context) + "/" + short_count(app_.core->context_window);
         // Add cost display
         const double cost = app_.core->total.cost_usd(app_.core->model);
