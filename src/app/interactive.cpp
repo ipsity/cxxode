@@ -64,16 +64,18 @@ agent_events interactive_ui::make_events() {
     ev.thinking = [this](std::string_view text, std::string_view) {
         if (!text.empty()) push(ev_thinking{std::string(text)});
     };
-    ev.tool_preparing = [this](std::string_view name) { push(ev_tool_preparing{std::string(name)}); };
+    ev.tool_preparing = [this](std::string_view name) {
+        if (!name.empty()) push(ev_tool_preparing{std::string(name), steady::now()});
+    };
     ev.tool_started = [this](const tool& t, const json& in) {
         const auto command = t.name == "Bash" ? bash_command(in) : std::string_view{};
         const auto label = t.name == "Bash" ? ui::one_line(command) : tool_label(t, in, app_.root);
-        push(ev_tool_start{t.name, label, std::string(command)});
+        push(ev_tool_start{t.name, label, std::string(command), steady::now()});
     };
     ev.tool_progress = [this](std::string_view s) { push(ev_progress{std::string(s)}); };
     ev.tool_finished = [this](const tool& t, const json& in, const tool_output& o) {
         const auto label = t.name == "Bash" ? ui::one_line(bash_command(in)) : tool_label(t, in, app_.root);
-        push(ev_tool_done{t.name, label, o.summary, o.detail, o.text, o.is_error});
+        push(ev_tool_done{t.name, label, o.summary, o.detail, o.text, o.is_error, o.elapsed});
     };
     ev.ask = [this](const tool& t, const json& in) {
         auto promise = std::make_shared<std::promise<answer>>();

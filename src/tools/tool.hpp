@@ -5,6 +5,7 @@
 #include "base/json.hpp"
 #include "base/text.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -49,6 +50,7 @@ struct tool_output {
     bool is_error = false;
     std::string summary;   // one line for the UI, e.g. "+4 -1" or "12 lines"
     std::string detail;    // optional extra lines for the UI, e.g. a diff
+    std::optional<std::chrono::milliseconds> elapsed{};  // time spent executing, if dispatched
 };
 
 enum class tool_access { read, write, execute };

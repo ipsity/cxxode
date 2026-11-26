@@ -230,6 +230,16 @@ std::string interactive_ui::status_line(int columns) const {
            paint(tone::dim, right.substr(mode_text.size()));
 }
 
+std::string interactive_ui::format_elapsed(std::chrono::milliseconds elapsed) {
+    const auto ms = elapsed.count();
+    if (ms == 0) return "<1 ms";
+    if (ms < 1000) return std::to_string(ms) + " ms";
+    if (ms < 60000) {
+        return std::to_string(ms / 1000) + "." + std::to_string(ms % 1000 / 100) + " s";
+    }
+    return std::to_string(ms / 60000) + "m " + std::to_string(ms / 1000 % 60) + "s";
+}
+
 std::vector<std::string> interactive_ui::activity_rows() const {
     std::vector<std::string> rows;
     const int columns = std::max(1, size_.columns - 1);
@@ -245,16 +255,20 @@ std::vector<std::string> interactive_ui::activity_rows() const {
     if (!progress_tail_.empty()) {
         for (auto& row : tool_detail_rows(progress_tail_, tone::dim)) rows.push_back(std::move(row));
     }
+    const auto now = steady::now();
     for (const auto& t : running_) {
         const auto head = spinner_with_color(t.started, t.name, app_.current_theme) + " " + std::string(ui::verb(t.name)) + " ";
-        const auto tail = "  " + seconds(t.started);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - t.started);
+        const auto tail = "  " + format_elapsed(elapsed);
         const auto label = t.name == "Bash" ? "运行中" :
             text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
         rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
     }
-    if (!ask_ && !preparing_tool_.empty()) {
-        rows.push_back(" " + spinner_with_color(busy_since_, preparing_tool_, app_.current_theme) +
-                       paint(tone::dim, " 准备 " + preparing_tool_ + " 参数"));
+    if (!ask_ && preparing_tool_) {
+        const auto& [name, started] = *preparing_tool_;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - started);
+        rows.push_back(" " + spinner_with_color(started, name, app_.current_theme) +
+                       paint(tone::dim, " 准备 " + name + " 参数  " + format_elapsed(elapsed)));
     } else if (!ask_ && busy_ && running_.empty() && thinking_) {
         rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking", app_.current_theme)) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
     }

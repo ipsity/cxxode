@@ -111,12 +111,12 @@ void interactive_ui::apply(ev_thinking& e) {
 void interactive_ui::apply(ev_request&) {
     flush_thinking(true);
     flush_stream(true);
-    preparing_tool_.clear();
+    preparing_tool_.reset();
     thinking_ = true;
 }
 
 void interactive_ui::apply(ev_tool_preparing& e) {
-    preparing_tool_ = std::move(e.name);
+    preparing_tool_ = std::move(e);
     thinking_ = false;
 }
 
@@ -151,11 +151,11 @@ void interactive_ui::flush_command_output(bool all) {
 }
 
 void interactive_ui::apply(ev_tool_start& e) {
-    preparing_tool_.clear();
+    preparing_tool_.reset();
     thinking_ = false;
     flush_thinking(true);
     flush_stream(true);
-    running_.push_back({e.name, e.label, steady::now()});
+    running_.push_back({e.name, e.label, e.started});
     if (e.name == "Bash") {
         command_output_bytes_ = 0;
         command_output_truncated_ = false;
@@ -193,12 +193,13 @@ void interactive_ui::apply(ev_tool_done& e) {
     section("tool");
     const int columns = size_.columns - 1;
     const auto head = std::string(ui::verb(e.name));
+    const auto duration = e.elapsed ? "  " + format_elapsed(*e.elapsed) : std::string{};
     const auto summary = e.summary.empty() ? std::string{} : "  " + e.summary;
-    const int fixed = 4 + text::width(head) + text::width(summary);
-    const auto label = bash ? std::string{} : text::keep_head(e.label, std::max(8, columns - fixed));
+    const int fixed = 4 + text::width(head) + text::width(duration) + text::width(summary);
+    const auto label = bash ? std::string{} : text::keep_head(e.label, std::max(0, columns - fixed));
     const auto dot = paint(e.error ? tone::error : tone::dim, "●");
 
-    screen_.commit(" " + dot + " " + paint(tone::dim, head) +
+    screen_.commit(" " + dot + " " + paint(tone::dim, head + duration) +
                    (label.empty() ? "" : " " + paint(tone::accent, label)) + paint(e.error ? tone::error : tone::dim, summary));
 
     if (!e.detail.empty()) {
@@ -248,7 +249,7 @@ void interactive_ui::apply(ev_ask& e) {
         e.reply->set_value(answer::no);
         return;
     }
-    preparing_tool_.clear();
+    preparing_tool_.reset();
     flush_thinking(true);
     flush_stream(true);
 
@@ -311,7 +312,7 @@ void interactive_ui::apply(ev_done& e) {
     flush_stream(true);
     flush_command_output(true);
     running_.clear();
-    preparing_tool_.clear();
+    preparing_tool_.reset();
     busy_ = false;
     thinking_ = false;
     if (worker_.joinable()) worker_.join();

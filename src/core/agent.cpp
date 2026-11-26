@@ -278,11 +278,13 @@ tool_output agent::run_tool(const tool& t, const json& input, agent_events& even
 
     if (events.tool_started) events.tool_started(t, input);
     auto ctx = make_context(t.access, events, cancel, backup, seen, allowed_tools);
+    const auto started = std::chrono::steady_clock::now();
     try {
         out = t.run(input, ctx);
     } catch (const std::exception& e) {
         out = {std::string("Tool failed: ") + e.what(), true, "失败", {}};
     }
+    out.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
 
     if (events.tool_finished) events.tool_finished(t, input, out);
 

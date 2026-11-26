@@ -2,7 +2,6 @@
 #include "platform/process.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
 
 namespace ode {
@@ -82,9 +81,7 @@ tool_output bash_tool(const json& input, tool_context& ctx) {
     } else {
         const int code = r.exit_code.value_or(-1);
         if (code != 0) text += "\n[exit code " + std::to_string(code) + "]";
-        char seconds[32];
-        std::snprintf(seconds, sizeof(seconds), "%.1fs", static_cast<double>(r.elapsed.count()) / 1000.0);
-        summary = code == 0 ? std::string("✓ ") + seconds : "✗ exit " + std::to_string(code) + "  " + seconds;
+        summary = code == 0 ? "✓" : "✗ exit " + std::to_string(code);
         error = code != 0;
     }
     if (text.empty()) text = "(no output)";

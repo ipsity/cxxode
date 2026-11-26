@@ -72,11 +72,19 @@ TEST_CASE("loop runs tools until the model stops and undo restores files") {
     agent_events ev;
     std::vector<std::string> started;
     ev.tool_started = [&](const tool& t, const json&) { started.push_back(t.name); };
+    std::map<std::string, std::chrono::milliseconds> elapsed;
+    ev.tool_finished = [&](const tool& t, const json&, const tool_output& out) {
+        if (out.elapsed) elapsed.emplace(t.name, *out.elapsed);
+    };
     cancel_token cancel;
     auto r = a.run("change it", ev, cancel);
     CHECK(r.stop == stop_reason::end_turn);
     CHECK(p.requests.size() == 3);
     CHECK(started.size() == 3);
+    CHECK(elapsed.size() == 3);
+    CHECK(elapsed.contains("Read"));
+    CHECK(elapsed.contains("Glob"));
+    CHECK(elapsed.contains("Edit"));
     // Second request carries both parallel read results, in call order.
     const auto& results = p.requests[1].messages.back().blocks;
     REQUIRE(results.size() == 2);
@@ -115,9 +123,12 @@ TEST_CASE("declined bash is reported to the model and always adds a rule") {
     std::vector<answer> answers{answer::no, answer::always};
     int asked = 0;
     ev.ask = [&](const tool&, const json&) { return answers[static_cast<std::size_t>(asked++)]; };
+    std::vector<bool> timed;
+    ev.tool_finished = [&](const tool&, const json&, const tool_output& out) { timed.push_back(out.elapsed.has_value()); };
     cancel_token cancel;
     a.run("build", ev, cancel);
     CHECK(asked == 2);
+    CHECK(timed == std::vector<bool>{false, true});
     CHECK(p.requests[1].messages.back().blocks[0].is_error);
     REQUIRE(rules.allow.size() == 1);
     CHECK(rules.allow[0] == "Bash(npm run:*)");

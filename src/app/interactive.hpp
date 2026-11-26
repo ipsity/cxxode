@@ -22,10 +22,14 @@ using steady = std::chrono::steady_clock;
 struct ev_text { std::string text; };
 struct ev_thinking { std::string text; };
 struct ev_request {};
-struct ev_tool_preparing { std::string name; };
-struct ev_tool_start { std::string name, label, command; };
+struct ev_tool_preparing { std::string name; steady::time_point started; };
+struct ev_tool_start { std::string name, label, command; steady::time_point started; };
 struct ev_progress { std::string text; };
-struct ev_tool_done { std::string name, label, summary, detail, full; bool error = false; };
+struct ev_tool_done {
+    std::string name, label, summary, detail, full;
+    bool error = false;
+    std::optional<std::chrono::milliseconds> elapsed;
+};
 struct ev_ask { std::string name, label, rule; std::shared_ptr<std::promise<answer>> reply; };
 struct ev_usage { std::size_t context = 0, input = 0, output = 0; };
 struct ev_notice { std::string message; std::optional<std::size_t> context; };
@@ -98,6 +102,7 @@ private:
     std::vector<std::string> file_items();     // File completion candidates
     std::vector<std::string> suggestion_items();  // Day 8: Tool suggestions based on input
     std::string status_line(int columns) const;
+    static std::string format_elapsed(std::chrono::milliseconds elapsed);
     void push(ui_event e);
     agent_events make_events();
     void show_customize_menu();  // Show theme customization menu
@@ -157,7 +162,7 @@ private:
     bool think_started_ = false;
     ui::markdown_state md_;
     std::vector<running_tool> running_;
-    std::string preparing_tool_;
+    std::optional<ev_tool_preparing> preparing_tool_;
     std::string progress_tail_;
     std::size_t command_output_bytes_ = 0;
     bool command_output_truncated_ = false;
