@@ -86,6 +86,7 @@ private:
     std::vector<std::string> thinking_rows(std::string_view line, int columns) const;
     void answer_ask(answer a);
     void cancel();
+    void set_permission_mode(permission_mode mode);
     std::vector<std::string> activity_rows() const;
     std::vector<std::string> footer_rows(int& cursor_row, int& cursor_col);
     void show_session_history();
@@ -101,8 +102,8 @@ private:
     std::vector<palette_item> palette_items() const;
     std::vector<std::string> file_items();     // File completion candidates
     std::vector<std::string> suggestion_items();  // Day 8: Tool suggestions based on input
-    std::string status_line(int columns) const;
     static std::string format_elapsed(std::chrono::milliseconds elapsed);
+    std::string status_line(int columns) const;
     void push(ui_event e);
     agent_events make_events();
     void show_customize_menu();  // Show theme customization menu

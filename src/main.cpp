@@ -329,5 +329,10 @@ int main(int argc, char** argv) {
         return run_interactive(a, prompt);
     } catch (const std::exception& e) {
         return fail(e.what());
+        if (mode_text.empty()) {
+            if (const auto saved = read_file(ode_home() / "permission_mode.txt")) {
+                if (auto mode = parse_mode(*saved)) a.permissions.set_mode(*mode);
+            }
+        }
     }
 }

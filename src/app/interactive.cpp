@@ -1,5 +1,8 @@
 #include "app/interactive.hpp"
+#include "platform/file_lock.hpp"
 #include "ui/welcome.hpp"
+
+#include <fstream>
 
 namespace ode {
 
@@ -50,6 +53,29 @@ interactive_ui::~interactive_ui() {
         if (done) worker_.join();
         else std::this_thread::sleep_for(10ms);
     }
+}
+
+void interactive_ui::set_permission_mode(permission_mode mode) {
+    app_.permissions.set_mode(mode);
+    const auto directory = ode_home();
+    const auto path = directory / "permission_mode.txt";
+    std::error_code ec;
+    fs::create_directories(directory, ec);
+    if (!ec) {
+        const file_lock lock(directory / "permission_mode.lock");
+        if (lock) {
+            const auto temporary = directory / "permission_mode.tmp";
+            std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+            out << mode_name(mode);
+            out.close();
+            if (out) {
+                fs::rename(temporary, path, ec);
+                if (!ec) return;
+            }
+            fs::remove(temporary, ec);
+        }
+    }
+    note("权限档已切换，但无法保存到下次启动", ui::tone::error);
 }
 
 void interactive_ui::push(ui_event e) {

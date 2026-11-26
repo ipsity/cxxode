@@ -305,8 +305,8 @@ bool interactive_ui::command(const std::string& line) {
             }
         }
     } else if (name == "/mode") {
-        if (auto m = parse_mode(arg)) app_.permissions.set_mode(*m);
-        else if (arg.empty()) app_.permissions.set_mode(next_mode(app_.permissions.mode()));
+        if (auto m = parse_mode(arg)) set_permission_mode(*m);
+        else if (arg.empty()) set_permission_mode(next_mode(app_.permissions.mode()));
         else note("档位为 plan、default 或 yolo", tone::error);
         note("权限档 " + std::string(mode_name(app_.permissions.mode())));
     } else if (name == "/theme") {

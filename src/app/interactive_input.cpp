@@ -93,7 +93,7 @@ void interactive_ui::handle(const ui::key& k, bool allow_lua) {
         else if (k.kind == key_kind::escape || (k.kind == key_kind::character && (k.text == "n" || k.text == "N"))) answer_ask(answer::no);
         else if (k.kind == key_kind::character && (k.text == "a" || k.text == "A")) answer_ask(answer::always);
         else if (k.kind == key_kind::ctrl && k.letter == 'c') cancel();
-        else if (k.kind == key_kind::shift_tab) app_.permissions.set_mode(next_mode(app_.permissions.mode()));
+        else if (k.kind == key_kind::shift_tab) set_permission_mode(next_mode(app_.permissions.mode()));
         return;
     }
     if (allow_lua && !busy_ && app_.lua && (k.kind == key_kind::ctrl || k.kind == key_kind::function_key)) {
@@ -161,11 +161,9 @@ void interactive_ui::handle(const ui::key& k, bool allow_lua) {
                 }
             }
             break;
-        case key_kind::shift_tab: {
-            const auto m = next_mode(app_.permissions.mode());
-            app_.permissions.set_mode(m);
+        case key_kind::shift_tab:
+            set_permission_mode(next_mode(app_.permissions.mode()));
             break;
-        }
         case key_kind::escape:
             if (busy_) {
                 cancel();
