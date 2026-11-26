@@ -86,7 +86,7 @@ private:
     std::vector<std::string> footer_rows(int& cursor_row, int& cursor_col);
     void show_session_history();
     void show_user_message(std::string_view text);
-    std::vector<std::string> palette_rows(int columns);
+    std::vector<std::string> palette_rows(int columns, std::size_t capacity);
     enum class command_kind { builtin, skill, user_command };
     struct palette_item {
         std::string name;

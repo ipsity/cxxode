@@ -1,4 +1,5 @@
 #include "app/interactive.hpp"
+#include "app/palette.hpp"
 #include "ext/lua/host.hpp"
 
 #include <cctype>
@@ -10,11 +11,7 @@ using ui::tone;
 
 namespace {
 
-constexpr std::size_t menu_rows = 6;
-
-std::size_t first_visible(std::size_t selected, std::size_t visible) {
-    return selected < visible ? 0 : selected + 1 - visible;
-}
+constexpr std::size_t menu_rows = 5;
 
 // Aliases (/b, /c, ...) still work when typed but are left out so each command appears once.
 const std::pair<const char*, const char*> builtin_commands[] = {
@@ -170,15 +167,14 @@ std::vector<std::string> interactive_ui::suggestion_items() {
     return result;
 }
 
-std::vector<std::string> interactive_ui::palette_rows(int columns) {
+std::vector<std::string> interactive_ui::palette_rows(int columns, std::size_t capacity) {
     std::vector<std::string> rows;
     const auto items = palette_items();
-    const auto capacity = static_cast<std::size_t>(std::max(0, size_.rows - 5));
     const auto visible = std::min({menu_rows, items.size(), capacity});
     if (visible == 0) return rows;
     if (palette_index_ >= items.size()) palette_index_ = 0;
 
-    const auto first = first_visible(palette_index_, visible);
+    const auto first = detail::first_visible(palette_index_, visible, items.size());
     constexpr std::string_view marker = "▶ ";
     const int prefix_width = text::width(marker);
     for (auto i = first; i < first + visible; ++i) {
@@ -193,7 +189,7 @@ std::vector<std::string> interactive_ui::palette_rows(int columns) {
         if (!description.empty()) row += std::string(gap, ' ') + paint(tone::dim, description);
         rows.push_back(std::move(row));
     }
-    if (items.size() > visible) {
+    if (items.size() > visible && visible < capacity) {
         rows.push_back("  " + paint(tone::dim,
             "[" + std::to_string(palette_index_ + 1) + "/" + std::to_string(items.size()) + "]"));
     }
@@ -246,20 +242,20 @@ std::vector<std::string> interactive_ui::activity_rows() const {
         auto state = md_;
         for (auto& r : ui::markdown_line(stream_, state, columns)) rows.push_back(std::move(r));
     }
+    if (!progress_tail_.empty()) {
+        for (auto& row : tool_detail_rows(progress_tail_, tone::dim)) rows.push_back(std::move(row));
+    }
     for (const auto& t : running_) {
         const auto head = spinner_with_color(t.started, t.name, app_.current_theme) + " " + std::string(ui::verb(t.name)) + " ";
         const auto tail = "  " + seconds(t.started);
-        const auto label = text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
+        const auto label = t.name == "Bash" ? "运行中" :
+            text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
         rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
     }
-    if (!progress_tail_.empty()) {
-        auto lines = text::wrap(progress_tail_, columns - 6);
-        while (!lines.empty() && lines.back().empty()) lines.pop_back();
-        const std::size_t keep = 4;
-        for (std::size_t i = lines.size() > keep ? lines.size() - keep : 0; i < lines.size(); ++i)
-            rows.push_back("   " + paint(tone::dim, "│ " + lines[i]));
-    }
-    if (!ask_ && busy_ && running_.empty() && (thinking_ || stream_.empty())) {
+    if (!ask_ && !preparing_tool_.empty()) {
+        rows.push_back(" " + spinner_with_color(busy_since_, preparing_tool_, app_.current_theme) +
+                       paint(tone::dim, " 准备 " + preparing_tool_ + " 参数"));
+    } else if (!ask_ && busy_ && running_.empty() && thinking_) {
         rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking", app_.current_theme)) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
     }
     return rows;
@@ -282,7 +278,7 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
         cursor_col = 0;
         const auto capacity = static_cast<std::size_t>(std::max(1, size_.rows - 2));
         const auto visible = std::min({menu_rows, selection_->items.size(), capacity});
-        const auto first = first_visible(selection_->selected_index, visible);
+        const auto first = detail::first_visible(selection_->selected_index, visible, selection_->items.size());
         rows = {" " + paint(tone::accent_bold, ui::one_line(selection_->title))};
         for (auto i = first; i < first + visible; ++i) {
             const bool selected = i == selection_->selected_index;
@@ -297,7 +293,11 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
         return rows;
     }
 
-    auto palette = palette_rows(columns);
+    const bool show_borders = size_.rows >= (ask_ ? 7 : 5);
+    const bool show_status = show_borders || (!ask_ && size_.rows >= 3);
+    const int chrome = (show_borders ? 2 : 0) + (show_status ? 1 : 0);
+    const auto extra_rows = static_cast<std::size_t>(std::max(0, size_.rows - chrome - 2));
+    auto palette = palette_rows(columns, extra_rows);
 
     std::vector<std::string> file_completion;
     const auto files = file_items();
@@ -339,10 +339,7 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
         }
     }
 
-    const bool show_borders = size_.rows >= (ask_ ? 7 : 5);
-    const bool show_status = show_borders || (!ask_ && size_.rows >= 3);
-    const int chrome = (show_borders ? 2 : 0) + (show_status ? 1 : 0);
-    const auto extra_rows = static_cast<std::size_t>(std::max(0, size_.rows - chrome - 2));
+    const auto above_input_capacity = extra_rows - palette.size();
     if (ask_ && size_.rows > 1) {
         const auto head = std::string(ui::verb(ask_->name)) + " ";
         if (size_.rows > 2) {
@@ -352,16 +349,17 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
                        paint(tone::dim, " 拒绝   ") + paint(tone::accent, "a") +
                        paint(tone::dim, " 总是允许 " + text::keep_head(ask_->rule, std::max(8, columns - 32))));
     }
-    if (!hint_.empty() && rows.size() < extra_rows) rows.push_back("  " + paint(tone::dim, hint_));
-    for (auto* list : {&palette, &file_completion, &hints}) {
+    if (!hint_.empty() && rows.size() < above_input_capacity) rows.push_back("  " + paint(tone::dim, hint_));
+    for (auto* list : {&file_completion, &hints}) {
         for (auto& line : *list) {
-            if (rows.size() >= extra_rows) break;
+            if (rows.size() >= above_input_capacity) break;
             rows.push_back(std::move(line));
         }
     }
 
     const auto l = editor_.arrange(std::max(1, columns - 4));
-    const int max_input_lines = std::clamp(size_.rows - chrome - static_cast<int>(rows.size()) - 1, 1, 10);
+    const int occupied = static_cast<int>(rows.size() + palette.size());
+    const int max_input_lines = std::clamp(size_.rows - chrome - occupied - 1, 1, 10);
     const int actual_input_lines = std::min(static_cast<int>(l.rows.size()), max_input_lines);
     const int first_input_line = std::max(0, l.cursor_row - actual_input_lines + 1);
 
@@ -390,6 +388,7 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
     }
 
     if (show_borders) rows.push_back(std::move(border));
+    for (auto& line : palette) rows.push_back(std::move(line));
     if (show_status) rows.push_back(status_line(columns));
 
     cursor_row = ask_ ? -1 : input_start + l.cursor_row - first_input_line;

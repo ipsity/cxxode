@@ -116,6 +116,7 @@ if(BUILD_TESTING)
         tests/core/version_test.cpp
         tests/core/agent_test.cpp
         tests/app/provider_switch_test.cpp
+        tests/app/palette_test.cpp
         tests/provider/provider_test.cpp
         tests/tools/tools_test.cpp
         tests/ui/ui_test.cpp
