@@ -21,6 +21,7 @@ namespace fs = std::filesystem;
 // Original contents of files changed during one user turn, for /undo.
 struct turn_backup {
     std::map<fs::path, std::optional<std::string>> originals;  // nullopt: file did not exist
+    void remember(const fs::path& path, std::optional<std::string> original);
 };
 
 struct file_stamp {
@@ -63,9 +64,11 @@ struct tool {
     std::function<tool_output(const json& input, tool_context& ctx)> run;
     // Short label for the UI and permission prompt, e.g. the path or the command.
     std::function<std::string(const json& input)> label;
+    bool parallel_file_write = false;
 };
 
 std::vector<tool> builtin_tools();
+std::string tool_input_error(const tool& t, const json& input);
 // Shell the Bash tool uses on this machine: "bash" or "powershell".
 std::string shell_name();
 std::optional<fs::path> git_bash();
@@ -74,11 +77,23 @@ std::optional<fs::path> git_bash();
 fs::path resolve(const fs::path& root, std::string_view path);
 std::string display_path(const fs::path& root, const fs::path& path);
 bool inside(const fs::path& root, const fs::path& path);
+struct write_target {
+    fs::path path;
+    bool exists;
+};
+std::optional<write_target> parallel_write_target(const fs::path& root, const fs::path& path);
+bool independent_write_targets(const write_target& left, const write_target& right);
 bool glob_match(std::string_view pattern, std::string_view path);
 std::vector<fs::path> workspace_files(const fs::path& root, const fs::path& under);
 std::optional<file_stamp> stamp(const fs::path& path);
 
 // Restores every file in the backup. Returns the display paths restored.
+struct restore_result {
+    std::vector<std::string> restored;
+    std::vector<std::string> failed;
+};
+
+restore_result restore_report(const turn_backup& backup, const fs::path& root);
 std::vector<std::string> restore(const turn_backup& backup, const fs::path& root);
 
 } // namespace ode

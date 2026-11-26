@@ -21,7 +21,7 @@ void remember(tool_context& ctx, const fs::path& path) {
 }
 
 void back_up(tool_context& ctx, const fs::path& path, std::optional<std::string> original) {
-    if (ctx.backup) ctx.backup->originals.try_emplace(path, std::move(original));
+    if (ctx.backup) ctx.backup->remember(path, std::move(original));
 }
 
 bool write_all(const fs::path& path, const std::string& content) {
@@ -239,7 +239,7 @@ std::vector<tool> edit_tools() {
          tool_access::read, read_tool, label},
         {"Write", "Create a file or overwrite it entirely. Prefer Edit for changes to existing files.",
          schema({{"file_path", {{"type", "string"}}}, {"content", {{"type", "string"}}}}, {"file_path", "content"}),
-         tool_access::write, write_tool, label},
+         tool_access::write, write_tool, label, true},
         {"Edit", "Replace exact text in a file. old_string must match the file exactly (without the line-number prefix "
                  "from Read) and be unique unless replace_all is true.",
          schema({{"file_path", {{"type", "string"}}},
@@ -247,7 +247,7 @@ std::vector<tool> edit_tools() {
                  {"new_string", {{"type", "string"}}},
                  {"replace_all", {{"type", "boolean"}, {"default", false}}}},
                 {"file_path", "old_string", "new_string"}),
-         tool_access::write, edit_tool, label},
+         tool_access::write, edit_tool, label, true},
     };
 }
 

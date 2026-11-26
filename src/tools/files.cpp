@@ -1,5 +1,6 @@
 #include "tools/tool.hpp"
 #include "platform/process.hpp"
+#include "platform/win_util.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -16,6 +17,47 @@ fs::path resolve(const fs::path& root, std::string_view path) {
 bool inside(const fs::path& root, const fs::path& path) {
     const auto rel = path.lexically_normal().lexically_relative(root.lexically_normal());
     return !rel.empty() && *rel.begin() != "..";
+}
+
+std::optional<write_target> parallel_write_target(const fs::path& root, const fs::path& path) {
+    if (root == path || !inside(root, path)) return std::nullopt;
+    const auto name = path.filename().native();
+    if (name.empty() || name.back() == L'.' || name.back() == L' ' ||
+        name.find_first_of(L"~:<>\"|?*") != std::wstring::npos) return std::nullopt;
+
+    std::error_code ec;
+    const auto parent = fs::canonical(path.parent_path(), ec);
+    if (ec || !inside(root, parent) || !fs::is_directory(parent, ec) || ec) return std::nullopt;
+    const auto target = parent / path.filename();
+    const auto attributes = GetFileAttributesW(target.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        if (GetLastError() != ERROR_FILE_NOT_FOUND) return std::nullopt;
+        // Keep new names away from DOS devices and names with ambiguous Win32 normalization.
+        constexpr std::wstring_view simple = L"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
+        if (name.find_first_not_of(simple) != std::wstring::npos) return std::nullopt;
+        const auto stem = name.substr(0, name.find(L'.'));
+        for (const auto* device : {L"CON", L"PRN", L"AUX", L"NUL", L"COM0", L"COM1", L"COM2", L"COM3", L"COM4",
+                                   L"COM5", L"COM6", L"COM7", L"COM8", L"COM9", L"LPT0", L"LPT1", L"LPT2",
+                                   L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9"}) {
+            if (CompareStringOrdinal(stem.c_str(), -1, device, -1, TRUE) == CSTR_EQUAL) return std::nullopt;
+        }
+        return write_target{target, false};
+    }
+    if ((attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DEVICE)) != 0 ||
+        fs::hard_link_count(target, ec) != 1 || ec) return std::nullopt;
+    return write_target{target, true};
+}
+
+bool independent_write_targets(const write_target& left, const write_target& right) {
+    std::error_code ec;
+    if (left.exists && right.exists) return !fs::equivalent(left.path, right.path, ec) && !ec;
+    const bool same_parent = fs::equivalent(left.path.parent_path(), right.path.parent_path(), ec);
+    if (ec) return false;
+    if (!same_parent) return true;
+    const auto left_name = left.path.filename();
+    const auto right_name = right.path.filename();
+    const int comparison = CompareStringOrdinal(left_name.c_str(), -1, right_name.c_str(), -1, TRUE);
+    return comparison == CSTR_LESS_THAN || comparison == CSTR_GREATER_THAN;
 }
 
 std::string display_path(const fs::path& root, const fs::path& path) {
@@ -144,19 +186,42 @@ std::vector<fs::path> workspace_files(const fs::path& root, const fs::path& unde
     return walk(under);
 }
 
-std::vector<std::string> restore(const turn_backup& backup, const fs::path& root) {
-    std::vector<std::string> restored;
+void turn_backup::remember(const fs::path& path, std::optional<std::string> original) {
+    if (originals.contains(path)) return;
+    // Windows file identity can be shared by distinct alternate data streams.
+    if (original && path.relative_path().native().find(L':') == std::wstring::npos) {
+        for (const auto& [prior, unused] : originals) {
+            if (prior.relative_path().native().find(L':') != std::wstring::npos) continue;
+            std::error_code ec;
+            if (fs::equivalent(prior, path, ec) && !ec) return;
+        }
+    }
+    originals.emplace(path, std::move(original));
+}
+
+restore_result restore_report(const turn_backup& backup, const fs::path& root) {
+    restore_result result;
     for (const auto& [path, original] : backup.originals) {
         std::error_code ec;
         if (original) {
             std::ofstream out(path, std::ios::binary | std::ios::trunc);
-            out << *original;
+            if (out) {
+                out.write(original->data(), static_cast<std::streamsize>(original->size()));
+                out.close();
+            }
+            if (!out) result.failed.push_back(display_path(root, path));
+            else result.restored.push_back(display_path(root, path));
         } else {
-            fs::remove(path, ec);
+            const bool removed = fs::remove(path, ec);
+            if (ec || (!removed && fs::exists(path, ec)) || ec) result.failed.push_back(display_path(root, path));
+            else result.restored.push_back(display_path(root, path));
         }
-        restored.push_back(display_path(root, path));
     }
-    return restored;
+    return result;
+}
+
+std::vector<std::string> restore(const turn_backup& backup, const fs::path& root) {
+    return restore_report(backup, root).restored;
 }
 
 } // namespace ode

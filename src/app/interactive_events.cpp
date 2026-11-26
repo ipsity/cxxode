@@ -115,6 +115,17 @@ void interactive_ui::apply(ev_request&) {
     thinking_ = true;
 }
 
+void interactive_ui::apply(ev_request_done& e) {
+    if (e.timing.compact) return;
+    auto message = "模型响应 " + format_elapsed(e.timing.elapsed);
+    if (e.timing.first_output) message += " · 首输出 " + format_elapsed(*e.timing.first_output);
+    if (e.timing.provider) {
+        message += " · 编码 " + format_elapsed(e.timing.provider->encode);
+        message += " · 网络/流 " + format_elapsed(e.timing.provider->http);
+    }
+    note(message, ui::tone::dim);
+}
+
 void interactive_ui::apply(ev_tool_preparing& e) {
     preparing_tool_ = std::move(e);
     thinking_ = false;

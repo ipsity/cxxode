@@ -86,6 +86,7 @@ void interactive_ui::push(ui_event e) {
 agent_events interactive_ui::make_events() {
     agent_events ev;
     ev.request_started = [this] { push(ev_request{}); };
+    ev.request_finished = [this](const request_timing& timing) { push(ev_request_done{timing}); };
     ev.text = [this](std::string_view t) { push(ev_text{std::string(t)}); };
     ev.thinking = [this](std::string_view text, std::string_view) {
         if (!text.empty()) push(ev_thinking{std::string(text)});

@@ -242,9 +242,11 @@ bool interactive_ui::command(const std::string& line) {
             start_job([this, focus = arg](agent_events& ev, cancel_token& c) { return app_.core->compact(ev, c, focus); }, true);
         }
     } else if (name == "/undo") {
-        const auto restored = core.undo();
-        if (restored.empty()) note("没有可撤销的改动");
-        for (const auto& p : restored) note("已恢复 " + p);
+        std::vector<std::string> failed;
+        const auto restored = core.undo(&failed);
+        if (restored.empty() && failed.empty()) note("没有可撤销的改动");
+        for (const auto& path : restored) note("已恢复 " + path);
+        for (const auto& path : failed) note("恢复失败 " + path + "；备份已保留，可重试", tone::error);
     } else if (name == "/model") {
         if (arg.empty() || arg.find_first_not_of("0123456789") == std::string::npos) {
             auto available = app_.credential_error ? model_list{{}, *app_.credential_error} : list_models(app_.provider_cfg);

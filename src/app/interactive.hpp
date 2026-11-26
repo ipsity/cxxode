@@ -22,6 +22,7 @@ using steady = std::chrono::steady_clock;
 struct ev_text { std::string text; };
 struct ev_thinking { std::string text; };
 struct ev_request {};
+struct ev_request_done { request_timing timing; };
 struct ev_tool_preparing { std::string name; steady::time_point started; };
 struct ev_tool_start { std::string name, label, command; steady::time_point started; };
 struct ev_progress { std::string text; };
@@ -34,7 +35,7 @@ struct ev_ask { std::string name, label, rule; std::shared_ptr<std::promise<answ
 struct ev_usage { std::size_t context = 0, input = 0, output = 0; };
 struct ev_notice { std::string message; std::optional<std::size_t> context; };
 struct ev_done { turn_result result; bool compact = false; };
-using ui_event = std::variant<ev_text, ev_thinking, ev_request, ev_tool_preparing, ev_tool_start, ev_progress,
+using ui_event = std::variant<ev_text, ev_thinking, ev_request, ev_request_done, ev_tool_preparing, ev_tool_start, ev_progress,
                               ev_tool_done, ev_ask, ev_usage, ev_notice, ev_done>;
 
 struct running_tool {
@@ -69,6 +70,7 @@ private:
     void apply(ev_text&);
     void apply(ev_thinking& e);
     void apply(ev_request&);
+    void apply(ev_request_done&);
     void apply(ev_tool_preparing& e);
     void apply(ev_tool_start&);
     void apply(ev_progress&);

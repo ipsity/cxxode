@@ -4,8 +4,10 @@
 #include "config/provider_config.hpp"
 #include "provider/message.hpp"
 
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,6 +30,11 @@ struct model_request {
 
 enum class stop_reason { end_turn, tool_use, max_tokens, refusal, error, cancelled };
 
+struct provider_timing {
+    std::chrono::milliseconds encode;
+    std::chrono::milliseconds http;
+};
+
 struct model_reply {
     message content{message::role::assistant, {}};
     stop_reason stop = stop_reason::error;
@@ -36,6 +43,7 @@ struct model_reply {
     // A reply only counts as complete when the stream ended with a final event.
     // Tool calls from an incomplete reply are never dispatched.
     bool complete = false;
+    std::optional<provider_timing> timing{};
 };
 
 struct stream_events {

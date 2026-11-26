@@ -60,6 +60,12 @@ TEST_CASE("newline JSON-RPC handshake lists and calls a tool") {
     const auto tools = make_mcp_tools({client});
     REQUIRE(tools.size() == 1);
     CHECK(tools[0].name == "mcp__fixture__echo");
+    auto validated = tools[0];
+    validated.schema = {{"type", "object"}, {"properties", {{"text", {{"type", "string"}}}}},
+                        {"required", {"text"}}, {"additionalProperties", false}};
+    CHECK(tool_input_error(validated, {{"text", 42}}).find("text must match type") != std::string::npos);
+    CHECK(tool_input_error(validated, json::object()).find("missing required field 'text'") != std::string::npos);
+    CHECK(tool_input_error(validated, {{"text", "pong"}, {"extra", true}}).find("does not allow field 'extra'") != std::string::npos);
 
     tool_context ctx;
     const auto output = tools[0].run({{"text", "pong"}}, ctx);

@@ -143,7 +143,9 @@ json encode_anthropic(const model_request& request) {
             if (belongs(b)) content.push_back(encode_block(b));
         }
         if (content.empty()) continue;
-        messages.push_back({{"role", m.from == message::role::user ? "user" : "assistant"}, {"content", content}});
+        json item{{"role", m.from == message::role::user ? "user" : "assistant"}};
+        item["content"] = std::move(content);
+        messages.push_back(std::move(item));
     }
     // Cache the stable prefix: tools, system and the conversation up to the latest turn.
     const json ephemeral{{"type", "ephemeral"}};
@@ -153,14 +155,15 @@ json encode_anthropic(const model_request& request) {
         tools.push_back({{"name", t.name}, {"description", t.description}, {"input_schema", t.parameters}});
     }
     if (!tools.empty()) tools.back()["cache_control"] = ephemeral;
-    json body{{"model", request.model}, {"max_tokens", request.max_tokens}, {"stream", true}, {"messages", messages}};
+    json body{{"model", request.model}, {"max_tokens", request.max_tokens}, {"stream", true}};
+    body["messages"] = std::move(messages);
     if (request.thinking && supports_adaptive_thinking(request.model)) {
         body["thinking"] = {{"type", "adaptive"}, {"display", "summarized"}};
     }
     if (!request.system.empty()) {
         body["system"] = json::array({{{"type", "text"}, {"text", request.system}, {"cache_control", ephemeral}}});
     }
-    if (!tools.empty()) body["tools"] = tools;
+    if (!tools.empty()) body["tools"] = std::move(tools);
     return body;
 }
 

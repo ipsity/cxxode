@@ -4,9 +4,12 @@
 
 #include <doctest.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <fstream>
 #include <random>
+#include <thread>
 
 using namespace ode;
 
@@ -94,6 +97,258 @@ TEST_CASE("loop runs tools until the model stops and undo restores files") {
     REQUIRE(a.can_undo());
     CHECK(a.undo() == std::vector<std::string>{"a.txt"});
     CHECK(*read_file(dir.path / "a.txt") == "old\n");
+}
+
+TEST_CASE("invalid built-in tool input is rejected before hooks and permissions") {
+    temp_dir dir;
+    scripted_provider p;
+    p.replies.push_back(reply({
+        block::make_tool_use("missing", "Write", {{"file_path", "x.txt"}}),
+        block::make_tool_use("type", "Bash", {{"command", "echo ok"}, {"timeout", "fast"}}),
+        block::make_tool_use("enum", "Grep", {{"pattern", "x"}, {"output_mode", "all"}}),
+        block::make_tool_use("extra", "Read", {{"file_path", "x.txt"}, {"extra", true}}),
+    }, stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    permission_rules rules;
+    bool hook_called = false;
+    agent_hooks hooks;
+    hooks.pre_tool = [&](const tool&, const json&, cancel_token&) {
+        hook_called = true;
+        return hook_verdict{};
+    };
+    agent a(p, builtin_tools(), rules, dir.path, hooks);
+    agent_events ev;
+    bool asked = false;
+    ev.ask = [&](const tool&, const json&) { asked = true; return answer::no; };
+    cancel_token cancel;
+    CHECK(a.run("validate", ev, cancel).stop == stop_reason::end_turn);
+    CHECK_FALSE(hook_called);
+    CHECK_FALSE(asked);
+    CHECK_FALSE(fs::exists(dir.path / "x.txt"));
+    const auto& results = p.requests.at(1).messages.back().blocks;
+    REQUIRE(results.size() == 4);
+    const std::string_view fields[]{"content", "timeout", "output_mode", "extra"};
+    for (std::size_t i = 0; i < results.size(); ++i) {
+        CHECK(results[i].is_error);
+        CHECK(results[i].text.find(fields[i]) != std::string::npos);
+    }
+}
+
+TEST_CASE("parallel tool batches are bounded and preserve result order") {
+    temp_dir dir;
+    scripted_provider p;
+    std::vector<block> calls;
+    for (int i = 0; i < 9; ++i) calls.push_back(block::make_tool_use(std::to_string(i), "Fixture", json::object()));
+    p.replies.push_back(reply(std::move(calls), stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    permission_rules rules;
+    std::atomic<int> active{0};
+    std::atomic<bool> exceeded_limit{false};
+    tool fixture{"Fixture", {}, {}, tool_access::read, [&](const json&, tool_context&) {
+        if (++active > 4) exceeded_limit = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        --active;
+        return tool_output{"ok", false, {}, {}};
+    }, {}};
+    agent a(p, {fixture}, rules, dir.path);
+    agent_events ev;
+    cancel_token cancel;
+    CHECK(a.run("run batch", ev, cancel).stop == stop_reason::end_turn);
+    CHECK_FALSE(exceeded_limit.load());
+    const auto& results = p.requests.at(1).messages.back().blocks;
+    REQUIRE(results.size() == 9);
+    for (std::size_t i = 0; i < results.size(); ++i) {
+        CHECK(results[i].id == std::to_string(i));
+        CHECK(results[i].text == "ok");
+    }
+}
+
+TEST_CASE("independent built-in writes overlap and undo preserves the first backup") {
+    temp_dir dir;
+    std::ofstream(dir.path / "a.txt") << "old";
+    scripted_provider p;
+    p.replies.push_back(reply({
+        block::make_tool_use("read", "Read", {{"file_path", "a.txt"}}),
+        block::make_tool_use("edit", "Edit", {{"file_path", "a.txt"}, {"old_string", "old"}, {"new_string", "first"}}),
+        block::make_tool_use("write", "Write", {{"file_path", "b.txt"}, {"content", "new"}}),
+        block::make_tool_use("edit-again", "Edit", {{"file_path", "./A.TXT"}, {"old_string", "first"}, {"new_string", "last"}}),
+    }, stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+
+    auto tools = builtin_tools();
+    std::mutex mutex;
+    std::condition_variable ready;
+    int entered = 0;
+    bool write_finished = false;
+    bool alias_ran_in_order = false;
+    bool overlapped = false;
+    for (auto& t : tools) {
+        if (!t.parallel_file_write) continue;
+        t.run = [&, run = t.run](const json& input, tool_context& ctx) {
+            const auto path = input.at("file_path").get<std::string>();
+            if (path == "./A.TXT") {
+                std::lock_guard lock(mutex);
+                alias_ran_in_order = write_finished;
+            } else {
+                std::unique_lock lock(mutex);
+                const bool first = ++entered == 1;
+                ready.notify_all();
+                if (first) overlapped = ready.wait_for(lock, std::chrono::seconds(1), [&] { return entered == 2; });
+            }
+            auto out = run(input, ctx);
+            if (path == "b.txt") {
+                std::lock_guard lock(mutex);
+                write_finished = true;
+            }
+            return out;
+        };
+    }
+    permission_rules rules;
+    agent a(p, std::move(tools), rules, fs::canonical(dir.path));
+    agent_events ev;
+    cancel_token cancel;
+    CHECK(a.run("edit and create", ev, cancel).stop == stop_reason::end_turn);
+    CHECK(overlapped);
+    CHECK(alias_ran_in_order);
+    const auto& results = p.requests.at(1).messages.back().blocks;
+    REQUIRE(results.size() == 4);
+    CHECK(results[1].id == "edit");
+    CHECK(results[2].id == "write");
+    CHECK(results[3].id == "edit-again");
+    for (const auto& result : results) CHECK_FALSE(result.is_error);
+    CHECK(read_file(dir.path / "a.txt") == "last");
+    CHECK(read_file(dir.path / "b.txt") == "new");
+    CHECK(a.undo().size() == 2);
+    CHECK(read_file(dir.path / "a.txt") == "old");
+    CHECK_FALSE(fs::exists(dir.path / "b.txt"));
+}
+
+TEST_CASE("undo removes a file created and then edited through a Windows path alias") {
+    temp_dir dir;
+    scripted_provider p;
+    p.replies.push_back(reply({
+        block::make_tool_use("create", "Write", {{"file_path", "new.txt"}, {"content", "first"}}),
+        block::make_tool_use("edit", "Edit", {{"file_path", "NEW.TXT"}, {"old_string", "first"}, {"new_string", "last"}}),
+    }, stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    permission_rules rules;
+    agent a(p, builtin_tools(), rules, fs::canonical(dir.path));
+    agent_events ev;
+    cancel_token cancel;
+    CHECK(a.run("create and edit", ev, cancel).stop == stop_reason::end_turn);
+    CHECK(read_file(dir.path / "new.txt") == "last");
+    CHECK(a.undo() == std::vector<std::string>{"new.txt"});
+    CHECK_FALSE(fs::exists(dir.path / "new.txt"));
+}
+
+TEST_CASE("parallel write targets exclude Windows aliases and ambiguous paths") {
+    temp_dir dir;
+    const auto root = fs::canonical(dir.path);
+    std::ofstream(root / "a.txt") << "old";
+    const auto existing = parallel_write_target(root, root / "a.txt");
+    const auto alias = parallel_write_target(root, root / "A.txt");
+    REQUIRE(existing);
+    REQUIRE(alias);
+    CHECK_FALSE(independent_write_targets(*existing, *alias));
+    const auto new_file = parallel_write_target(root, root / "new.txt");
+    const auto new_alias = parallel_write_target(root, root / "NEW.txt");
+    REQUIRE(new_file);
+    REQUIRE(new_alias);
+    CHECK_FALSE(independent_write_targets(*new_file, *new_alias));
+    CHECK(independent_write_targets(*existing, *new_file));
+    CHECK_FALSE(parallel_write_target(root, root / "missing-dir" / "a.txt"));
+    CHECK_FALSE(parallel_write_target(root, root / "a.txt:stream"));
+    std::error_code ec;
+    fs::create_hard_link(root / "a.txt", root / "linked.txt", ec);
+    if (!ec) {
+        CHECK_FALSE(parallel_write_target(root, root / "a.txt"));
+        CHECK_FALSE(parallel_write_target(root, root / "linked.txt"));
+    }
+}
+
+TEST_CASE("undo retains failed files for a later retry") {
+    temp_dir dir;
+    std::ofstream(dir.path / "a.txt") << "original";
+    scripted_provider p;
+    p.replies.push_back(reply({block::make_tool_use("write", "Write", {
+        {"file_path", "a.txt"}, {"content", "changed"}})}, stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    permission_rules rules;
+    agent a(p, builtin_tools(), rules, dir.path);
+    cancel_token cancel;
+    agent_events events;
+    CHECK(a.run("change file", events, cancel).stop == stop_reason::end_turn);
+    fs::remove(dir.path / "a.txt");
+    fs::create_directory(dir.path / "a.txt");
+
+    std::vector<std::string> failed;
+    CHECK(a.undo(&failed).empty());
+    CHECK(failed == std::vector<std::string>{"a.txt"});
+    CHECK(a.can_undo());
+    fs::remove(dir.path / "a.txt");
+    std::ofstream(dir.path / "a.txt") << "still changed";
+    failed.clear();
+    CHECK(a.undo(&failed) == std::vector<std::string>{"a.txt"});
+    CHECK(failed.empty());
+    CHECK(read_file(dir.path / "a.txt") == "original");
+    CHECK_FALSE(a.can_undo());
+}
+
+TEST_CASE("steering after a read prevents subsequent mutations and closes all tool calls") {
+    temp_dir dir;
+    std::ofstream(dir.path / "source.txt") << "source";
+    scripted_provider p;
+    p.replies.push_back(reply({
+        block::make_tool_use("read", "Read", {{"file_path", "source.txt"}}),
+        block::make_tool_use("write", "Write", {{"file_path", "new.txt"}, {"content", "new"}}),
+        block::make_tool_use("glob", "Glob", {{"pattern", "*.txt"}}),
+    }, stop_reason::tool_use));
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    permission_rules rules;
+    rules.set_mode(permission_mode::yolo);
+    agent a(p, builtin_tools(), rules, dir.path);
+    agent_events ev;
+    bool read_done = false;
+    ev.tool_finished = [&](const tool& t, const json&, const tool_output&) { read_done = t.name == "Read"; };
+    ev.take_steering = [&] {
+        if (!std::exchange(read_done, false)) return std::vector<std::string>{};
+        return std::vector<std::string>{"Do not write new.txt."};
+    };
+    cancel_token cancel;
+    CHECK(a.run("read and write", ev, cancel).stop == stop_reason::end_turn);
+    CHECK_FALSE(fs::exists(dir.path / "new.txt"));
+    const auto& results = p.requests.at(1).messages.back().blocks;
+    REQUIRE(results.size() == 4);
+    CHECK(results[0].id == "read");
+    CHECK_FALSE(results[0].is_error);
+    CHECK(results[1].id == "write");
+    CHECK(results[1].is_error);
+    CHECK(results[2].id == "glob");
+    CHECK(results[2].is_error);
+    CHECK(results[3].text.find("Do not write new.txt.") != std::string::npos);
+}
+
+TEST_CASE("request timings report first output and distinguish compaction") {
+    temp_dir dir;
+    scripted_provider p;
+    p.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
+    p.replies.push_back(reply({block::make_text("Summary.")}, stop_reason::end_turn));
+    p.replies.push_back(reply({}, stop_reason::error, false));
+    permission_rules rules;
+    agent a(p, {}, rules, dir.path);
+    agent_events ev;
+    std::vector<request_timing> timings;
+    ev.request_finished = [&](const request_timing& timing) { timings.push_back(timing); };
+    cancel_token cancel;
+    CHECK(a.run("hello", ev, cancel).stop == stop_reason::end_turn);
+    CHECK(a.compact(ev, cancel).stop == stop_reason::end_turn);
+    CHECK(a.run("again", ev, cancel).stop == stop_reason::error);
+    REQUIRE(timings.size() == 3);
+    REQUIRE(timings[0].first_output);
+    CHECK(*timings[0].first_output <= timings[0].elapsed);
+    CHECK_FALSE(timings[0].compact);
+    CHECK(timings[1].compact);
+    CHECK_FALSE(timings[2].first_output.has_value());
 }
 
 TEST_CASE("incomplete reply dispatches nothing") {

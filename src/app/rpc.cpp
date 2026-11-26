@@ -29,6 +29,17 @@ void rpc_server::handle_request(const json& req) {
     const int id = req["id"];
     const std::string method = req["method"];
     const auto params = req.value("params", json::object());
+    agent_events events;
+    events.request_finished = [this, id](const request_timing& timing) {
+        send_event(id, "request_finished", {
+            {"build_ms", timing.build_elapsed.count()},
+            {"elapsed_ms", timing.elapsed.count()},
+            {"encode_ms", timing.provider ? json(timing.provider->encode.count()) : json(nullptr)},
+            {"http_ms", timing.provider ? json(timing.provider->http.count()) : json(nullptr)},
+            {"first_output_ms", timing.first_output ? json(timing.first_output->count()) : json(nullptr)},
+            {"compact", timing.compact}
+        });
+    };
 
     if (method == "run") {
         const std::string prompt = params.value("prompt", std::string{});
@@ -37,7 +48,6 @@ void rpc_server::handle_request(const json& req) {
             return;
         }
 
-        agent_events events;
         events.text = [this, id](std::string_view text) {
             send_event(id, "text", {{"text", std::string(text)}});
         };
@@ -55,7 +65,8 @@ void rpc_server::handle_request(const json& req) {
                 {"tool", t.name},
                 {"input", input},
                 {"output", out.text},
-                {"is_error", out.is_error}
+                {"is_error", out.is_error},
+                {"elapsed_ms", out.elapsed ? json(out.elapsed->count()) : json(nullptr)}
             });
         };
         events.usage_updated = [this, id](const usage& u) {
@@ -105,14 +116,11 @@ void rpc_server::handle_request(const json& req) {
         send_event(id, "done", {{"stop", "cancelled"}, {"error", ""}});
 
     } else if (method == "undo") {
-        const auto restored = core.undo();
-        send_event(id, "undo", {{"restored", restored}});
+        std::vector<std::string> failed;
+        const auto restored = core.undo(&failed);
+        send_event(id, "undo", {{"restored", restored}, {"failed", failed}});
 
     } else if (method == "compact") {
-        agent_events events;
-        events.text = [this, id](std::string_view text) {
-            send_event(id, "text", {{"text", std::string(text)}});
-        };
         const auto result = core.compact(events, cancel);
         send_event(id, "done", {{"stop", result.stop == stop_reason::end_turn ? "end_turn" : "error"}});
 

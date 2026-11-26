@@ -53,7 +53,16 @@ public:
                 if (!config_.api_key.empty()) http.headers.emplace_back("authorization", "Bearer " + config_.api_key);
                 break;
         }
+        using clock = std::chrono::steady_clock;
+        using milliseconds = std::chrono::milliseconds;
+        const auto encode_started = clock::now();
         http.body = encode_request(config_.kind, request).dump();
+        const auto http_started = clock::now();
+        const auto encode_elapsed = std::chrono::duration_cast<milliseconds>(http_started - encode_started);
+        const auto record_timing = [&](model_reply& reply) {
+            reply.timing = provider_timing{encode_elapsed,
+                std::chrono::duration_cast<milliseconds>(clock::now() - http_started)};
+        };
 
         // Retry only before any byte of a reply was shown; a partial stream is reported, not replayed.
         for (int attempt = 0;; ++attempt) {
@@ -66,6 +75,7 @@ public:
                 reply.stop = stop_reason::cancelled;
                 reply.complete = false;
                 reply.error = "Cancelled.";
+                record_timing(reply);
                 return reply;
             }
             const bool retryable = !received && attempt < 4 &&
@@ -89,6 +99,7 @@ public:
                 reply.stop = stop_reason::error;
                 reply.error = result.error;
             }
+            record_timing(reply);
             return reply;
         }
     }

@@ -21,7 +21,8 @@ namespace ode {
 // {"id": 1, "event": "text", "data": "..."}
 // {"id": 1, "event": "thinking", "data": {"text": "...", "signature": "..."}}
 // {"id": 1, "event": "tool_started", "data": {"tool": "...", "input": {...}}}
-// {"id": 1, "event": "tool_finished", "data": {"tool": "...", "output": "...", "is_error": false}}
+// {"id": 1, "event": "request_finished", "data": {"build_ms": 1, "elapsed_ms": 100, "encode_ms": 2, "http_ms": 98, "first_output_ms": 30, "compact": false}}
+// {"id": 1, "event": "tool_finished", "data": {"tool": "...", "output": "...", "is_error": false, "elapsed_ms": 1}}
 // {"id": 1, "event": "done", "data": {"stop": "end_turn", "error": ""}}
 // {"id": 1, "event": "error", "data": {"message": "..."}}
 

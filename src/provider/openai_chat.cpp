@@ -102,7 +102,7 @@ json encode_chat(const model_request& request) {
                 calls.push_back({{"id", b->id}, {"type", "function"},
                                  {"function", {{"name", b->name}, {"arguments", b->input.dump()}}}});
             }
-            if (!calls.empty()) item["tool_calls"] = calls;
+            if (!calls.empty()) item["tool_calls"] = std::move(calls);
             messages.push_back(std::move(item));
             continue;
         }
@@ -114,16 +114,21 @@ json encode_chat(const model_request& request) {
                 text += b.text;
             }
         }
-        if (!text.empty()) messages.push_back({{"role", "user"}, {"content", text}});
+        if (!text.empty()) {
+            json item{{"role", "user"}};
+            item["content"] = std::move(text);
+            messages.push_back(std::move(item));
+        }
     }
-    json body{{"model", request.model}, {"stream", true}, {"messages", messages},
+    json body{{"model", request.model}, {"stream", true},
               {"max_tokens", request.max_tokens}, {"stream_options", {{"include_usage", true}}}};
+    body["messages"] = std::move(messages);
     json tools = json::array();
     for (const auto& t : request.tools) {
         tools.push_back({{"type", "function"},
                          {"function", {{"name", t.name}, {"description", t.description}, {"parameters", t.parameters}}}});
     }
-    if (!tools.empty()) body["tools"] = tools;
+    if (!tools.empty()) body["tools"] = std::move(tools);
     return body;
 }
 

@@ -7,6 +7,13 @@ namespace ode {
 namespace {
 
 constexpr int max_rounds_without_user = 200;
+constexpr std::size_t max_parallel_tools = 4;
+
+void take_steering(agent_events& events, std::vector<std::string>& steering) {
+    if (events.take_steering) {
+        for (auto& note : events.take_steering()) steering.push_back(std::move(note));
+    }
+}
 
 std::string stop_text(stop_reason stop) {
     switch (stop) {
@@ -34,6 +41,37 @@ model_request agent::request() const {
     r.messages = messages;
     for (const auto& t : tools_) r.tools.push_back({t.name, t.description, t.schema});
     return r;
+}
+
+model_reply agent::send(const model_request& request, stream_events stream, agent_events& events,
+                        cancel_token& cancel, std::chrono::steady_clock::time_point build_started, bool compact) {
+    if (!events.request_finished) return provider_.send(request, stream, cancel);
+
+    using clock = std::chrono::steady_clock;
+    using milliseconds = std::chrono::milliseconds;
+    const auto started = clock::now();
+    const auto build_elapsed = std::chrono::duration_cast<milliseconds>(started - build_started);
+    const auto elapsed = [&] { return std::chrono::duration_cast<milliseconds>(clock::now() - started); };
+    std::optional<milliseconds> first_output;
+    const auto record_first = [&](std::string_view output) {
+        if (!output.empty() && !first_output) first_output = elapsed();
+    };
+    stream_events timed;
+    timed.text = [&](std::string_view text) {
+        record_first(text);
+        if (stream.text) stream.text(text);
+    };
+    timed.thinking = [&](std::string_view text, std::string_view signature) {
+        record_first(text);
+        if (stream.thinking) stream.thinking(text, signature);
+    };
+    timed.tool_started = [&](const std::string& name) {
+        record_first(name);
+        if (stream.tool_started) stream.tool_started(name);
+    };
+    auto reply = provider_.send(request, timed, cancel);
+    events.request_finished({build_elapsed, elapsed(), first_output, compact, reply.timing});
+    return reply;
 }
 
 void agent::append(message m) {
@@ -96,7 +134,8 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         stream.thinking = [&events](std::string_view text, std::string_view sig) {
             if (events.thinking) events.thinking(text, sig);
         };
-        auto reply = provider_.send(request(), stream, cancel);
+        const auto build_started = std::chrono::steady_clock::now();
+        auto reply = send(request(), std::move(stream), events, cancel, build_started);
         if (reply.tokens.input || reply.tokens.output) {
             total.input += reply.tokens.input;
             total.output += reply.tokens.output;
@@ -114,7 +153,8 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         }
         append(reply.content);
 
-        std::vector<std::string> steering = events.take_steering ? events.take_steering() : std::vector<std::string>{};
+        std::vector<std::string> steering;
+        take_steering(events, steering);
         if (reply.stop != stop_reason::tool_use) {
             if (cancel.cancelled()) return finish({stop_reason::cancelled, "Cancelled."});
             if (steering.empty() && hooks_.stop && reply.stop == stop_reason::end_turn) {
@@ -134,10 +174,8 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         }
 
         message results{message::role::user, {}};
-        run_tools(reply.content, events, cancel, results, backup, options.allowed_tools);
-        if (events.take_steering) {
-            for (auto& s : events.take_steering()) steering.push_back(std::move(s));
-        }
+        run_tools(reply.content, events, cancel, results, backup, options.allowed_tools, steering);
+        take_steering(events, steering);
         for (auto& s : steering) {
             results.blocks.push_back(block::make_text("[The user added while you were working]\n" + s));
         }
@@ -151,19 +189,17 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
 }
 
 void agent::run_tools(const message& reply, agent_events& events, cancel_token& cancel, message& results,
-                      turn_backup& backup, std::span<const std::string> allowed_tools) {
+                      turn_backup& backup, std::span<const std::string> allowed_tools, std::vector<std::string>& steering) {
     const auto calls = reply.tool_uses();
+    const auto write_target_for = [&](const tool* t, const block& call) -> std::optional<write_target> {
+        if (!t || !t->parallel_file_write || !tool_input_error(*t, call.input).empty()) return std::nullopt;
+        {
+            std::lock_guard lock(permission_mutex_);
+            if (rules_.check(*t, call.input, root_, allowed_tools) != verdict::allow) return std::nullopt;
+        }
+        return parallel_write_target(root_, resolve(root_, call.input.at("file_path").get_ref<const std::string&>()));
+    };
 
-    // TODO: 未来可以启用智能调度器
-    // 当前保持原有逻辑以确保稳定性
-    // 可通过配置开关启用：USE_SMART_SCHEDULER
-
-    // if (use_smart_scheduler) {
-    //     run_tools_smart(reply, events, cancel, results, backup);
-    //     return;
-    // }
-
-    // 现有逻辑保持不变
     std::size_t i = 0;
     while (i < calls.size()) {
         if (cancel.cancelled()) {
@@ -171,58 +207,89 @@ void agent::run_tools(const message& reply, agent_events& events, cancel_token& 
             ++i;
             continue;
         }
-        // Consecutive read-only calls run in parallel; anything else runs alone, in order.
         std::size_t end = i + 1;
         const auto* first = find_tool(calls[i]->name);
+        const bool file_writes = first && first->access == tool_access::write;
         if (first && first->access == tool_access::read) {
-            while (end < calls.size()) {
+            while (end < calls.size() && end - i < max_parallel_tools) {
                 const auto* t = find_tool(calls[end]->name);
                 if (!t || t->access != tool_access::read) break;
                 ++end;
+            }
+        } else if (file_writes && !hooks_.pre_tool && !hooks_.post_tool) {
+            if (auto target = write_target_for(first, *calls[i])) {
+                std::vector<write_target> targets{std::move(*target)};
+                while (end < calls.size() && end - i < max_parallel_tools) {
+                    auto next = write_target_for(find_tool(calls[end]->name), *calls[end]);
+                    if (!next || !std::ranges::all_of(targets, [&](const write_target& prior) {
+                        return independent_write_targets(prior, *next);
+                    })) break;
+                    targets.push_back(std::move(*next));
+                    ++end;
+                }
+            }
+        }
+        if (first && first->access != tool_access::read) {
+            take_steering(events, steering);
+            if (!steering.empty()) {
+                for (; i < calls.size(); ++i) {
+                    results.blocks.push_back(block::make_tool_result(calls[i]->id,
+                        "Skipped because the user added instructions. Reconsider this call using the new instructions.", true));
+                }
+                break;
             }
         }
         if (end - i == 1) {
             auto out = run_one(*calls[i], events, cancel, backup, seen_, allowed_tools);
             results.blocks.push_back(block::make_tool_result(calls[i]->id, std::move(out.text), out.is_error));
         } else {
-            // Each parallel read records file stamps privately; they are merged afterwards.
-            // Callbacks are serialised so event consumers never see concurrent calls.
-            std::mutex callback_mutex;
-            agent_events serial = events;
-            if (events.tool_started) serial.tool_started = [&](const tool& t, const json& in) {
-                std::lock_guard lock(callback_mutex);
-                events.tool_started(t, in);
-            };
-            if (events.tool_finished) serial.tool_finished = [&](const tool& t, const json& in, const tool_output& o) {
-                std::lock_guard lock(callback_mutex);
-                events.tool_finished(t, in, o);
-            };
-            if (events.tool_progress) serial.tool_progress = [&](std::string_view s) {
-                std::lock_guard lock(callback_mutex);
-                events.tool_progress(s);
-            };
-            if (events.notice) serial.notice = [&](std::string_view s) {
-                std::lock_guard lock(callback_mutex);
-                events.notice(s);
-            };
-            if (events.ask) serial.ask = [&](const tool& t, const json& in) {
-                std::lock_guard lock(callback_mutex);
-                return events.ask(t, in);
-            };
-            std::vector<std::map<fs::path, file_stamp>> stamps(end - i);
-            std::vector<std::future<tool_output>> pending;
-            for (std::size_t k = i; k < end; ++k) {
-                pending.push_back(std::async(std::launch::async, [&, k] {
-                    return run_one(*calls[k], serial, cancel, backup, stamps[k - i], allowed_tools);
-                }));
-            }
-            for (std::size_t k = i; k < end; ++k) {
-                auto out = pending[k - i].get();
-                results.blocks.push_back(block::make_tool_result(calls[k]->id, std::move(out.text), out.is_error));
-                for (auto& [path, s] : stamps[k - i]) seen_[path] = s;
-            }
+            run_tool_batch(std::span(calls).subspan(i, end - i), events, cancel, results, backup, allowed_tools, file_writes);
         }
         i = end;
+    }
+}
+
+void agent::run_tool_batch(std::span<const block* const> calls, agent_events& events, cancel_token& cancel,
+                           message& results, turn_backup& backup, std::span<const std::string> allowed_tools,
+                           bool file_writes) {
+    // Each call records its own file stamps and backups until its result is collected.
+    std::mutex callback_mutex;
+    agent_events serial = events;
+    const auto serialize = [&callback_mutex](auto& callback) {
+        return [&callback_mutex, &callback](auto&&... args) {
+            std::lock_guard lock(callback_mutex);
+            return callback(std::forward<decltype(args)>(args)...);
+        };
+    };
+    if (events.tool_started) serial.tool_started = serialize(events.tool_started);
+    if (events.tool_finished) serial.tool_finished = serialize(events.tool_finished);
+    if (events.tool_progress) serial.tool_progress = serialize(events.tool_progress);
+    if (events.notice) serial.notice = serialize(events.notice);
+    if (events.ask) serial.ask = serialize(events.ask);
+
+    std::vector<std::map<fs::path, file_stamp>> stamps(calls.size());
+    std::vector<turn_backup> backups(calls.size());
+    if (file_writes) {
+        for (std::size_t i = 0; i < calls.size(); ++i) {
+            const auto path = resolve(root_, calls[i]->input.at("file_path").get_ref<const std::string&>());
+            if (const auto prior = seen_.find(path); prior != seen_.end()) stamps[i].insert(*prior);
+        }
+    }
+    std::vector<std::future<tool_output>> pending;
+    pending.reserve(calls.size());
+    for (std::size_t i = 0; i < calls.size(); ++i) {
+        const auto run = [&, i] {
+            if (cancel.cancelled()) return tool_output{"[Interrupted by the user]", true, {}, {}};
+            return run_one(*calls[i], serial, cancel, backups[i], stamps[i], allowed_tools);
+        };
+        // A deferred call still returns a result if the system cannot start another thread.
+        pending.push_back(std::async(std::launch::async | std::launch::deferred, run));
+    }
+    for (std::size_t i = 0; i < calls.size(); ++i) {
+        auto out = pending[i].get();
+        results.blocks.push_back(block::make_tool_result(calls[i]->id, std::move(out.text), out.is_error));
+        for (auto& [path, original] : backups[i].originals) backup.remember(path, std::move(original));
+        for (const auto& [path, stamp] : stamps[i]) seen_[path] = stamp;
     }
 }
 
@@ -236,7 +303,7 @@ tool_output agent::run_one(const block& call, agent_events& events, cancel_token
 tool_output agent::run_tool(const tool& t, const json& input, agent_events& events, cancel_token& cancel,
                             turn_backup* backup, std::map<fs::path, file_stamp>& seen,
                             std::span<const std::string> allowed_tools) {
-    if (!input.is_object()) return {"Tool input must be a JSON object.", true, "参数错误", {}};
+    if (auto error = tool_input_error(t, input); !error.empty()) return {std::move(error), true, "参数错误", {}};
     tool_output out;
     const auto blocked = [&](std::string reason) {
         tool_output denied{std::move(reason), true, "已拒绝", {}};
@@ -331,19 +398,31 @@ void agent::set_extensions(std::vector<tool> tools, agent_hooks hooks) {
     hooks_ = std::move(hooks);
 }
 
-std::vector<std::string> agent::undo() {
+std::vector<std::string> agent::undo(std::vector<std::string>* failed) {
+    if (failed) failed->clear();
     if (backups_.empty()) return {};
-    auto restored = restore(backups_.back(), root_);
-    backups_.pop_back();
+    auto result = restore_report(backups_.back(), root_);
+    if (failed) *failed = result.failed;
+    if (result.failed.empty()) backups_.pop_back();
+    else {
+        turn_backup remaining;
+        for (const auto& [path, original] : backups_.back().originals) {
+            if (std::ranges::find(result.failed, display_path(root_, path)) != result.failed.end()) {
+                remaining.originals.emplace(path, original);
+            }
+        }
+        backups_.back() = std::move(remaining);
+    }
     seen_.clear();
     pending_note_ = "[The user undid your file changes from an earlier turn. Restored: ";
-    for (std::size_t i = 0; i < restored.size(); ++i) pending_note_ += (i ? ", " : "") + restored[i];
+    for (std::size_t i = 0; i < result.restored.size(); ++i) pending_note_ += (i ? ", " : "") + result.restored[i];
     pending_note_ += ". Re-read files before editing them.]";
-    return restored;
+    return result.restored;
 }
 
 turn_result agent::compact(agent_events& events, cancel_token& cancel, std::string_view focus) {
     if (messages.empty()) return {stop_reason::end_turn, {}};
+    const auto build_started = std::chrono::steady_clock::now();
     auto r = request();
     r.tools.clear();
     std::string ask = "Summarise this conversation so that work can continue without it. Keep: the user's goals and "
@@ -352,8 +431,7 @@ turn_result agent::compact(agent_events& events, cancel_token& cancel, std::stri
     if (!focus.empty()) ask += " Focus on: " + std::string(focus);
     r.messages.push_back(message{message::role::user, {block::make_text(ask)}});
     close_dangling_tool_calls(r.messages);
-    stream_events quiet;
-    auto reply = provider_.send(r, quiet, cancel);
+    auto reply = send(r, {}, events, cancel, build_started, true);
     if (cancel.cancelled() || reply.stop == stop_reason::cancelled) return {stop_reason::cancelled, "Cancelled."};
     if (!reply.complete) return {stop_reason::error, reply.error};
     const auto summary_text = reply.content.plain_text();
@@ -366,7 +444,6 @@ turn_result agent::compact(agent_events& events, cancel_token& cancel, std::stri
     messages = {summary, message{message::role::assistant, {block::make_text("Understood. I'll continue from the summary.")}}};
     if (log) log->append_message(messages.back());
     context_tokens = reply.tokens.output;
-    (void)events;
     return {stop_reason::end_turn, {}};
 }
 

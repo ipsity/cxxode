@@ -117,8 +117,9 @@ json encode_responses(const model_request& request) {
     for (const auto& t : request.tools) {
         tools.push_back({{"type", "function"}, {"name", t.name}, {"description", t.description}, {"parameters", t.parameters}});
     }
-    json body{{"model", request.model}, {"stream", true}, {"input", input}, {"store", false},
+    json body{{"model", request.model}, {"stream", true}, {"store", false},
               {"max_output_tokens", request.max_tokens}, {"include", json::array({"reasoning.encrypted_content"})}};
+    body["input"] = std::move(input);
     std::string_view model = request.model;
     model.remove_prefix(model.find_last_of('/') + 1);
     // Gateways may expose non-reasoning models through the same endpoint.
@@ -129,7 +130,7 @@ json encode_responses(const model_request& request) {
         body["reasoning"] = {{"effort", "medium"}, {"summary", "auto"}};
     }
     if (!request.system.empty()) body["instructions"] = request.system;
-    if (!tools.empty()) body["tools"] = tools;
+    if (!tools.empty()) body["tools"] = std::move(tools);
     return body;
 }
 

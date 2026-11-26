@@ -95,6 +95,114 @@ std::vector<tool> search_tools();
 
 std::string shell_name() { return detect_shell().name; }
 
+namespace {
+
+std::string json_type(const json& value) {
+    if (value.is_null()) return "null";
+    if (value.is_boolean()) return "boolean";
+    if (value.is_number_integer() || value.is_number_unsigned()) return "integer";
+    if (value.is_number()) return "number";
+    if (value.is_string()) return "string";
+    if (value.is_array()) return "array";
+    return "object";
+}
+
+bool matches_type(const json& value, std::string_view type) {
+    if (type == "number") return value.is_number();
+    if (type == "integer") return value.is_number_integer() || value.is_number_unsigned();
+    return json_type(value) == type;
+}
+
+std::optional<std::size_t> size_limit(const json& schema, std::string_view key) {
+    const auto it = schema.find(key);
+    if (it == schema.end() || !it->is_number_integer()) return std::nullopt;
+    if (it->is_number_unsigned()) return it->get<std::size_t>();
+    const auto value = it->get<std::int64_t>();
+    if (value < 0) return std::nullopt;
+    return static_cast<std::size_t>(value);
+}
+
+std::string validate_schema(const json& schema, const json& value, const std::string& path) {
+    if (!schema.is_object()) return {};
+    const auto type = schema.find("type");
+    if (type != schema.end()) {
+        bool matches = false;
+        if (type->is_string()) matches = matches_type(value, type->get_ref<const std::string&>());
+        else if (type->is_array()) {
+            matches = std::ranges::any_of(*type, [&](const json& item) {
+                return item.is_string() && matches_type(value, item.get_ref<const std::string&>());
+            });
+        }
+        if (!matches) return path + " must match type " + type->dump() + ", got " + json_type(value) + ".";
+    }
+    if (const auto allowed = schema.find("enum"); allowed != schema.end() &&
+        std::ranges::find(*allowed, value) == allowed->end()) return path + " must be one of " + allowed->dump() + ".";
+
+    if (value.is_object()) {
+        if (const auto required = schema.find("required"); required != schema.end() && required->is_array()) {
+            for (const auto& field : *required) {
+                if (field.is_string() && !value.contains(field.get_ref<const std::string&>())) {
+                    return path + " is missing required field '" + field.get<std::string>() + "'.";
+                }
+            }
+        }
+        const auto properties = schema.find("properties");
+        const auto additional = schema.find("additionalProperties");
+        for (auto it = value.begin(); it != value.end(); ++it) {
+            if (properties != schema.end() && properties->is_object()) {
+                const auto property = properties->find(it.key());
+                if (property != properties->end()) {
+                    if (auto error = validate_schema(*property, it.value(), path + "." + it.key()); !error.empty()) return error;
+                    continue;
+                }
+            }
+            if (additional != schema.end() && additional->is_boolean() && !additional->get<bool>()) {
+                return path + " does not allow field '" + it.key() + "'.";
+            }
+            if (additional != schema.end() && additional->is_object()) {
+                if (auto error = validate_schema(*additional, it.value(), path + "." + it.key()); !error.empty()) return error;
+            }
+        }
+        if (const auto minimum = size_limit(schema, "minProperties"); minimum && value.size() < *minimum)
+            return path + " has too few properties.";
+        if (const auto maximum = size_limit(schema, "maxProperties"); maximum && value.size() > *maximum)
+            return path + " has too many properties.";
+    }
+    if (value.is_array()) {
+        if (const auto items = schema.find("items"); items != schema.end() && items->is_object()) {
+            for (std::size_t i = 0; i < value.size(); ++i) {
+                if (auto error = validate_schema(*items, value[i], path + "[" + std::to_string(i) + "]"); !error.empty()) return error;
+            }
+        }
+        if (const auto minimum = size_limit(schema, "minItems"); minimum && value.size() < *minimum)
+            return path + " has too few items.";
+        if (const auto maximum = size_limit(schema, "maxItems"); maximum && value.size() > *maximum)
+            return path + " has too many items.";
+    }
+    if (value.is_string()) {
+        const auto length = value.get_ref<const std::string&>().size();
+        if (const auto minimum = size_limit(schema, "minLength"); minimum && length < *minimum)
+            return path + " is shorter than minLength.";
+        if (const auto maximum = size_limit(schema, "maxLength"); maximum && length > *maximum)
+            return path + " exceeds maxLength.";
+    }
+    if (value.is_number()) {
+        if (const auto minimum = schema.find("minimum"); minimum != schema.end() && minimum->is_number() && value < *minimum)
+            return path + " is below minimum.";
+        if (const auto maximum = schema.find("maximum"); maximum != schema.end() && maximum->is_number() && value > *maximum)
+            return path + " exceeds maximum.";
+    }
+    return {};
+}
+
+} // namespace
+
+std::string tool_input_error(const tool& t, const json& input) {
+    if (!input.is_object()) return t.name + ": input must be a JSON object.";
+    if (!t.schema.is_object() || t.schema.empty()) return {};
+    return validate_schema(t.schema, input, t.name);
+}
+
 std::vector<tool> builtin_tools() {
     auto tools = edit_tools();
     for (auto& t : search_tools()) tools.push_back(std::move(t));

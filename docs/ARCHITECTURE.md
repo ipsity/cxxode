@@ -79,8 +79,9 @@ user text
   -> compact_if_needed     input tokens > 窗口 × 0.8 时自动压缩
   -> provider.send         流式；只有收到终止事件的回复才算完整
   -> 对每个 tool_use：
-       hooks.pre -> permission.check -> (ask) -> tool.run -> hooks.post
-       连续的只读调用并行执行，其余调用串行
+       validate -> hooks.pre -> permission.check -> (ask) -> tool.run -> hooks.post
+       连续的只读调用或独立的内置文件写入每批最多并行 4 个，其余调用串行
+       开始有副作用的批次前收取用户补充，有补充则跳过余下调用并交回模型
   -> 有 tool_use 就继续下一轮，否则结束
   -> hooks.stop            退出码 2 时把 stderr 作为新的用户消息继续
 ```
@@ -89,13 +90,16 @@ user text
 
 - 每个 `tool_use` 都必须有对应的 `tool_result`。被取消或崩溃导致缺失时，由 `close_dangling_tool_calls` 补齐。
 - Write/Edit 前检查文件的 mtime 和 size 是否与模型上次读到的一致，不一致就拒绝写入并让模型重新读取。
-- 一个用户回合内被改动的文件都会备份，`/undo` 恢复的是最近一个改过文件的回合。
+- `Write` 和 `Edit` 可以同批并行，前提是无需询问权限、没有工具调用前后的 Hooks、目标位于工作区内且能确认互不冲突。每个调用单独收集备份和文件时间戳，按原始调用顺序合并。
+- 一个用户回合保留文件第一次改动前的备份。Windows 路径别名指向同一文件时共用该备份。`/undo` 恢复最近一个改过文件的回合。
 - 子 agent 沿用主 agent 的工具权限规则和前后置 Hooks，由当前前端处理权限询问，文件备份归入主回合。
 - session 是只追加的 JSONL 文件，崩溃最多丢失最后一行。
 
 交互界面在终端备用屏幕上绘制。启动时把原屏幕可见的命令和输出放到对话区开头，恢复会话时接着显示会话中的消息。对话从窗口顶部向下排，填满后跟随新输出。滚轮或 Page Up / Page Down 只移动对话视窗，向上翻阅时保留当前起始行，向下翻到底后继续跟随。输入框和状态栏固定在窗口底部。打开 `/` 命令面板时，输入框上移并在下方显示候选项。
 
-模型文本和 Bash 输出收到后逐段刷新，未换行的内容也显示。Bash 命令单独显示，已输出的行留在对话区。Write 和 Edit 成功后显示有行数上限的增删预览。工具完成行显示实际执行耗时，权限确认及调用前后的 hooks 不计入；模型发送参数时单独显示等待时间。
+模型文本和 Bash 输出收到后逐段刷新，未换行的内容也显示。Bash 命令单独显示，已输出的行留在对话区。Write 和 Edit 成功后显示有行数上限的增删预览。模型请求完成后显示总耗时、首个输出耗时，以及可用时的 JSON 编码和网络/流阶段耗时。
+
+RPC 的 `request_finished` 记录本地构造请求的 `build_ms`（包括复制历史），以及进入 provider 后的 `elapsed_ms` 和 `first_output_ms`。首个输出可以是文本、思考或工具名。HTTP provider 还提供 `encode_ms` 和 `http_ms`，分别记录 JSON 编码，以及编码后的 HTTP、重试等待和流解析。压缩请求带 `compact` 标记。`tool_finished` 提供工具执行耗时。没有对应计时数据时字段为 `null`。
 
 ## 5. 扩展兼容规格
 
