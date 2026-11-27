@@ -12,6 +12,8 @@
 
 namespace ode {
 
+inline constexpr std::size_t default_context_window = 272000;
+
 struct request_timing {
     std::chrono::milliseconds build_elapsed;
     std::chrono::milliseconds elapsed;
@@ -72,7 +74,7 @@ public:
 
     std::string model;
     std::string system;
-    std::size_t context_window = 200000;
+    std::size_t context_window = default_context_window;
     double auto_compact_ratio = 0.8;
     std::vector<message> messages;
     session_log* log = nullptr;

@@ -24,7 +24,7 @@ struct model_request {
     std::string system;
     std::vector<message> messages;
     std::vector<tool_schema> tools;
-    std::size_t max_tokens = 16384;
+    std::size_t max_tokens = 128000;
     bool thinking = true;
 };
 

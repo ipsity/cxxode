@@ -67,6 +67,7 @@ bool save_credential(settings& s, const std::string& provider, const std::string
 bool delete_credential(settings& s, const std::string& provider);
 bool import_windows_credential(settings& s, const std::string& provider);
 bool save_provider_selection(const std::string& provider, const std::filesystem::path& settings_path);
+bool save_model_selection(const std::string& provider, const std::string& model, const std::filesystem::path& settings_path);
 bool valid_provider_id(std::string_view name);
 bool normalize_provider_base_url(protocol kind, std::string& url);
 bool save_new_provider(settings& s, const provider_entry& entry);

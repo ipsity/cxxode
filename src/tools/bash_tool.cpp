@@ -78,7 +78,8 @@ std::string normalize_shell_output(std::string text) {
 tool_output bash_tool(const json& input, tool_context& ctx) {
     const auto command = input.value("command", std::string{});
     if (command.empty()) return {"command is required.", true, "failed", {}};
-    const auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, 600000);
+    constexpr std::int64_t max_timeout_ms = 2147483647;
+    const auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, max_timeout_ms);
     const auto& sh = detect_shell();
     process_request req{sh.program, sh.prefix, ctx.root, std::chrono::milliseconds(timeout)};
     req.arguments.push_back(command);
@@ -230,11 +231,12 @@ std::vector<tool> builtin_tools() {
     tools.push_back({"Bash",
                      "Run a shell command in the workspace directory (" + detect_shell().name +
                          " on this machine). stdin is closed; interactive programs will not work. Output is "
-                         "truncated to 30000 characters. Default timeout 120000 ms, maximum 600000.",
+                         "truncated to 30000 characters. Default timeout 120000 ms, maximum 2147483647 ms.",
                      {{"type", "object"},
                       {"properties",
                        {{"command", {{"type", "string"}}},
-                        {"timeout", {{"type", "integer"}, {"description", "Milliseconds"}}},
+                        {"timeout", {{"type", "integer"}, {"description", "Milliseconds, maximum 2147483647"},
+                                     {"minimum", 1000}, {"maximum", 2147483647}}},
                         {"description", {{"type", "string"}, {"description", "5-10 word summary of what it does"}}}}},
                       {"required", {"command"}}},
                      tool_access::execute, bash_tool,

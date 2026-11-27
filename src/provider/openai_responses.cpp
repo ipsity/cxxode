@@ -33,6 +33,9 @@ public:
             completed_ = true;
             const auto& r = data["response"];
             incomplete_ = type == "response.incomplete";
+            if (incomplete_ && r.contains("incomplete_details") && r["incomplete_details"].is_object()) {
+                incomplete_reason_ = r["incomplete_details"].value("reason", "");
+            }
             if (r.contains("usage") && r["usage"].is_object()) {
                 const auto& u = r["usage"];
                 reply_.tokens.input = u.value("input_tokens", std::size_t{});
@@ -76,7 +79,13 @@ public:
         reply_.complete = completed_ && !broken && reply_.error.empty();
         if (!reply_.complete) {
             reply_.stop = stop_reason::error;
-            if (reply_.error.empty()) reply_.error = broken ? "Tool arguments were not valid JSON." : "The stream ended early.";
+            if (reply_.error.empty()) {
+                if (broken && incomplete_reason_ == "max_output_tokens") {
+                    reply_.error = "Response was truncated before completion; tool arguments may be incomplete.";
+                } else {
+                    reply_.error = broken ? "Tool arguments were not valid JSON." : "The stream ended early.";
+                }
+            }
         } else if (calls) {
             reply_.stop = stop_reason::tool_use;
         } else if (refused_) {
@@ -94,6 +103,7 @@ private:
     std::map<int, std::string> names_;
     bool completed_ = false;
     bool incomplete_ = false;
+    std::string incomplete_reason_;
     bool refused_ = false;
 };
 

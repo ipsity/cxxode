@@ -48,8 +48,7 @@ void app::set_model(const std::string& requested, std::size_t context_window) {
     const auto model = resolve_model_alias(requested);
     core->model = model;
     if (context_window == 0) context_window = known_model_context_window(provider_cfg, model);
-    core->context_window = context_window != 0 ? context_window
-                                               : (model.find("[1m]") != std::string::npos ? 1000000 : 200000);
+    core->context_window = context_window != 0 ? context_window : default_context_window;
     if (log.is_open()) log.append({{"v", 1}, {"type", "meta"}, {"model", model}});
 }
 

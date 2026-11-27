@@ -213,7 +213,7 @@ error_handler::suggest_for_permission_denied(std::string_view context) const {
 
     suggestions.push_back({
         "检查权限模式",
-        "当前可能处于 plan 模式（只读），使用 Shift+Tab 切换到 normal 或 yolo 模式",
+        "当前可能处于 plan 模式（只读），使用 Shift+Tab 切换到 auto 或 yolo 模式",
         0.95f
     });
 

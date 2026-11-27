@@ -113,6 +113,18 @@ TEST_CASE("provider setup accepts API roots and rejects complete endpoint URLs")
     }
 }
 
+TEST_CASE("model selection persists with its provider") {
+    const auto directory = fs::temp_directory_path() /
+        ("ode-model-selection-" + std::to_string(std::random_device{}()));
+    fs::create_directories(directory);
+    const auto path = directory / "settings.json";
+    REQUIRE(save_model_selection("gateway", "custom-model", path));
+    const auto saved = json::parse(*read_file(path));
+    CHECK(saved["model"] == "custom-model");
+    CHECK(saved["model_provider"] == "gateway");
+    fs::remove_all(directory);
+}
+
 TEST_CASE("official provider model context windows use provider metadata") {
     provider_config anthropic;
     anthropic.name = "anthropic";
@@ -134,6 +146,27 @@ TEST_CASE("DeepSeek official models use the documented context window") {
     CHECK(known_model_context_window(deepseek, "deepseek-flash") == 1048576);
     CHECK(known_model_context_window(deepseek, "deepseek-v4-pro") == 1048576);
     CHECK(known_model_context_window(deepseek, "deepseek-coder") == 0);
+}
+
+TEST_CASE("custom gateways do not infer context windows from model names") {
+    provider_config gateway;
+    gateway.name = "ustc";
+    gateway.kind = protocol::openai_responses;
+    CHECK(known_model_context_window(gateway, "deepseek-flash") == 0);
+    CHECK(known_model_context_window(gateway, "deepseek-v4-flash") == 0);
+}
+
+TEST_CASE("unreported custom model context uses the 272k default") {
+    app current;
+    current.config.providers["gateway"] = {
+        "gateway", protocol::openai_responses, "https://gateway.example/v1", "custom-model", credential_mode::none};
+    current.provider_cfg.name = "gateway";
+    auto provider = make_provider(current.provider_cfg);
+    current.model_provider = std::move(provider);
+    current.core = std::make_unique<agent>(*current.model_provider, std::vector<tool>{},
+                                           current.permissions, fs::current_path());
+    current.set_model("custom-model");
+    CHECK(current.core->context_window == 272000);
 }
 
 TEST_CASE("switching providers updates the live client and default model") {

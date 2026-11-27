@@ -30,7 +30,7 @@ ode --help                  查看全部启动参数
 - `-C DIR`：指定工作区目录。
 - `--provider NAME`：选择 provider。
 - `--model NAME`：覆盖本次启动的模型，也支持 `opus`、`sonnet`、`haiku`、`fable` 别名。
-- `--permission plan|default|yolo`：选择本次启动的权限档位。
+- `--permission plan|auto|yolo`：选择本次启动的权限档位。
 - `--no-color` 或 `NO_COLOR=1`：关闭 ANSI 颜色。
 
 交互模式常用命令：`/help`、`/model`、`/mode`、`/theme`、`/resume`、`/compact`、`/undo`、`/login`、`/logout`、`/cost`、`/clear`、`/exit`。`Shift+Tab` 可切换权限档位。工具执行前仍会按当前权限规则验证和询问；`/undo` 可恢复最近一轮修改的文件。
@@ -76,7 +76,7 @@ HTTP 请求默认使用 Windows 代理设置。需要对特定主机直连时，
 
 ## 权限与文件安全
 
-权限档位为 `plan`、`default` 和 `yolo`。工具调用仍经过输入校验、Hooks 和权限判断；流式接收中的工具参数只用于显示接收进度，**只有完整参数解析并授权后才会执行**。
+权限档位为 `plan`、`auto` 和 `yolo`。工具调用仍经过输入校验、Hooks 和权限判断；流式接收中的工具参数只用于显示接收进度，**只有完整参数解析并授权后才会执行**。服务商没有提供模型上下文窗口时，ode 默认按 272K 管理上下文；每次请求默认允许最多生成 128K 输出 token。Bash 命令默认超时为 120 秒，单次最多可设置为 2,147,483,647 毫秒（与 Pi 相同的毫秒上限）。实际上下文和输出能力仍取决于模型及服务商限制。
 
 相对路径按工作区解析。`C:/...` 和 `C:\...` 是 Windows 绝对路径；Git Bash 的 `/c/...`、`/d/...` 会转换为对应盘符路径；`c/...` 是工作区内的相对目录。Write/Edit 会检查模型读取文件后的变化，并在写入前保留可供 `/undo` 使用的备份。
 
