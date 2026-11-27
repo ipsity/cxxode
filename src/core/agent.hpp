@@ -99,15 +99,25 @@ private:
                    turn_backup& backup, std::span<const std::string> allowed_tools, std::vector<std::string>& steering);
     void run_tool_batch(std::span<const block* const> calls, agent_events& events, cancel_token& cancel,
                         message& results, turn_backup& backup, std::span<const std::string> allowed_tools,
-                        bool file_writes);
+                        bool file_writes, std::span<tool_output> outputs = {},
+                        std::optional<std::chrono::steady_clock::time_point> deadline = {});
+    std::vector<tool_output> invoke_tool_batch(const std::vector<tool_invocation>& calls,
+                                               agent_events& events, cancel_token& cancel,
+                                               turn_backup& backup,
+                                               std::map<fs::path, file_stamp>& seen,
+                                               std::span<const std::string> allowed_tools,
+                                               std::optional<std::chrono::steady_clock::time_point> deadline);
     tool_output run_one(const block& call, agent_events& events, cancel_token& cancel, turn_backup& backup,
-                        std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools);
+                        std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools,
+                        std::optional<std::chrono::steady_clock::time_point> deadline = {});
     tool_output run_tool(const tool& t, const json& input, agent_events& events, cancel_token& cancel,
                          turn_backup* backup, std::map<fs::path, file_stamp>& seen,
-                         std::span<const std::string> allowed_tools);
+                         std::span<const std::string> allowed_tools,
+                         std::optional<std::chrono::steady_clock::time_point> deadline = {});
     tool_context make_context(tool_access access, agent_events& events, cancel_token& cancel,
                               turn_backup* backup, std::map<fs::path, file_stamp>& seen,
-                              std::span<const std::string> allowed_tools);
+                              std::span<const std::string> allowed_tools, bool delegates_tool_permissions = false,
+                              std::optional<std::chrono::steady_clock::time_point> deadline = {});
 
     provider& provider_;
     tool_registry tools_;

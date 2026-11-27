@@ -59,7 +59,13 @@ const shell& detect_shell() {
 tool_output bash_tool(const json& input, tool_context& ctx) {
     const auto command = input.value("command", std::string{});
     if (command.empty()) return {"command is required.", true, "failed", {}};
-    const auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, 600000);
+    auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, 600000);
+    if (ctx.deadline) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            *ctx.deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) return {"CodeMode execution deadline exceeded", true, "timeout", {}};
+        timeout = std::min<std::int64_t>(timeout, remaining);
+    }
     const auto& sh = detect_shell();
     process_request req{sh.program, sh.prefix, ctx.root, std::chrono::milliseconds(timeout)};
     req.arguments.push_back(command);

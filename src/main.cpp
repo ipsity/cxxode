@@ -235,10 +235,15 @@ int main(int argc, char** argv) {
             cfg.command = config.value("command", "");
             if (cfg.command.empty()) continue;
             if (const auto exposure = config.find("exposure"); exposure != config.end()) {
-                if (exposure->is_string() && exposure->get<std::string>() == "direct") {
-                    cfg.exposure = tool_exposure::direct;
-                } else if (!exposure->is_string() || exposure->get<std::string>() != "deferred") {
-                    ui::write_stream(true, "ode: invalid MCP exposure for " + name + "; using deferred\n");
+                if (exposure->is_string()) {
+                    const auto mode = exposure->get<std::string>();
+                    if (mode == "direct") cfg.exposure = tool_exposure::direct;
+                    else if (mode == "deferred") cfg.exposure = tool_exposure::deferred;
+                    else if (mode != "codemode") {
+                        ui::write_stream(true, "ode: invalid MCP exposure for " + name + "; using codemode\n");
+                    }
+                } else {
+                    ui::write_stream(true, "ode: invalid MCP exposure for " + name + "; using codemode\n");
                 }
             }
             if (config.contains("args") && config["args"].is_array()) {
@@ -271,7 +276,7 @@ int main(int argc, char** argv) {
                 return lua.run_hooks(type, input, cancel, parse_hook_output);
             };
         }
-        auto setup = build_tool_registry(a.skills, a.mcp_clients, lua.tools(), a.agents,
+        auto setup = build_tool_registry(a.skills, a.mcp_clients, lua.tools(), lua.code_mode_tool(), a.agents,
             *a.model_provider, a.permissions, [&a] { return a.core->model; }, a.config.hooks, [&a] {
             return hook_session{a.session_id, a.log.path(), a.root};
         }, std::move(script), warnings);
