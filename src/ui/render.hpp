@@ -8,7 +8,7 @@
 
 namespace ode::ui {
 
-enum class tone { normal, bold, italic, code, dim, accent, accent_bold, error, diff_added, diff_removed };
+enum class tone { normal, bold, italic, thinking, code, dim, accent, accent_bold, success, failure, error, diff_added, diff_removed };
 
 bool& color_enabled();
 std::string sgr(tone t);

@@ -45,7 +45,7 @@ constexpr const char* help_text =
     "- `Ctrl+L` 清屏\n"
     "- `Ctrl+O` 展开最近一次工具的完整输出\n"
     "- `Ctrl+T` 切换后续思考的显示方式（正文或字数）\n"
-    "- `Shift+Tab` 切换权限档：plan → default → yolo\n"
+    "- `Shift+Tab` 切换权限档：plan → auto → yolo\n"
     "- 需要确认时：`Enter` 允许，`Esc` 拒绝，`a` 总是允许\n"
     "\n"
     "**🚀 快捷工作流**（新）\n"
@@ -260,6 +260,10 @@ bool interactive_ui::command(const std::string& line) {
             }
             const auto select_model = [this](const model_info& model) {
                 app_.set_model(model.id, model.context_window);
+                app_.config.model_overrides[app_.config.provider] = app_.core->model;
+                if (!save_model_selection(app_.config.provider, app_.core->model, app_.config.user_settings_path)) {
+                    note("模型已切换，但无法保存到下次启动", tone::error);
+                }
                 note("✓ Switched to model: " + app_.core->model);
             };
             if (!arg.empty()) {
@@ -292,12 +296,16 @@ bool interactive_ui::command(const std::string& line) {
             }
         } else {
             app_.set_model(arg);
+            app_.config.model_overrides[app_.config.provider] = app_.core->model;
+            if (!save_model_selection(app_.config.provider, app_.core->model, app_.config.user_settings_path)) {
+                note("模型已切换，但无法保存到下次启动", tone::error);
+            }
             note("✓ Switched to model: " + core.model);
         }
     } else if (name == "/mode") {
         if (auto m = parse_mode(arg)) set_permission_mode(*m);
         else if (arg.empty()) set_permission_mode(next_mode(app_.permissions.mode()));
-        else note("档位为 plan、default 或 yolo", tone::error);
+        else note("档位为 plan、auto 或 yolo", tone::error);
         note("权限档 " + std::string(mode_name(app_.permissions.mode())));
     } else if (name == "/theme") {
         if (arg.empty()) {

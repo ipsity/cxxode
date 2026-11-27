@@ -1,5 +1,7 @@
 #include "provider/codec.hpp"
 
+#include <map>
+
 namespace ode {
 namespace {
 
@@ -16,13 +18,24 @@ public:
             if (events_.thinking) events_.thinking(data.value("delta", ""), "");
         } else if (type == "response.output_item.added") {
             const auto& item = data["item"];
-            if (item.value("type", "") == "function_call" && events_.tool_started) events_.tool_started(item.value("name", ""));
+            if (item.value("type", "") == "function_call") {
+                const auto name = item.value("name", "");
+                names_[data.value("output_index", 0)] = name;
+                if (events_.tool_started) events_.tool_started(name);
+            }
+        } else if (type == "response.function_call_arguments.delta") {
+            const auto name = names_.find(data.value("output_index", 0));
+            const auto delta = data.value("delta", "");
+            if (name != names_.end() && events_.tool_arguments) events_.tool_arguments(name->second, delta);
         } else if (type == "response.output_item.done") {
             items_.push_back(data["item"]);
         } else if (type == "response.completed" || type == "response.incomplete") {
             completed_ = true;
             const auto& r = data["response"];
             incomplete_ = type == "response.incomplete";
+            if (incomplete_ && r.contains("incomplete_details") && r["incomplete_details"].is_object()) {
+                incomplete_reason_ = r["incomplete_details"].value("reason", "");
+            }
             if (r.contains("usage") && r["usage"].is_object()) {
                 const auto& u = r["usage"];
                 reply_.tokens.input = u.value("input_tokens", std::size_t{});
@@ -66,7 +79,13 @@ public:
         reply_.complete = completed_ && !broken && reply_.error.empty();
         if (!reply_.complete) {
             reply_.stop = stop_reason::error;
-            if (reply_.error.empty()) reply_.error = broken ? "Tool arguments were not valid JSON." : "The stream ended early.";
+            if (reply_.error.empty()) {
+                if (broken && incomplete_reason_ == "max_output_tokens") {
+                    reply_.error = "Response was truncated before completion; tool arguments may be incomplete.";
+                } else {
+                    reply_.error = broken ? "Tool arguments were not valid JSON." : "The stream ended early.";
+                }
+            }
         } else if (calls) {
             reply_.stop = stop_reason::tool_use;
         } else if (refused_) {
@@ -81,8 +100,10 @@ private:
     const stream_events& events_;
     model_reply reply_;
     std::vector<json> items_;
+    std::map<int, std::string> names_;
     bool completed_ = false;
     bool incomplete_ = false;
+    std::string incomplete_reason_;
     bool refused_ = false;
 };
 

@@ -24,7 +24,7 @@ struct model_request {
     std::string system;
     std::vector<message> messages;
     std::vector<tool_schema> tools;
-    std::size_t max_tokens = 16384;
+    std::size_t max_tokens = 128000;
     bool thinking = true;
 };
 
@@ -50,6 +50,7 @@ struct stream_events {
     std::function<void(std::string_view)> text;
     std::function<void(std::string_view text, std::string_view signature)> thinking;
     std::function<void(const std::string& name)> tool_started;
+    std::function<void(const std::string& name, std::string_view delta)> tool_arguments;
 };
 
 class provider {

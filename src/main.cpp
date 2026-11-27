@@ -45,7 +45,7 @@ constexpr const char* usage_text =
     "\n"
     "  --model NAME              model id or alias (opus, sonnet, haiku, fable)\n"
     "  --provider NAME           anthropic, openai, deepseek, or one from ~/.ode/settings.json\n"
-    "  --permission MODE         plan | default | yolo\n"
+    "  --permission MODE         plan | auto | yolo\n"
     "  -C DIR                    workspace directory\n"
     "  --no-color                plain output (also NO_COLOR=1)\n"
     "  -v, --version\n"
@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
 
     if (!mode_text.empty()) {
         const auto m = parse_mode(mode_text);
-        if (!m) return fail("--permission takes plan, default or yolo");
+        if (!m) return fail("--permission takes plan, auto or yolo");
         a.permissions.set_mode(*m);
     }
 

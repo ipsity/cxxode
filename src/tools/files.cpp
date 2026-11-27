@@ -3,12 +3,23 @@
 #include "platform/win_util.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
 namespace ode {
 
 fs::path resolve(const fs::path& root, std::string_view path) {
+#ifdef _WIN32
+    // Git Bash spells Windows drives as /c/... while std::filesystem expects C:/....
+    if (path.size() >= 3 && path[0] == '/' && path[2] == '/' &&
+        ((path[1] >= 'a' && path[1] <= 'z') || (path[1] >= 'A' && path[1] <= 'Z'))) {
+        std::string windows_path(path);
+        windows_path[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(path[1])));
+        windows_path[1] = ':';
+        return fs::path(std::u8string(windows_path.begin(), windows_path.end())).lexically_normal();
+    }
+#endif
     fs::path p = fs::path(std::u8string(path.begin(), path.end()));
     if (p.is_relative()) p = root / p;
     return p.lexically_normal();
@@ -67,6 +78,13 @@ std::string display_path(const fs::path& root, const fs::path& path) {
     }
     const auto abs = path.generic_u8string();
     return std::string(abs.begin(), abs.end());
+}
+
+std::string display_absolute_path(const fs::path& path) {
+    std::error_code ec;
+    const auto absolute = fs::absolute(path, ec).lexically_normal();
+    const auto shown = (ec ? path : absolute).generic_u8string();
+    return std::string(shown.begin(), shown.end());
 }
 
 std::optional<file_stamp> stamp(const fs::path& path) {

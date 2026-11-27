@@ -1,5 +1,6 @@
 #include "tools/tool.hpp"
 #include "platform/process.hpp"
+#include "base/utf.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -56,10 +57,29 @@ const shell& detect_shell() {
     return value;
 }
 
+std::string normalize_shell_output(std::string text) {
+    if (text.empty()) return text;
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0) > 0)
+        return text;
+    auto code_page = GetConsoleOutputCP();
+    if (code_page == 0 || code_page == CP_UTF8) code_page = GetACP();
+    if (code_page == 0 || code_page == CP_UTF8) return text;
+    const int wide_size = MultiByteToWideChar(code_page, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (wide_size <= 0) return text;
+    std::wstring wide(static_cast<std::size_t>(wide_size), L'\0');
+    MultiByteToWideChar(code_page, 0, text.data(), static_cast<int>(text.size()), wide.data(), wide_size);
+    const int utf8_size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, nullptr, 0, nullptr, nullptr);
+    if (utf8_size <= 0) return text;
+    std::string utf8(static_cast<std::size_t>(utf8_size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, utf8.data(), utf8_size, nullptr, nullptr);
+    return utf8;
+}
+
 tool_output bash_tool(const json& input, tool_context& ctx) {
     const auto command = input.value("command", std::string{});
     if (command.empty()) return {"command is required.", true, "failed", {}};
-    auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, 600000);
+    constexpr std::int64_t max_timeout_ms = 2147483647;
+    auto timeout = std::clamp<std::int64_t>(input.value("timeout", std::int64_t{120000}), 1000, max_timeout_ms);
     if (ctx.deadline) {
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
             *ctx.deadline - std::chrono::steady_clock::now()).count();
@@ -70,10 +90,12 @@ tool_output bash_tool(const json& input, tool_context& ctx) {
     process_request req{sh.program, sh.prefix, ctx.root, std::chrono::milliseconds(timeout)};
     req.arguments.push_back(command);
     cancel_token never;
-    auto r = run_process(req, ctx.cancel ? *ctx.cancel : never, ctx.output);
+    auto r = run_process(req, ctx.cancel ? *ctx.cancel : never, [&](std::string_view chunk) {
+        if (ctx.output) ctx.output(normalize_shell_output(std::string(chunk)));
+    });
     if (!r.error.empty()) return {"Could not start " + sh.name + ": " + r.error, true, "failed to start", {}};
 
-    std::string text = clip(std::move(r.output), 30000);
+    std::string text = clip(normalize_shell_output(std::move(r.output)), 30000);
     std::string summary;
     bool error = false;
     if (r.cancelled) {
@@ -215,11 +237,12 @@ std::vector<tool> builtin_tools() {
     tools.push_back({"Bash",
                      "Run a shell command in the workspace directory (" + detect_shell().name +
                          " on this machine). stdin is closed; interactive programs will not work. Output is "
-                         "truncated to 30000 characters. Default timeout 120000 ms, maximum 600000.",
+                         "truncated to 30000 characters. Default timeout 120000 ms, maximum 2147483647 ms.",
                      {{"type", "object"},
                       {"properties",
                        {{"command", {{"type", "string"}}},
-                        {"timeout", {{"type", "integer"}, {"description", "Milliseconds"}}},
+                        {"timeout", {{"type", "integer"}, {"description", "Milliseconds, maximum 2147483647"},
+                                     {"minimum", 1000}, {"maximum", 2147483647}}},
                         {"description", {{"type", "string"}, {"description", "5-10 word summary of what it does"}}}}},
                       {"required", {"command"}}},
                      tool_access::execute, bash_tool,

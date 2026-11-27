@@ -80,6 +80,13 @@ void interactive_ui::set_permission_mode(permission_mode mode) {
 
 void interactive_ui::push(ui_event e) {
     std::lock_guard lock(mutex_);
+    if (auto* update = std::get_if<ev_tool_preparing>(&e); update && update->started == steady::time_point{} && !queue_.empty()) {
+        if (auto* previous = std::get_if<ev_tool_preparing>(&queue_.back());
+            previous && previous->started == steady::time_point{} && previous->name == update->name) {
+            previous->argument_bytes = update->argument_bytes;
+            return;
+        }
+    }
     queue_.push_back(std::move(e));
 }
 
@@ -92,7 +99,10 @@ agent_events interactive_ui::make_events() {
         if (!text.empty()) push(ev_thinking{std::string(text)});
     };
     ev.tool_preparing = [this](std::string_view name) {
-        if (!name.empty()) push(ev_tool_preparing{std::string(name), steady::now()});
+        if (!name.empty()) push(ev_tool_preparing{std::string(name), steady::now(), 0});
+    };
+    ev.tool_argument_progress = [this](std::string_view name, std::size_t bytes) {
+        push(ev_tool_preparing{std::string(name), {}, bytes});
     };
     ev.tool_started = [this](const tool& t, const json& in) {
         const auto command = t.name == "Bash" ? bash_command(in) : std::string_view{};
@@ -135,6 +145,8 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
     cancel_.reset();
     busy_ = true;
     thinking_ = true;
+    responding_ = false;
+    request_summary_.clear();
     busy_since_ = steady::now();
     worker_ = std::thread([this, job = std::move(job), compact] {
         auto ev = make_events();
@@ -148,10 +160,24 @@ void interactive_ui::start_job(std::function<turn_result(agent_events&, cancel_t
     });
 }
 
-void interactive_ui::show_user_message(std::string_view text) {
+void interactive_ui::show_user_message(std::string_view message) {
     section("user");
-    screen_.commit(ui::layout({{std::string(text), ui::tone::normal}}, size_.columns - 1,
-                              {app_.current_theme.user_message_fg + "› \033[0m", 2}, {"  ", 2}));
+    const int columns = std::max(1, size_.columns - 1);
+    const auto wrapped = text::wrap(message, std::max(1, columns - 8));
+    int content_width = 0;
+    for (const auto& line : wrapped) content_width = std::max(content_width, text::width(line));
+    const int block_width = std::min(columns - 1, content_width + 7);
+    const bool color = ui::color_enabled();
+    const auto background = color ? app_.current_theme.user_message_bg : std::string{};
+    const auto foreground = color ? "\033[39m" : "";
+    const auto reset = color ? "\033[0m" : "";
+    for (std::size_t i = 0; i < wrapped.size(); ++i) {
+        const auto prefix = i == 0 ? "› " : "  ";
+        const int used = 1 + text::width(prefix) + text::width(wrapped[i]);
+        const int padding = color ? std::max(0, block_width - used) : 0;
+        screen_.commit(" " + background + foreground + prefix + wrapped[i] +
+                       std::string(static_cast<std::size_t>(padding), ' ') + reset);
+    }
 }
 
 void interactive_ui::start_turn(std::string text, std::vector<std::string> allowed_tools) {

@@ -54,6 +54,27 @@ TEST_CASE("anthropic stream with tool call") {
     CHECK(calls[0]->input["path"] == "a.txt");
 }
 
+TEST_CASE("model requests default to 128k output tokens") {
+    const model_request request;
+    CHECK(request.max_tokens == 128000);
+}
+
+TEST_CASE("anthropic stream reports tool argument deltas before parsing completes") {
+    std::vector<std::string> names;
+    std::vector<std::string> deltas;
+    stream_events events;
+    events.tool_started = [&](const std::string& name) { names.push_back(name); };
+    events.tool_arguments = [&](const std::string& name, std::string_view delta) {
+        CHECK(name == "read");
+        deltas.emplace_back(delta);
+    };
+    const std::string full = std::string(anthropic_tool_stream) + "data: {\"type\":\"message_stop\"}\n\n";
+    const auto result = decode_stream(protocol::anthropic, full, events);
+    REQUIRE(result.complete);
+    CHECK(names == std::vector<std::string>{"read"});
+    CHECK(deltas == std::vector<std::string>{"{\"path\":", "\"a.txt\"}"});
+}
+
 TEST_CASE("anthropic stream without message_stop is incomplete") {
     auto r = decode_stream(protocol::anthropic, anthropic_tool_stream);
     CHECK_FALSE(r.complete);
@@ -68,14 +89,32 @@ TEST_CASE("chat completions stream with split tool arguments") {
         "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
         "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3}}\n\n"
         "data: [DONE]\n\n";
-    auto r = decode_stream(protocol::openai_chat, s);
+    std::vector<std::string> argument_deltas;
+    stream_events events;
+    events.tool_arguments = [&](const std::string& name, std::string_view delta) {
+        CHECK(name == "bash");
+        argument_deltas.emplace_back(delta);
+    };
+    auto r = decode_stream(protocol::openai_chat, s, events);
     CHECK(r.complete);
+    CHECK(argument_deltas == std::vector<std::string>{"{\"command\"", ":\"ls\"}"});
     CHECK(r.stop == stop_reason::tool_use);
     CHECK(r.content.plain_text() == "ok");
     auto calls = r.content.tool_uses();
     REQUIRE(calls.size() == 1);
     CHECK(calls[0]->input["command"] == "ls");
     CHECK(r.tokens.output == 3);
+}
+
+TEST_CASE("chat stream reports truncation when tool arguments hit the token limit") {
+    const char* s =
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"write\",\"arguments\":\"{\\\"content\\\":\\\"partial\"}}]}}]}\n\n"
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n";
+    const auto reply = decode_stream(protocol::openai_chat, s);
+    CHECK_FALSE(reply.complete);
+    CHECK(reply.error == "Response was truncated before completion; tool arguments may be incomplete.");
+    CHECK(reply.stop == stop_reason::error);
+    CHECK(reply.content.tool_uses().size() == 1);
 }
 
 TEST_CASE("chat stream with broken arguments is not dispatchable") {
@@ -112,6 +151,17 @@ TEST_CASE("responses stream") {
     auto body = encode_request(protocol::openai_responses, req);
     CHECK(body["input"][0]["type"] == "reasoning");
     CHECK(body["input"][2]["type"] == "function_call");
+}
+
+TEST_CASE("responses stream reports output-token truncation for incomplete tool arguments") {
+    const char* s =
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"f1\",\"name\":\"write\",\"arguments\":\"{\\\"content\\\":\\\"partial\"}}\n\n"
+        "data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n";
+    const auto reply = decode_stream(protocol::openai_responses, s);
+    CHECK_FALSE(reply.complete);
+    CHECK(reply.error == "Response was truncated before completion; tool arguments may be incomplete.");
+    CHECK(reply.stop == stop_reason::error);
+    CHECK(reply.content.tool_uses().size() == 1);
 }
 
 TEST_CASE("reasoning summaries are requested for compatible provider models") {

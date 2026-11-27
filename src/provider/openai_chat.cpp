@@ -45,7 +45,11 @@ public:
                             slot.name = f["name"];
                             if (events_.tool_started) events_.tool_started(slot.name);
                         }
-                        if (f.contains("arguments") && f["arguments"].is_string()) slot.arguments += f["arguments"].get<std::string>();
+                        if (f.contains("arguments") && f["arguments"].is_string()) {
+                            const auto delta = f["arguments"].get<std::string>();
+                            slot.arguments += delta;
+                            if (events_.tool_arguments) events_.tool_arguments(slot.name, delta);
+                        }
                     }
                 }
             }
@@ -66,7 +70,10 @@ public:
         reply_.error = error_;
         if (!reply_.complete) {
             reply_.stop = stop_reason::error;
-            if (reply_.error.empty()) reply_.error = broken ? "Tool arguments were not valid JSON." : "The stream ended early.";
+            if (reply_.error.empty()) {
+                if (finish_ == "length") reply_.error = "Response was truncated before completion; tool arguments may be incomplete.";
+                else reply_.error = broken ? "Tool arguments were not valid JSON." : "The stream ended early.";
+            }
         } else if (!calls_.empty()) {
             reply_.stop = stop_reason::tool_use;
         } else if (finish_ == "length") {

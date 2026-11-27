@@ -13,10 +13,13 @@ std::string sgr(tone t) {
         case tone::normal: return "\x1b[0m";
         case tone::bold: return "\x1b[0;1m";
         case tone::italic: return "\x1b[0;3m";
+        case tone::thinking: return "\x1b[0;2;3m";
         case tone::code: return "\x1b[0;38;2;0;212;255m";
         case tone::dim: return "\x1b[0;90m";
         case tone::accent: return "\x1b[0;38;2;0;212;255m";
         case tone::accent_bold: return "\x1b[0;1;38;2;0;212;255m";
+        case tone::success: return "\x1b[0;1;38;2;80;200;120m";
+        case tone::failure: return "\x1b[0;1;38;2;255;80;80m";
         case tone::error: return "\x1b[0;38;2;255;95;95m";
         case tone::diff_added: return "\x1b[0;38;2;142;230;174;48;2;22;54;42m";
         case tone::diff_removed: return "\x1b[0;38;2;255;165;168;48;2;70;29;36m";

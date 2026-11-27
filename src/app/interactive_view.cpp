@@ -210,7 +210,7 @@ std::string interactive_ui::status_line(int columns) const {
                 std::to_string(cost).substr(0, std::to_string(cost).find('.') + 3));
         }
     }
-    const auto mode_tone = mode == permission_mode::yolo ? tone::error : mode == permission_mode::plan ? tone::accent : tone::dim;
+    const auto mode_tone = mode == permission_mode::yolo ? tone::error : mode == permission_mode::plan ? tone::accent : tone::success;
     std::string left = "ode  " + home_relative(app_.root);
     if (!branch_.empty()) left += "  " + branch_;
     const int room = columns - 2 - text::width(right) - 2;
@@ -246,7 +246,24 @@ std::vector<std::string> interactive_ui::activity_rows() const {
     const int columns = std::max(1, size_.columns - 1);
 
     if (!think_stream_.empty()) {
-        for (auto& r : thinking_rows(think_stream_, columns)) rows.push_back(std::move(r));
+        std::vector<std::string> lines;
+        const int wrap_width = std::max(1, columns - text::width("  ┊ "));
+        std::size_t start = 0;
+        while (start < think_stream_.size()) {
+            const auto end = think_stream_.find('\n', start);
+            const auto stop = end == std::string::npos ? think_stream_.size() : end;
+            const auto wrapped = text::wrap_line(std::string_view(think_stream_).substr(start, stop - start), wrap_width);
+            lines.insert(lines.end(), wrapped.begin(), wrapped.end());
+            start = end == std::string::npos ? stop : end + 1;
+        }
+        constexpr std::size_t preview_lines = 4;
+        const auto first = lines.size() > preview_lines ? lines.size() - preview_lines : 0;
+        if (first != 0) {
+            rows.push_back("  " + paint(tone::dim, "┊ … 前 " + std::to_string(first) + " 行已折叠"));
+        }
+        for (auto i = first; i < lines.size(); ++i) {
+            for (auto& row : thinking_rows(lines[i], columns)) rows.push_back(std::move(row));
+        }
     }
     // Unfinished streamed line.
     if (!stream_.empty()) {
@@ -263,15 +280,27 @@ std::vector<std::string> interactive_ui::activity_rows() const {
         const auto tail = "  " + format_elapsed(elapsed);
         const auto label = t.name == "Bash" ? "运行中" :
             text::keep_head(t.label, std::max(8, columns - 4 - text::width(head) - text::width(tail)));
-        rows.push_back(" " + paint(tone::accent, head) + label + paint(tone::dim, tail));
+        rows.push_back(" " + paint(tone::accent, spinner_with_color(t.started, t.name, app_.current_theme)) +
+                       paint(tone::dim, " 执行 ") + std::string(ui::verb(t.name)) + " " + label + paint(tone::dim, tail));
     }
     if (!ask_ && preparing_tool_) {
-        const auto& [name, started] = *preparing_tool_;
+        const auto& name = preparing_tool_->name;
+        const auto started = preparing_tool_->started;
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - started);
+        const auto size = preparing_tool_->argument_bytes < 1024
+            ? std::to_string(preparing_tool_->argument_bytes) + " B"
+            : std::to_string(preparing_tool_->argument_bytes / 1024) + " KB";
         rows.push_back(" " + spinner_with_color(started, name, app_.current_theme) +
-                       paint(tone::dim, " 准备 " + name + " 参数  " + format_elapsed(elapsed)));
+                       paint(tone::dim, " 生成 " + name + " 参数 " + size + "  " + format_elapsed(elapsed)));
     } else if (!ask_ && busy_ && running_.empty() && thinking_) {
-        rows.push_back(" " + paint(tone::accent, spinner_with_color(busy_since_, "Thinking", app_.current_theme)) + paint(tone::dim, " 思考中 " + seconds(busy_since_) + "  esc 中断"));
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - thinking_status_started_);
+        rows.push_back(" " + paint(tone::accent, spinner_with_color(thinking_status_started_, "Thinking", app_.current_theme)) +
+                       paint(tone::dim, " 思考中 " + format_elapsed(elapsed) + "  esc 中断"));
+    } else if (!ask_ && busy_ && running_.empty() && responding_) {
+        rows.push_back(" " + paint(tone::accent, spinner_with_color(response_started_, "Response", app_.current_theme)) +
+                       paint(tone::dim, " 生成回答 " + seconds(response_started_)));
+    } else if (!busy_ && !ask_ && !request_summary_.empty()) {
+        rows.push_back(" " + paint(tone::dim, request_summary_));
     }
     return rows;
 }
@@ -381,7 +410,7 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
     std::string border;
     if (show_borders) {
         border = app_.current_theme.border_fg + "\033[1m";
-        for (int i = 0; i < columns; ++i) border += "─";
+        for (int i = 0; i < columns; ++i) border += "━";
         border += "\033[0m";
         rows.push_back(border);
     }
@@ -395,10 +424,9 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
         if (!shown.empty() && shown.back() == '\n') shown.pop_back();
 
         if (i == 0) {
-            rows.push_back(app_.current_theme.prompt_fg + "\033[1m› \033[0m" +
-                          app_.current_theme.prompt_fg + "\033[1m" + shown + "\033[0m");
+            rows.push_back("› " + shown);
         } else {
-            rows.push_back(app_.current_theme.prompt_fg + "\033[1m  " + shown + "\033[0m");
+            rows.push_back("  " + shown);
         }
     }
 

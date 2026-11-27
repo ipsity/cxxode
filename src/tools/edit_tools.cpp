@@ -26,9 +26,14 @@ void back_up(tool_context& ctx, const fs::path& path, std::optional<std::string>
 
 bool write_all(const fs::path& path, const std::string& content) {
     std::error_code ec;
-    if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
+    if (path.has_parent_path()) {
+        fs::create_directories(path.parent_path(), ec);
+        if (ec) return false;
+    }
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << content;
+    if (!out) return false;
+    out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    out.close();
     return static_cast<bool>(out);
 }
 
@@ -167,10 +172,10 @@ tool_output write_tool(const json& input, tool_context& ctx) {
     auto detail = rewrite_preview(original ? std::string_view(*original) : std::string_view{}, content);
     if (existed && !original) detail.insert(0, "Original content could not be read.\n");
     back_up(ctx, path, std::move(original));
-    if (!write_all(path, content)) return fail("Could not write " + display_path(ctx.root, path));
+    if (!write_all(path, content)) return fail("Could not write " + display_absolute_path(path));
     remember(ctx, path);
     const auto lines = count_lines(content);
-    return {(existed ? "Overwrote " : "Created ") + display_path(ctx.root, path) + " (" + std::to_string(lines) + " lines).",
+    return {(existed ? "Overwrote " : "Created ") + display_absolute_path(path) + " (" + std::to_string(lines) + " lines).",
             false, (existed ? "overwrote " : "created ") + std::to_string(lines) + " lines", std::move(detail)};
 }
 
@@ -209,11 +214,11 @@ tool_output edit_tool(const json& input, tool_context& ctx) {
     }
     updated.append(*content, from);
     back_up(ctx, path, std::move(content));
-    if (!write_all(path, updated)) return fail("Could not write " + display_path(ctx.root, path));
+    if (!write_all(path, updated)) return fail("Could not write " + display_absolute_path(path));
     remember(ctx, path);
 
     const auto removed = count_lines(old_text) * count, added = count_lines(new_text) * count;
-    return {"Edited " + display_path(ctx.root, path) + (count > 1 ? " (" + std::to_string(count) + " replacements)." : "."),
+    return {"Edited " + display_absolute_path(path) + (count > 1 ? " (" + std::to_string(count) + " replacements)." : "."),
             false, "+" + std::to_string(added) + " -" + std::to_string(removed), preview(old_text, new_text)};
 }
 

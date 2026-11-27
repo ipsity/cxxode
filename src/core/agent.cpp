@@ -68,6 +68,9 @@ model_reply agent::send(const model_request& request, stream_events stream, agen
         record_first(name);
         if (stream.tool_started) stream.tool_started(name);
     };
+    timed.tool_arguments = [&](const std::string& name, std::string_view delta) {
+        if (stream.tool_arguments) stream.tool_arguments(name, delta);
+    };
     auto reply = provider_.send(request, timed, cancel);
     events.request_finished({build_elapsed, elapsed(), first_output, compact, reply.timing});
     return reply;
@@ -129,7 +132,19 @@ turn_result agent::run(std::string user_text, agent_events& events, cancel_token
         if (events.request_started) events.request_started();
         stream_events stream;
         stream.text = events.text;
-        if (events.tool_preparing) stream.tool_started = events.tool_preparing;
+        std::map<std::string, std::size_t> argument_bytes;
+        if (events.tool_preparing) {
+            stream.tool_started = [&, preparing = events.tool_preparing](const std::string& name) {
+                argument_bytes[name] = 0;
+                preparing(name);
+            };
+        }
+        if (events.tool_argument_progress) {
+            stream.tool_arguments = [&, progress = events.tool_argument_progress](const std::string& name, std::string_view delta) {
+                argument_bytes[name] += delta.size();
+                progress(name, argument_bytes[name]);
+            };
+        }
         stream.thinking = [&events](std::string_view text, std::string_view sig) {
             if (events.thinking) events.thinking(text, sig);
         };

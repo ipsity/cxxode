@@ -71,7 +71,9 @@ public:
                 b.text += text;
                 if (events_.text) events_.text(text);
             } else if (kind == "input_json_delta") {
-                arguments_ += delta.value("partial_json", "");
+                const auto partial = delta.value("partial_json", "");
+                arguments_ += partial;
+                if (events_.tool_arguments) events_.tool_arguments(b.name, partial);
             } else if (kind == "thinking_delta") {
                 const auto text = delta.value("thinking", "");
                 b.text += text;

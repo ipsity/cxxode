@@ -67,6 +67,7 @@ bool save_credential(settings& s, const std::string& provider, const std::string
 bool delete_credential(settings& s, const std::string& provider);
 bool import_windows_credential(settings& s, const std::string& provider);
 bool save_provider_selection(const std::string& provider, const std::filesystem::path& settings_path);
+bool save_model_selection(const std::string& provider, const std::string& model, const std::filesystem::path& settings_path);
 
 // Built-in model aliases shared with Claude Code agent definitions.
 std::string resolve_model_alias(const std::string& model);

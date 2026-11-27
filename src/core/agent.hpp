@@ -12,6 +12,8 @@
 
 namespace ode {
 
+inline constexpr std::size_t default_context_window = 272000;
+
 struct request_timing {
     std::chrono::milliseconds build_elapsed;
     std::chrono::milliseconds elapsed;
@@ -27,6 +29,7 @@ struct agent_events {
     std::function<void(std::string_view)> text;
     std::function<void(std::string_view text, std::string_view signature)> thinking;
     std::function<void(std::string_view)> tool_preparing;
+    std::function<void(std::string_view, std::size_t)> tool_argument_progress;
     std::function<void(const tool&, const json& input)> tool_started;
     std::function<void(std::string_view)> tool_progress;
     std::function<void(const tool&, const json& input, const tool_output&)> tool_finished;
@@ -71,7 +74,7 @@ public:
 
     std::string model;
     std::string system;
-    std::size_t context_window = 200000;
+    std::size_t context_window = default_context_window;
     double auto_compact_ratio = 0.8;
     std::vector<message> messages;
     session_log* log = nullptr;
