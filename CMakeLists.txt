@@ -72,6 +72,7 @@ add_library(ode_app STATIC
     src/app/app.cpp
     src/app/format.cpp
     src/app/commands.cpp
+    src/app/login.cpp
     src/app/interactive.cpp
     src/app/interactive_events.cpp
     src/app/interactive_input.cpp

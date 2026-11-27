@@ -4,10 +4,12 @@
 #include "base/utf.hpp"
 #include "platform/file_lock.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 
 #include <wincred.h>
+#include <winhttp.h>
 
 namespace ode {
 namespace fs = std::filesystem;
@@ -264,6 +266,17 @@ bool valid_api_key(std::string_view key) {
     return !key.empty() && key.find_first_of("\r\n") == std::string_view::npos && key.find('\0') == std::string_view::npos;
 }
 
+void select_provider(json& data, const std::string& provider) {
+    const auto model = data.find("model");
+    const auto model_provider = data.find("model_provider");
+    if (model != data.end() && model->is_string() &&
+        (model_provider == data.end() || !model_provider->is_string())) {
+        const auto selected = data.find("provider");
+        data["model_provider"] = selected != data.end() && selected->is_string() ? selected->get<std::string>() : "anthropic";
+    }
+    data["provider"] = provider;
+}
+
 } // namespace
 
 std::optional<std::string> resolve_provider(const settings& s, const std::string& name, provider_config& out) {
@@ -326,16 +339,64 @@ bool import_windows_credential(settings& s, const std::string& provider) {
 
 bool save_provider_selection(const std::string& provider, const fs::path& settings_path) {
     return update_store(settings_path, [&](json& data) -> std::optional<bool> {
-        const auto model = data.find("model");
-        const auto model_provider = data.find("model_provider");
-        if (model != data.end() && model->is_string() &&
-            (model_provider == data.end() || !model_provider->is_string())) {
-            const auto selected = data.find("provider");
-            data["model_provider"] = selected != data.end() && selected->is_string() ? selected->get<std::string>() : "anthropic";
-        }
-        data["provider"] = provider;
+        select_provider(data, provider);
         return true;
     });
+}
+
+bool valid_provider_id(std::string_view name) {
+    constexpr std::string_view alphanumeric = "abcdefghijklmnopqrstuvwxyz0123456789";
+    return !name.empty() && alphanumeric.find(name.front()) != std::string_view::npos &&
+           name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") == std::string_view::npos;
+}
+
+bool normalize_provider_base_url(protocol kind, std::string& url) {
+    if ((!url.starts_with("https://") && !url.starts_with("http://")) ||
+        url.find_first_of("?#\\") != std::string::npos ||
+        std::ranges::any_of(url, [](unsigned char c) { return c <= ' ' || c == 127; })) return false;
+    const auto wide = widen(url);
+    URL_COMPONENTS parts{};
+    parts.dwStructSize = sizeof(parts);
+    parts.dwHostNameLength = parts.dwUrlPathLength = parts.dwUserNameLength =
+        parts.dwPasswordLength = static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &parts) || parts.dwHostNameLength == 0 ||
+        parts.dwUserNameLength != 0 || parts.dwPasswordLength != 0) return false;
+
+    const auto path_start = url.find('/', url.find("://") + 3);
+    if (url.find('@', url.find("://") + 3) < path_start) return false;
+    auto end = url.find_last_not_of('/');
+    if (path_start != std::string::npos && end >= path_start) {
+        const auto path = std::string_view(url).substr(path_start, end - path_start + 1);
+        if (path.ends_with("/chat/completions") || path.ends_with("/responses") ||
+            path.ends_with("/messages") || path.ends_with("/models")) return false;
+        if (kind == protocol::anthropic && path.ends_with("/v1")) {
+            end -= 3;
+            while (url[end] == '/') --end;
+        }
+    }
+    url.resize(end + 1);
+    return true;
+}
+
+bool save_new_provider(settings& s, const provider_entry& entry) {
+    auto saved = entry;
+    if (!valid_provider_id(saved.name) || s.providers.contains(saved.name) ||
+        !normalize_provider_base_url(saved.kind, saved.base_url) ||
+        saved.default_model.empty() ||
+        std::ranges::any_of(saved.default_model, [](unsigned char c) { return c <= ' ' || c == 127; }) ||
+        (saved.auth != credential_mode::api_key && saved.auth != credential_mode::bearer) ||
+        !valid_api_key(saved.api_key)) return false;
+    if (!update_store(s.user_settings_path, [&](json& data) -> std::optional<bool> {
+        auto& providers = data["providers"];
+        if ((!providers.is_null() && !providers.is_object()) || providers.contains(saved.name)) return std::nullopt;
+        providers[saved.name] = {{"protocol", protocol_name(saved.kind)}, {"base_url", saved.base_url},
+                                {"model", saved.default_model}, {"api_key", saved.api_key},
+                                {"auth", saved.auth == credential_mode::bearer ? "bearer" : "api-key"}};
+        select_provider(data, saved.name);
+        return true;
+    })) return false;
+    s.providers.emplace(saved.name, std::move(saved));
+    return true;
 }
 
 std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& workspace) {

@@ -57,6 +57,62 @@ TEST_CASE("provider selection persists without replacing other settings") {
     fs::remove_all(directory);
 }
 
+TEST_CASE("third-party provider setup saves the definition and selection together") {
+    temp_directory dir;
+    const auto home = dir.path / "home";
+    const auto workspace = dir.path / "project";
+    scoped_env profile("USERPROFILE", home.string());
+    const auto store = home / ".ode" / "settings.json";
+    write_settings(store, R"({"provider":"openai","model":"old-model","extra":17})");
+    auto s = load_settings(workspace);
+    auto stale = s;
+    const provider_entry gateway{"gateway", protocol::anthropic, "https://gateway.example/api/v1/",
+                                 "vendor/model", credential_mode::bearer, "fixture-key"};
+    REQUIRE(save_new_provider(s, gateway));
+    CHECK(s.provider == "openai");
+    CHECK_FALSE(save_new_provider(stale, gateway));
+    CHECK_FALSE(stale.providers.contains("gateway"));
+
+    const auto data = json::parse(*read_file(store));
+    CHECK(data["provider"] == "gateway");
+    CHECK(data["model_provider"] == "openai");
+    CHECK(data["extra"] == 17);
+    CHECK(data["providers"]["gateway"]["base_url"] == "https://gateway.example/api");
+    const auto loaded = load_settings(workspace);
+    CHECK(loaded.provider == "gateway");
+    CHECK(configured_model(loaded, "gateway") == "vendor/model");
+    CHECK(configured_model(loaded, "openai") == "old-model");
+    provider_config connection;
+    REQUIRE_FALSE(resolve_provider(loaded, "gateway", connection));
+    CHECK(connection.bearer);
+    CHECK(connection.api_key == "fixture-key");
+    CHECK(models_url(connection) == "https://gateway.example/api/v1/models");
+
+    write_settings(store, "{");
+    auto unsaved = gateway;
+    unsaved.name = "other";
+    CHECK_FALSE(save_new_provider(s, unsaved));
+    CHECK_FALSE(s.providers.contains("other"));
+    CHECK(read_file(store) == "{");
+}
+
+TEST_CASE("provider setup accepts API roots and rejects complete endpoint URLs") {
+    auto chat = std::string("https://gateway.example/api/v1///");
+    REQUIRE(normalize_provider_base_url(protocol::openai_chat, chat));
+    CHECK(chat == "https://gateway.example/api/v1");
+    auto responses = std::string("http://127.0.0.1:8123/api");
+    REQUIRE(normalize_provider_base_url(protocol::openai_responses, responses));
+    provider_config connection;
+    connection.kind = protocol::openai_responses;
+    connection.base_url = responses;
+    CHECK(models_url(connection) == "http://127.0.0.1:8123/api/v1/models");
+
+    for (auto url : {std::string("gateway.example"), std::string("https://user@host.example"),
+                     std::string("https://host.example/v1/responses"), std::string("https://host.example?v=1")}) {
+        CHECK_FALSE(normalize_provider_base_url(protocol::openai_responses, url));
+    }
+}
+
 TEST_CASE("official provider model context windows use provider metadata") {
     provider_config anthropic;
     anthropic.name = "anthropic";

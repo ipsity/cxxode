@@ -37,7 +37,11 @@ ode --help                  查看全部启动参数
 
 ## Provider 配置
 
-内置 provider 为 Anthropic、OpenAI 和 DeepSeek。首次使用推荐通过 `ode login [provider]` 输入密钥。provider、模型和连接设置位于用户级 `%USERPROFILE%\.ode\settings.json`。例如：
+内置 provider 为 Anthropic、OpenAI 和 DeepSeek。运行 `/login`，选择「使用 API Key」及要连接的服务商。使用 `/login <provider>` 或 `ode login [provider]` 可直接录入或更新密钥。
+
+选择「第三方服务商」→「添加第三方服务商」，填写服务商 ID、协议、Base URL 和 API Key。ode 会查询模型列表供你选择默认模型，也可手动输入模型 ID。Base URL 可包含服务商要求的路径，例如 `https://gateway.example.com/api/v1`。
+
+provider、模型和连接设置位于用户级 `%USERPROFILE%\.ode\settings.json`。例如：
 
 ```json
 {

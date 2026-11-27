@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace ode {
 
@@ -18,5 +19,6 @@ struct provider_config {
 };
 
 std::optional<protocol> parse_protocol(std::string_view text);
+std::string_view protocol_name(protocol kind);
 
 } // namespace ode

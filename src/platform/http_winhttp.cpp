@@ -111,7 +111,19 @@ http_result http_send(const http_request& request, const http_sink& sink, cancel
         return result;
     };
 
-    WinHttpSetTimeouts(raw, 0, 30000, 60000, 600000);
+    if (request.timeout_ms > 0) {
+        const auto timeout = request.timeout_ms;
+        WinHttpSetTimeouts(raw, timeout, timeout, timeout, timeout);
+    } else {
+        WinHttpSetTimeouts(raw, 0, 30000, 60000, 600000);
+    }
+    if (!request.follow_redirects) {
+        DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+        if (!WinHttpSetOption(raw, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy))) {
+            if (!cancel.cancelled()) result.error = last_error("Setting redirect policy");
+            return finish();
+        }
+    }
     std::wstring headers;
     for (const auto& [name, value] : request.headers) headers += widen(name + ": " + value + "\r\n");
     if (!WinHttpSendRequest(raw, headers.c_str(), static_cast<DWORD>(headers.size()),

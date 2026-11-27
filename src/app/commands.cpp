@@ -391,18 +391,7 @@ bool interactive_ui::command(const std::string& line) {
 
 void interactive_ui::login_command(std::string_view arg) {
     if (arg.empty()) {
-        selection_state providers;
-        providers.title = "选择登录的 provider";
-        providers.items.push_back(app_.config.provider);
-        providers.details.push_back("当前 provider");
-        for (const auto& [name, entry] : app_.config.providers) {
-            if (name == app_.config.provider) continue;
-            providers.items.push_back(name);
-        }
-        providers.on_select = [this, names = providers.items](std::size_t index) {
-            if (!switch_to_saved_provider(names[index])) login_ = login_state{names[index], {}};
-        };
-        selection_ = std::move(providers);
+        show_login_methods();
         return;
     }
 
@@ -444,12 +433,12 @@ void interactive_ui::save_login() {
         return;
     }
 
-    auto [name, key] = std::move(*login_);
-    login_.reset();
-    if (!save_credential(app_.config, name, key)) {
+    if (!save_credential(app_.config, login_->provider, login_->key)) {
         note("无法将密钥保存到用户 .ode/settings.json", tone::error);
         return;
     }
+    const auto name = std::move(login_->provider);
+    login_.reset();
 
     const bool switching = name != app_.config.provider;
     if (auto error = app_.use_provider(name)) {

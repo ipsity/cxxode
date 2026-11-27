@@ -348,6 +348,7 @@ void interactive_ui::apply(ev_done& e) {
     responding_ = false;
     if (worker_.joinable()) worker_.join();
     const auto& r = e.result;
+    finish_setup_models();
     if (lua_key_) {
         const auto key = *lua_key_;
         lua_key_.reset();
