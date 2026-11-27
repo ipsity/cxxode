@@ -6,7 +6,6 @@
 #include <chrono>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -22,7 +21,7 @@ public:
         std::vector<std::string> args;
         std::map<std::string, std::string> env;
         fs::path working_dir;
-        tool_exposure exposure = tool_exposure::codemode;
+        tool_exposure exposure = tool_exposure::deferred;
     };
 
     struct mcp_tool_info {
@@ -42,8 +41,7 @@ public:
     bool initialize(std::chrono::milliseconds timeout = std::chrono::seconds(30));
 
     std::vector<mcp_tool_info> list_tools();
-    tool_output call_tool(const std::string& name, const json& arguments,
-                         std::optional<std::chrono::steady_clock::time_point> deadline = {});
+    tool_output call_tool(const std::string& name, const json& arguments);
 
     const std::string& server_name() const { return config_.name; }
     tool_exposure exposure() const { return config_.exposure; }
@@ -60,7 +58,6 @@ private:
     std::string pending_;  // bytes read past the end of the last message
     int request_id_ = 0;
     std::string error_;
-    std::mutex call_mutex_;
 };
 
 // Every tool of every running server, named mcp__<server>__<tool>.

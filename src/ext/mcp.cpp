@@ -99,18 +99,10 @@ std::vector<mcp_client::mcp_tool_info> mcp_client::list_tools() {
     return tools;
 }
 
-tool_output mcp_client::call_tool(const std::string& name, const json& arguments,
-                                 std::optional<std::chrono::steady_clock::time_point> deadline) {
-    std::lock_guard lock(call_mutex_);
+tool_output mcp_client::call_tool(const std::string& name, const json& arguments) {
     try {
-        auto timeout = std::chrono::milliseconds(120000);
-        if (deadline) {
-            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(*deadline - std::chrono::steady_clock::now());
-            if (remaining <= std::chrono::milliseconds::zero()) return {"CodeMode execution deadline exceeded", true, "timeout", {}};
-            timeout = std::min(timeout, remaining);
-        }
         const auto response = send_request("tools/call", {{"name", name}, {"arguments", arguments}},
-                                           timeout);
+                                           std::chrono::seconds(120));
         if (response.contains("error")) {
             const auto message = response["error"].value("message", "MCP error");
             return {message, true, "错误", {}};
@@ -187,9 +179,7 @@ std::vector<tool> make_mcp_tools(const std::vector<std::shared_ptr<mcp_client>>&
             t.label = [name = mcp_tool.name](const json&) { return name; };
 
             const auto original_name = mcp_tool.name;
-            t.run = [client, original_name](const json& input, tool_context& context) {
-                return client->call_tool(original_name, input, context.deadline);
-            };
+            t.run = [client, original_name](const json& input, tool_context&) { return client->call_tool(original_name, input); };
             tools.push_back(std::move(t));
         }
     }

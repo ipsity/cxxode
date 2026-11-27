@@ -36,8 +36,6 @@ public:
     std::vector<std::string> reload_scripts(std::vector<lua_script> scripts, cancel_token& cancel);
     bool active() const;
     std::vector<tool> tools();
-    tool code_mode_tool();
-    tool_output run_code(std::string_view source, tool_context& ctx);
     const std::vector<std::string>& commands() const;
     bool has_hooks() const;
     hook_verdict run_hooks(hook_type type, const json& input, cancel_token& cancel,

@@ -60,7 +60,7 @@ TEST_CASE("newline JSON-RPC handshake lists and calls a tool") {
     const auto tools = make_mcp_tools({client});
     REQUIRE(tools.size() == 1);
     CHECK(tools[0].name == "mcp__fixture__echo");
-    CHECK(tools[0].exposure == tool_exposure::codemode);
+    CHECK(tools[0].exposure == tool_exposure::deferred);
     auto validated = tools[0];
     validated.schema = {{"type", "object"}, {"properties", {{"text", {{"type", "string"}}}}},
                         {"required", {"text"}}, {"additionalProperties", false}};
@@ -80,12 +80,4 @@ TEST_CASE("newline JSON-RPC handshake lists and calls a tool") {
     const auto direct_tools = make_mcp_tools({direct_client});
     REQUIRE(direct_tools.size() == 1);
     CHECK(direct_tools[0].exposure == tool_exposure::direct);
-
-    cfg.name = "deferred_fixture";
-    cfg.exposure = tool_exposure::deferred;
-    auto deferred_client = std::make_shared<mcp_client>(cfg);
-    REQUIRE(deferred_client->initialize(std::chrono::seconds(5)));
-    const auto deferred_tools = make_mcp_tools({deferred_client});
-    REQUIRE(deferred_tools.size() == 1);
-    CHECK(deferred_tools[0].exposure == tool_exposure::deferred);
 }

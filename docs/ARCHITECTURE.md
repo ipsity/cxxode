@@ -109,14 +109,11 @@ RPC 的 `request_finished` 记录本地构造请求的 `build_ms`（包括复制
 |---|---|
 | settings.json | `permissions.allow/deny/defaultMode`、`hooks`、`mcpServers`、`env`、`model`。`.mcp.json` 也要读 |
 | Hooks | `{事件: [{matcher, hooks: [{type:"command", command, timeout}]}]}`。stdin 字段：`session_id`、`transcript_path`、`cwd`、`hook_event_name`、`tool_name`、`tool_input`、`tool_response`、`prompt`。退出码 2 表示阻止，stderr 回传给模型。stdout 输出的 JSON 中要支持 `decision`/`reason`。命令通过 `bash`（找不到时用 `cmd /c`）执行 |
-| MCP | stdio 传输，**换行分隔的 JSON-RPC**。支持 `initialize`、`tools/list`、`tools/call`，工具名格式为 `mcp__<server>__<tool>`。服务配置 `exposure` 为 `direct`、`deferred` 或 `codemode`，默认 `codemode`。`direct` 工具进入模型请求；`deferred` 工具由 `tool_search` 搜索并加入后续请求；`codemode` 工具只经 Lua CodeMode 脚本调用。所有工具定义都保留在注册表中。M3 再加 Streamable HTTP |
-
+| MCP | stdio 传输，**换行分隔的 JSON-RPC**。支持 `initialize`、`tools/list`、`tools/call`，工具名格式为 `mcp__<server>__<tool>`。服务配置 `exposure` 为 `direct` 或 `deferred`，默认 `deferred`。`direct` 工具进入当前模型请求；`deferred` 工具保留在注册表中，由 `tool_search` 搜索并加入后续请求。M3 再加 Streamable HTTP |
 | Skills | `skills/<name>/SKILL.md`。系统提示里只放 name 和 description，正文由 `Skill` 工具按需加载 |
 | 斜杠命令 | `commands/*.md`，支持 `$ARGUMENTS`、`$1..$9` 和 frontmatter 里的 `description`、`allowed-tools` |
 | Subagents | `agents/*.md`，frontmatter 包含 `name`、`description`、`tools`、`model`。通过 `Task` 工具调用，子 agent 只返回最终文本 |
 | Plugins | `.claude-plugin/plugin.json` 所在目录，里面包含上面几类文件。安装就是解压到 `~/.ode/plugins/<name>/` |
-
-CodeMode 使用内嵌 Lua。脚本可通过 `search_tools`、`describe_tool`、`tools.call` 和 `tools.parallel` 发现并调用注册工具；嵌套调用仍经过 Agent 的权限与 Hook 管线。每个批次最多并发 4 个工具，结果按脚本提交顺序返回。脚本执行环境不提供文件、进程和网络 API。
 
 ## 6. Lua 扩展
 

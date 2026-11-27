@@ -1,11 +1,9 @@
 #include "core/agent.hpp"
 #include "core/permission.hpp"
 #include "core/session.hpp"
-#include "ext/lua/host.hpp"
 
 #include <doctest.h>
 
-#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -134,111 +132,6 @@ TEST_CASE("invalid built-in tool input is rejected before hooks and permissions"
         CHECK(results[i].is_error);
         CHECK(results[i].text.find(fields[i]) != std::string::npos);
     }
-}
-
-TEST_CASE("deferred tools are declared after tool_search and then use the normal agent dispatch") {
-    temp_dir dir;
-    scripted_provider model;
-    model.replies.push_back(reply({block::make_tool_use("search", "tool_search", {{"query", "hidden lookup"}})},
-                                  stop_reason::tool_use));
-    model.replies.push_back(reply({block::make_tool_use("hidden", "mcp__fixture__hidden", {{"query", "value"}})},
-                                  stop_reason::tool_use));
-    model.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
-
-    tool direct{"Direct", "Direct fixture", {{"type", "object"}}, tool_access::read,
-        [](const json&, tool_context&) { return tool_output{"direct", false, {}, {}}; }, {}};
-    tool deferred{"mcp__fixture__hidden", "Hidden lookup", {{"type", "object"}}, tool_access::read,
-        [](const json& input, tool_context&) { return tool_output{input.value("query", std::string{}), false, {}, {}}; }, {}};
-    deferred.exposure = tool_exposure::deferred;
-
-    permission_rules rules;
-    agent core(model, {direct, deferred, make_tool_search_tool()}, rules, dir.path);
-    agent_events events;
-    cancel_token cancel;
-    CHECK(core.run("search and call", events, cancel).stop == stop_reason::end_turn);
-    REQUIRE(model.requests.size() == 3);
-    CHECK(std::ranges::any_of(model.requests[0].tools, [](const auto& item) { return item.name == "Direct"; }));
-    CHECK(std::ranges::any_of(model.requests[0].tools, [](const auto& item) { return item.name == "tool_search"; }));
-    CHECK_FALSE(std::ranges::any_of(model.requests[0].tools, [](const auto& item) { return item.name == "mcp__fixture__hidden"; }));
-    CHECK(std::ranges::any_of(model.requests[1].tools, [](const auto& item) { return item.name == "mcp__fixture__hidden"; }));
-    CHECK(model.requests[2].messages.back().blocks.front().text == "value");
-}
-
-TEST_CASE("CodeMode nested writes use tool hooks, permissions, and turn undo") {
-    temp_dir dir;
-    scripted_provider model;
-    model.replies.push_back(reply({block::make_tool_use("code", "codemode", {
-        {"code", "local result = tools.call('Write', {file_path='nested.txt', content='written'}); return result.text"}})},
-        stop_reason::tool_use));
-    model.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
-
-    lua_host lua;
-    auto tools = builtin_tools();
-    tools.push_back(lua.code_mode_tool());
-    permission_rules rules;
-    int write_hooks = 0;
-    agent_hooks hooks;
-    hooks.pre_tool = [&](const tool& candidate, const json&, cancel_token&) {
-        hook_verdict result;
-        if (candidate.name == "Write") {
-            ++write_hooks;
-            result.tool_permission = hook_verdict::permission::ask;
-        }
-        return result;
-    };
-    agent core(model, std::move(tools), rules, dir.path, hooks);
-    agent_events events;
-    std::vector<std::string> asked;
-    events.ask = [&](const tool& candidate, const json&) { asked.push_back(candidate.name); return answer::yes; };
-    cancel_token cancel;
-
-    CHECK(core.run("write through CodeMode", events, cancel).stop == stop_reason::end_turn);
-    CHECK(read_file(dir.path / "nested.txt") == std::optional<std::string>{"written"});
-    CHECK(asked == std::vector<std::string>{"Write"});
-    CHECK(write_hooks == 1);
-    CHECK(core.undo() == std::vector<std::string>{"nested.txt"});
-    CHECK_FALSE(fs::exists(dir.path / "nested.txt"));
-}
-
-TEST_CASE("CodeMode batches independent MCP tools concurrently and preserves order") {
-    temp_dir dir;
-    scripted_provider model;
-    model.replies.push_back(reply({block::make_tool_use("code", "codemode", {{"code", "run batch"}})},
-                                  stop_reason::tool_use));
-    model.replies.push_back(reply({block::make_text("Done.")}, stop_reason::end_turn));
-
-    std::atomic<int> active{0};
-    std::atomic<int> maximum{0};
-    const auto make_mcp = [&](std::string name) {
-        tool result{name, "MCP fixture", {{"type", "object"}}, tool_access::execute,
-            [&, name](const json&, tool_context&) {
-                const int now = ++active;
-                auto seen = maximum.load();
-                while (seen < now && !maximum.compare_exchange_weak(seen, now)) {}
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                --active;
-                return tool_output{name, false, {}, {}};
-            }, {}};
-        return result;
-    };
-    tool codemode{"codemode", "fixture CodeMode", {{"type", "object"}}, tool_access::read,
-        [](const json&, tool_context& context) {
-            const auto results = context.invoke_tools({
-                {"mcp__one__read", json::object()}, {"mcp__two__read", json::object()}
-            }, context.deadline);
-            return tool_output{results[0].text + "," + results[1].text, false, {}, {}};
-        }, {}};
-    codemode.delegates_tool_permissions = true;
-    permission_rules rules;
-    agent core(model, {make_mcp("mcp__one__read"), make_mcp("mcp__two__read"), codemode}, rules, dir.path);
-    agent_events events;
-    events.ask = [](const tool&, const json&) { return answer::yes; };
-    cancel_token cancel;
-
-    CHECK(core.run("batch MCP tools", events, cancel).stop == stop_reason::end_turn);
-    REQUIRE(model.requests.size() == 2);
-    CHECK(maximum.load() == 2);
-    CHECK(model.requests[1].messages.back().blocks.front().text == "mcp__one__read,mcp__two__read");
 }
 
 TEST_CASE("parallel tool batches are bounded and preserve result order") {

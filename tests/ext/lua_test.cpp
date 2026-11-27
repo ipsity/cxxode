@@ -114,66 +114,6 @@ TEST_CASE("Lua scripts have isolated environments and plugin-local require") {
     CHECK(*host.status() == "plugin updated · user updated");
 }
 
-TEST_CASE("Lua CodeMode discovers tools and invokes them through its supplied context") {
-    lua_host host;
-    CHECK_FALSE(host.active());
-    cancel_token cancel;
-    tool_context context;
-    context.cancel = &cancel;
-    context.search_tools = [](std::string_view query, std::size_t limit, bool activate) {
-        CHECK(query == "documentation search");
-        CHECK(limit == 5);
-        CHECK_FALSE(activate);
-        return std::vector<tool_search_result>{{"mcp__docs__search", "Search documentation", {{"type", "object"}}}};
-    };
-    context.describe_tool = [](std::string_view name) -> std::optional<tool_search_result> {
-        if (name != "mcp__docs__search") return std::nullopt;
-        return tool_search_result{"mcp__docs__search", "Search documentation", {{"type", "object"}}};
-    };
-    context.invoke_tool = [](std::string_view name, const json& input,
-                             std::optional<std::chrono::steady_clock::time_point>) {
-        return tool_output{name == "mcp__docs__search" ? "found " + input.value("query", std::string{}) : "wrong tool",
-                           false, "ok", {}};
-    };
-    context.invoke_tools = [](const std::vector<tool_invocation>& calls,
-                              std::optional<std::chrono::steady_clock::time_point>) {
-        std::vector<tool_output> results;
-        for (const auto& call : calls) results.push_back({call.name, false, "ok", {}});
-        return results;
-    };
-
-    const auto result = host.run_code(R"(
-        assert(io == nil and os == nil and debug == nil and ode == nil and load == nil)
-        local matches = search_tools('documentation search', 5)
-        local detail = describe_tool(matches[1].name)
-        local one = tools.call(detail.name, {query = 'mcp'})
-        local many = tools.parallel({
-            {name = 'first', input = {}},
-            {name = 'second', input = {}}
-        })
-        return {name = detail.name, schema = detail.schema.type, text = one.text,
-                first = many[1].text, second = many[2].text}
-    )", context);
-    CHECK_FALSE(result.is_error);
-    const auto value = json::parse(result.text);
-    CHECK(value["name"] == "mcp__docs__search");
-    CHECK(value["schema"] == "object");
-    CHECK(value["text"] == "found mcp");
-    CHECK(value["first"] == "first");
-    CHECK(value["second"] == "second");
-    CHECK_FALSE(host.active());
-}
-
-TEST_CASE("Lua CodeMode obeys the instruction budget") {
-    lua_host host;
-    cancel_token cancel;
-    tool_context context;
-    context.cancel = &cancel;
-    const auto result = host.run_code("while true do end", context);
-    CHECK(result.is_error);
-    CHECK(result.text.find("execution limit") != std::string::npos);
-}
-
 TEST_CASE("Lua print forwards formatted arguments to the host") {
     lua_fixture files;
     std::vector<std::string> output;

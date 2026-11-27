@@ -355,157 +355,6 @@ struct lua_host::runtime {
         return 0;
     }
 
-    static int code_search(runtime&, lua_State* state) {
-        auto& self = **static_cast<runtime**>(lua_getextraspace(state));
-        if (!self.action || !self.action->search_tools) return luaL_error(state, "tool search is unavailable");
-        const auto query = read_string(state, 1);
-        const auto limit = lua_isnoneornil(state, 2)
-            ? std::size_t{10}
-            : static_cast<std::size_t>(std::clamp<lua_Integer>(luaL_checkinteger(state, 2), 1, 50));
-        const auto found = self.action->search_tools(query, limit, false);
-        auto output = json::array();
-        for (const auto& item : found) output.push_back({{"name", item.name}, {"description", item.description}});
-        push_json(state, output);
-        return 1;
-    }
-
-    static int code_describe(runtime&, lua_State* state) {
-        auto& self = **static_cast<runtime**>(lua_getextraspace(state));
-        if (!self.action || !self.action->describe_tool) return luaL_error(state, "tool descriptions are unavailable");
-        const auto name = read_string(state, 1);
-        const auto found = self.action->describe_tool(name);
-        if (!found) return luaL_error(state, "unknown or unavailable tool: %s", name.c_str());
-        push_json(state, {{"name", found->name}, {"description", found->description}, {"schema", found->schema}});
-        return 1;
-    }
-
-    static int code_call(runtime& self, lua_State* state) {
-        if (!self.action || !self.action->invoke_tool) return luaL_error(state, "tool invocation is unavailable");
-        const auto name = read_string(state, 1);
-        const auto input = read_json(state, 2);
-        if (!input.is_object()) return luaL_error(state, "tool arguments must be an object");
-        const auto started = std::chrono::steady_clock::now();
-        self.remaining -= hook_interval;
-        const auto result = self.action->invoke_tool(name, input, self.action->deadline);
-        self.deadline += std::chrono::steady_clock::now() - started;
-        if (self.current_cancel->cancelled()) return luaL_error(state, "Lua execution cancelled");
-        if (self.code_deadline && std::chrono::steady_clock::now() >= *self.code_deadline)
-            return luaL_error(state, "CodeMode timed out after 5 minutes");
-        push_json(state, {{"text", result.text}, {"is_error", result.is_error},
-                          {"summary", result.summary}, {"detail", result.detail}});
-        return 1;
-    }
-
-    static int code_parallel(runtime& self, lua_State* state) {
-        if (!self.action || !self.action->invoke_tools) return luaL_error(state, "parallel tool invocation is unavailable");
-        const auto input = read_json(state, 1);
-        if (!input.is_array()) return luaL_error(state, "parallel expects an array of tool calls");
-        std::vector<tool_invocation> calls;
-        calls.reserve(input.size());
-        for (const auto& item : input) {
-            if (!item.is_object() || !item.contains("name") || !item["name"].is_string() ||
-                !item.contains("input") || !item["input"].is_object()) {
-                return luaL_error(state, "each parallel call needs name and input fields");
-            }
-            calls.push_back({item["name"].get<std::string>(), item["input"]});
-        }
-        const auto started = std::chrono::steady_clock::now();
-        self.remaining -= hook_interval;
-        const auto results = self.action->invoke_tools(calls, self.action->deadline);
-        self.deadline += std::chrono::steady_clock::now() - started;
-        if (self.current_cancel->cancelled()) return luaL_error(state, "Lua execution cancelled");
-        if (self.code_deadline && std::chrono::steady_clock::now() >= *self.code_deadline)
-            return luaL_error(state, "CodeMode timed out after 5 minutes");
-        auto output = json::array();
-        for (const auto& result : results) {
-            output.push_back({{"text", result.text}, {"is_error", result.is_error},
-                              {"summary", result.summary}, {"detail", result.detail}});
-        }
-        push_json(state, output);
-        return 1;
-    }
-
-    void push_code_environment(int chunk) {
-        lua_newtable(state);
-        const int environment = lua_absindex(state, -1);
-        for (const char* name : {"assert", "error", "ipairs", "pairs", "next", "select", "tonumber", "tostring", "type", "rawequal"}) {
-            lua_getglobal(state, name);
-            lua_setfield(state, environment, name);
-        }
-        for (const char* name : {LUA_TABLIBNAME, LUA_STRLIBNAME, LUA_MATHLIBNAME, LUA_UTF8LIBNAME}) {
-            lua_getglobal(state, name);
-            if (lua_istable(state, -1)) {
-                const int library = lua_absindex(state, -1);
-                lua_newtable(state);
-                const int copy = lua_absindex(state, -1);
-                lua_pushnil(state);
-                while (lua_next(state, library)) {
-                    lua_pushvalue(state, -2);
-                    lua_pushvalue(state, -2);
-                    lua_rawset(state, copy);
-                    lua_pop(state, 1);
-                }
-                lua_setfield(state, environment, name);
-            }
-            lua_pop(state, 1);
-        }
-        lua_pushvalue(state, environment);
-        lua_setfield(state, environment, "_G");
-
-        lua_newtable(state);
-        lua_pushcfunction(state, bridge<code_call>);
-        lua_setfield(state, -2, "call");
-        lua_pushcfunction(state, bridge<code_parallel>);
-        lua_setfield(state, -2, "parallel");
-        lua_setfield(state, environment, "tools");
-        lua_pushcfunction(state, bridge<code_search>);
-        lua_setfield(state, environment, "search_tools");
-        lua_pushcfunction(state, bridge<code_describe>);
-        lua_setfield(state, environment, "describe_tool");
-
-        lua_pushvalue(state, environment);
-        if (!lua_setupvalue(state, chunk, 1)) {
-            lua_pop(state, 1);
-            throw std::runtime_error("CodeMode chunk has no environment upvalue");
-        }
-        lua_pop(state, 1);
-    }
-
-    tool_output run_code(std::string_view source, tool_context& ctx) {
-        return call([&] {
-            if (!state) return tool_output{"Lua CodeMode is unavailable", true, "Lua", {}};
-            if (source.empty() || source.size() > memory_limit) {
-                return tool_output{"CodeMode source is empty or exceeds 8 MiB", true, "Lua", {}};
-            }
-            const int top = lua_gettop(state);
-            const auto previous_action = action;
-            const auto previous_code_deadline = code_deadline;
-            action = &ctx;
-            code_deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
-            ctx.deadline = code_deadline;
-            const auto name = "=codemode";
-            int status = luaL_loadbufferx(state, source.data(), source.size(), name, "t");
-            if (status == LUA_OK) push_code_environment(lua_absindex(state, -1));
-            json value;
-            if (status == LUA_OK) status = run(0, 1, *ctx.cancel);
-            std::string error;
-            if (status != LUA_OK) error = lua_error_text(state);
-            else {
-                try {
-                    value = read_json(state, -1);
-                } catch (const std::exception& e) {
-                    error = e.what();
-                }
-            }
-            lua_settop(state, top);
-            action = previous_action;
-            code_deadline = previous_code_deadline;
-            if (!error.empty()) return tool_output{"Lua CodeMode: " + error, true, "Lua", {}};
-            const auto text = value.is_string() ? value.get<std::string>() : value.dump(2);
-            return tool_output{text, false, "completed", {}};
-        });
-    }
-
     template<int (*fn)(runtime&, lua_State*)>
     static int bridge(lua_State* state) {
         try {
@@ -817,13 +666,13 @@ struct lua_host::runtime {
     }
 
     int native_tool(std::string_view name, json input) {
-        if (!action || !action->invoke_tool) {
+        if (!action || !action->invoke_builtin) {
             return luaL_error(state, "file and process operations require a tool or command callback");
         }
         const auto start = std::chrono::steady_clock::now();
         remaining -= hook_interval;
         if (remaining <= 0 || start >= deadline) return luaL_error(state, "Lua execution limit exceeded");
-        const auto out = action->invoke_tool(name, input, action->deadline);
+        const auto out = action->invoke_builtin(name, input);
         deadline += std::chrono::steady_clock::now() - start;
         if (current_cancel->cancelled()) return luaL_error(state, "Lua execution cancelled");
         push_json(state, {{"text", out.text}, {"is_error", out.is_error}, {"summary", out.summary}, {"detail", out.detail}});
@@ -873,8 +722,7 @@ struct lua_host::runtime {
         auto& self = **static_cast<runtime**>(lua_getextraspace(state));
         if (self.current_cancel->cancelled()) luaL_error(state, "Lua execution cancelled");
         self.remaining -= hook_interval;
-        if (self.remaining <= 0 || std::chrono::steady_clock::now() >= self.deadline ||
-            (self.code_deadline && std::chrono::steady_clock::now() >= *self.code_deadline)) {
+        if (self.remaining <= 0 || std::chrono::steady_clock::now() >= self.deadline) {
             luaL_error(state, "Lua execution limit exceeded");
         }
     }
@@ -916,7 +764,6 @@ struct lua_host::runtime {
     cancel_token* current_cancel = nullptr;
     int remaining = 0;
     std::chrono::steady_clock::time_point deadline;
-    std::optional<std::chrono::steady_clock::time_point> code_deadline;
     std::mutex mutex;
     std::condition_variable wake;
     // The submitting thread keeps each job alive until the worker signals completion.
@@ -967,40 +814,6 @@ std::vector<tool> lua_host::tools() {
         result.push_back(std::move(t));
     }
     return result;
-}
-
-tool lua_host::code_mode_tool() {
-    tool result;
-    result.name = "codemode";
-    result.description = "Run a Lua script in a restricted environment with no filesystem, process, or network APIs. "
-                         "Use search_tools(query[, limit]) to find MCP tools, describe_tool(name) to inspect a schema, "
-                         "tools.call(name, input) for one call, and tools.parallel({{name=..., input=...}, ...}) "
-                         "for a bounded batch. Tool results contain text, is_error, summary, and detail. "
-                         "Return the useful result from the script.";
-    result.schema = {
-        {"type", "object"},
-        {"properties", {
-            {"code", {{"type", "string"}, {"description", "Lua script body. Return the final result."}}}
-        }},
-        {"required", {"code"}},
-        {"additionalProperties", false}
-    };
-    result.access = tool_access::read;
-    result.delegates_tool_permissions = true;
-    result.label = [](const json&) { return "Lua CodeMode"; };
-    result.run = [this](const json& input, tool_context& ctx) {
-        return run_code(input.value("code", std::string{}), ctx);
-    };
-    return result;
-}
-
-tool_output lua_host::run_code(std::string_view source, tool_context& ctx) {
-    runtime sandbox(status_, print_);
-    cancel_token startup;
-    if (const auto warnings = sandbox.load({}, startup); !warnings.empty()) {
-        return {warnings.front(), true, "Lua", {}};
-    }
-    return sandbox.run_code(source, ctx);
 }
 
 const std::vector<std::string>& lua_host::commands() const {
