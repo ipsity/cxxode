@@ -179,8 +179,12 @@ TEST_CASE("CodeMode nested writes use tool hooks, permissions, and turn undo") {
     int write_hooks = 0;
     agent_hooks hooks;
     hooks.pre_tool = [&](const tool& candidate, const json&, cancel_token&) {
-        if (candidate.name == "Write") ++write_hooks;
-        return hook_verdict{};
+        hook_verdict result;
+        if (candidate.name == "Write") {
+            ++write_hooks;
+            result.tool_permission = hook_verdict::permission::ask;
+        }
+        return result;
     };
     agent core(model, std::move(tools), rules, dir.path, hooks);
     agent_events events;

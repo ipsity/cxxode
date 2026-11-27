@@ -52,7 +52,7 @@ struct tool_context {
     std::function<void(std::string_view)> output;     // live bash output
     std::function<answer(const tool&, const json&)> ask{};
     std::span<const std::string> allowed_tools{};
-    std::optional<std::chrono::steady_clock::time_point> deadline;
+    std::optional<std::chrono::steady_clock::time_point> deadline{};
     std::function<tool_output(std::string_view, const json&, std::optional<std::chrono::steady_clock::time_point>)> invoke_tool{};
     std::function<void(std::string_view)> notice{};
     std::function<std::vector<tool_search_result>(std::string_view, std::size_t, bool)> search_tools{};
