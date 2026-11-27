@@ -210,7 +210,7 @@ std::string interactive_ui::status_line(int columns) const {
                 std::to_string(cost).substr(0, std::to_string(cost).find('.') + 3));
         }
     }
-    const auto mode_tone = mode == permission_mode::yolo ? tone::error : mode == permission_mode::plan ? tone::accent : tone::dim;
+    const auto mode_tone = mode == permission_mode::yolo ? tone::error : mode == permission_mode::plan ? tone::accent : tone::success;
     std::string left = "ode  " + home_relative(app_.root);
     if (!branch_.empty()) left += "  " + branch_;
     const int room = columns - 2 - text::width(right) - 2;

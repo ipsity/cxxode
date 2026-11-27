@@ -338,6 +338,16 @@ bool save_provider_selection(const std::string& provider, const fs::path& settin
     });
 }
 
+bool save_model_selection(const std::string& provider, const std::string& model, const fs::path& settings_path) {
+    if (provider.empty() || model.empty()) return false;
+    if (!update_store(settings_path, [&](json& data) -> std::optional<bool> {
+        data["model"] = model;
+        data["model_provider"] = provider;
+        return true;
+    })) return false;
+    return true;
+}
+
 std::vector<std::pair<fs::path, std::string>> load_memory(const fs::path& workspace) {
     std::vector<std::pair<fs::path, std::string>> out;
     const auto add = [&](const fs::path& p) {

@@ -524,8 +524,19 @@ TEST_CASE("auto-compaction at the start keeps the new prompt and handles failure
 }
 
 TEST_CASE("permission rules") {
+    CHECK(mode_name(permission_mode::plan) == "plan");
+    CHECK(mode_name(permission_mode::normal) == "auto");
+    CHECK(mode_name(permission_mode::yolo) == "yolo");
+    CHECK(parse_mode("auto") == permission_mode::normal);
+    CHECK(parse_mode("default") == permission_mode::normal);
+    CHECK_FALSE(parse_mode("unknown"));
+    CHECK(next_mode(permission_mode::plan) == permission_mode::normal);
+    CHECK(next_mode(permission_mode::normal) == permission_mode::yolo);
+    CHECK(next_mode(permission_mode::yolo) == permission_mode::plan);
     const auto tools = builtin_tools();
     const auto& bash = find(tools, "Bash");
+    CHECK_FALSE(tool_input_error(bash, {{"command", "echo ok"}, {"timeout", 2147483648LL}}).empty());
+    CHECK(tool_input_error(bash, {{"command", "echo ok"}, {"timeout", 2147483647}}).empty());
     const auto& edit = find(tools, "Edit");
     const auto& read = find(tools, "Read");
     const fs::path root = fs::temp_directory_path() / "ws";

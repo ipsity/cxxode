@@ -68,14 +68,16 @@ model_list list_models(const provider_config& config) {
             const auto display_name = model.find("display_name");
             info.name = display_name != model.end() && display_name->is_string()
                 ? display_name->get_ref<const std::string&>() : info.id;
-            info.context_window = known_model_context_window(config, info.id);
+            std::size_t reported_context_window = 0;
             for (const auto* key : {"context_window", "context_length"}) {
                 const auto window = model.find(key);
                 if (window != model.end() && window->is_number_integer() && *window > 0) {
-                    info.context_window = window->get<std::size_t>();
+                    reported_context_window = window->get<std::size_t>();
                     break;
                 }
             }
+            info.context_window = reported_context_window != 0
+                ? reported_context_window : known_model_context_window(config, info.id);
             info.supports_vision = info.id.find("claude") != std::string::npos || (!anthropic &&
                 (info.id.find("vision") != std::string::npos || info.id.starts_with("gpt-4.1") ||
                  info.id.starts_with("gpt-5") || info.id.find("gpt-4o") != std::string::npos));

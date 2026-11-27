@@ -59,10 +59,10 @@ bool rule_matches(std::string_view rule, const tool& t, const json& input) {
 std::string_view mode_name(permission_mode mode) {
     switch (mode) {
         case permission_mode::plan: return "plan";
-        case permission_mode::normal: return "default";
+        case permission_mode::normal: return "auto";
         case permission_mode::yolo: return "yolo";
     }
-    return "default";
+    return "auto";
 }
 
 permission_mode next_mode(permission_mode mode) {
@@ -76,7 +76,7 @@ permission_mode next_mode(permission_mode mode) {
 
 std::optional<permission_mode> parse_mode(std::string_view text) {
     if (text == "plan") return permission_mode::plan;
-    if (text == "default" || text == "acceptEdits") return permission_mode::normal;
+    if (text == "auto" || text == "default" || text == "acceptEdits") return permission_mode::normal;
     if (text == "yolo" || text == "bypassPermissions") return permission_mode::yolo;
     return std::nullopt;
 }
