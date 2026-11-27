@@ -15,6 +15,8 @@ struct http_request {
     std::string url;
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;
+    int timeout_ms = 0;  // zero uses the streaming defaults
+    bool follow_redirects = true;
 };
 
 struct http_result {

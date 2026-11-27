@@ -23,7 +23,8 @@ struct model_list {
     std::string error;
 };
 
-model_list list_models(const provider_config& config);
+std::string models_url(const provider_config& config);
+model_list list_models(const provider_config& config, cancel_token* setup_cancel = nullptr);
 std::size_t known_model_context_window(const provider_config& config, std::string_view model);
 
 } // namespace ode

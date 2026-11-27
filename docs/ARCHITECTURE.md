@@ -187,6 +187,7 @@ Lua 用来做进程内扩展，覆盖两类需求：高频 hook（在 Windows �
 - `/mode` 和 `Shift+Tab` 切换 `plan`、`auto`、`yolo` 权限档位并保存选择。`auto` 是默认交互档位；旧配置值 `default` 仍兼容读取。交互模式启动时按 `--permission`、上次选择、`permissions.defaultMode` 的顺序决定档位。打印和 RPC 模式沿用各自的启动规则。
 - 首次运行没有密钥时，交互界面仍可打开并运行 `/login`，发起模型请求时提示登录。打印、RPC 和模型列表模式在凭据缺失时提示处理方式并以退出码 2 退出。
 - Provider 定义和地址取自内置默认值和 `%USERPROFILE%\.ode\settings.json`。工作区 `.ode/settings.json` 只能为已定义的 provider 选择 provider 和模型。`.claude` 的连接字段和 `ANTHROPIC_*`、`OPENAI_*`、`DEEPSEEK_*` 环境变量不参与连接解析。现有扩展及指令的加载规则继续适用。
+- `/login` 的 API Key 菜单支持添加第三方服务商。向导用待保存的连接配置查询模型列表，并支持手动输入默认模型。确认后在一次用户设置更新中写入服务商定义和选择，再切换当前会话。
 - `ode login [provider]` 和 `/login <provider>` 将密钥以明文写入 `%USERPROFILE%\.ode\settings.json` 的 `providers.<name>.api_key`。这个字段仅在用户级配置生效。`ode logout [provider]` 和 `/logout [provider]` 删除该字段。旧 Windows 凭据可通过 `ode login [provider] --import-windows-credential` 显式导入。
 - 推荐在 `providers.<name>.model` 设置默认模型。顶层 `model` 归属同一配置层选中的 provider，也可用 `model_provider` 指明归属。命令行 `--model` 只覆盖当次启动。
 - Bash 工具优先使用 Git for Windows 的 bash，找不到时退回 PowerShell，所以目标机器不强制安装 Git。

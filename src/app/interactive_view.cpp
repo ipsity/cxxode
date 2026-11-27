@@ -24,7 +24,7 @@ const std::pair<const char*, const char*> builtin_commands[] = {
     {"/run", "运行程序"},
     {"/commit", "智能提交"},
     {"/lint", "代码检查"},
-    {"/login", "登录或更新 API 密钥"},
+    {"/login", "使用 API Key 登录或配置第三方服务商"},
     {"/logout", "清除保存的 API 密钥"},
     {"/format", "代码格式化"},
     {"/doc", "生成文档"},
@@ -90,7 +90,7 @@ std::string seconds(steady::time_point since) {
 
 std::vector<interactive_ui::palette_item> interactive_ui::palette_items() const {
     const auto& draft = editor_.text();
-    if (busy_ || selection_ || login_ || !draft.starts_with('/') || draft.find_first_of(" \t\r\n") != std::string::npos) return {};
+    if (busy_ || selection_ || login_ || setup_ || !draft.starts_with('/') || draft.find_first_of(" \t\r\n") != std::string::npos) return {};
     const auto query = std::string_view(draft).substr(1);
     const auto score = [query](std::string_view name) -> int {
         if (query.empty()) return 100;
@@ -308,24 +308,67 @@ std::vector<std::string> interactive_ui::activity_rows() const {
 std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& cursor_col) {
     const int columns = std::max(1, size_.columns - 1);
     std::vector<std::string> rows;
+    if (setup_ && setup_->fetching) {
+        cursor_row = -1;
+        cursor_col = 0;
+        return {" " + paint(tone::accent_bold, "正在获取模型列表"),
+                " " + paint(tone::dim, "Esc 返回  Ctrl+C 取消")};
+    }
+    if (setup_ && setup_->field) {
+        std::string title;
+        const bool secret = *setup_->field == setup_field::api_key;
+        switch (*setup_->field) {
+            case setup_field::name: title = "输入服务商 ID（例如 my-gateway）"; break;
+            case setup_field::base_url: title = "输入 Base URL（例如 https://example.com/api/v1）"; break;
+            case setup_field::api_key: title = "输入 API Key"; break;
+            case setup_field::model: title = "输入默认模型 ID"; break;
+        }
+        rows.push_back(" " + paint(tone::accent_bold, title));
+        if (secret) {
+            const auto& entry = setup_->entry;
+            provider_config connection;
+            connection.kind = entry.kind;
+            connection.base_url = entry.base_url;
+            rows.push_back(" " + paint(tone::dim, "获取模型 " + models_url(connection)));
+        }
+        const auto& input = setup_->input;
+        const auto shown = secret ? std::string(input.text().size(), '*') : ui::one_line(input.text());
+        const int view_width = std::max(1, columns - 3);
+        const auto prefix = text::keep_tail(std::string_view(shown).substr(0, input.cursor()), view_width);
+        cursor_row = static_cast<int>(rows.size());
+        cursor_col = 2 + text::width(prefix);
+        rows.push_back("  " + text::keep_head(prefix + shown.substr(input.cursor()), view_width));
+        if (!setup_->error.empty()) rows.push_back(" " + paint(tone::error, setup_->error));
+        rows.push_back(" " + paint(tone::dim, "Enter 继续  Esc 返回  Ctrl+C 取消"));
+        return rows;
+    }
+
     if (login_) {
         cursor_row = -1;
         cursor_col = 0;
         const auto visible = std::min(login_->key.size(), static_cast<std::size_t>(std::max(0, columns - 2)));
         return {" " + paint(tone::accent_bold, "输入 API 密钥 · " + login_->provider),
                 "  " + std::string(visible, '*'),
-                " " + paint(tone::dim, "Enter 保存  Esc 取消")};
+                " " + paint(tone::dim, "Enter 保存  Esc 返回  Ctrl+C 取消")};
     }
 
     if (selection_) {
         cursor_row = -1;
         cursor_col = 0;
-        const auto capacity = static_cast<std::size_t>(std::max(1, size_.rows - 2));
-        const auto visible = std::min({menu_rows, selection_->items.size(), capacity});
-        const auto first = detail::first_visible(selection_->selected_index, visible, selection_->items.size());
+        const auto matches = selection_->matching_items();
+        const auto capacity = static_cast<std::size_t>(std::max(1, size_.rows - (selection_->search ? 3 : 2)));
+        const auto visible = std::min({menu_rows, matches.size(), capacity});
+        const auto first = detail::first_visible(selection_->selected_index, visible, matches.size());
         rows = {" " + paint(tone::accent_bold, ui::one_line(selection_->title))};
-        for (auto i = first; i < first + visible; ++i) {
-            const bool selected = i == selection_->selected_index;
+        if (selection_->search) {
+            const auto query = text::keep_tail(ui::one_line(selection_->search->text()), std::max(1, columns - 9));
+            rows.push_back(" " + paint(tone::dim, "搜索 ") + query);
+            cursor_row = 1;
+            cursor_col = 6 + text::width(query);
+        }
+        for (auto row = first; row < first + visible; ++row) {
+            const auto i = matches[row];
+            const bool selected = row == selection_->selected_index;
             auto label = ui::one_line(selection_->items[i]);
             if (i < selection_->details.size() && !selection_->details[i].empty()) {
                 label += "  " + ui::one_line(selection_->details[i]);
@@ -333,7 +376,8 @@ std::vector<std::string> interactive_ui::footer_rows(int& cursor_row, int& curso
             rows.push_back(" " + paint(selected ? tone::accent_bold : tone::normal,
                                        (selected ? "→ " : "  ") + label));
         }
-        rows.push_back(" " + paint(tone::dim, "↑↓ 选择  Enter 确认  Esc 取消"));
+        if (matches.empty()) rows.push_back(" " + paint(tone::dim, "没有匹配的模型"));
+        rows.push_back(" " + paint(tone::dim, "↑↓ 选择  Enter 确认  Esc 返回  Ctrl+C 取消"));
         return rows;
     }
 
