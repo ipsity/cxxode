@@ -42,6 +42,7 @@ struct theme {
 
     // Cached ANSI codes (for performance)
     std::string user_message_fg;
+    std::string user_message_bg;
     std::string assistant_message_fg;
     std::string tool_read_fg;
     std::string tool_write_fg;
@@ -57,6 +58,11 @@ struct theme {
     // Update cached codes after color changes
     void update_cache() {
         user_message_fg = user_message.ansi_fg();
+        user_message_bg = rgb_color{
+            static_cast<uint8_t>((background.r * 78 + user_message.r * 22) / 100),
+            static_cast<uint8_t>((background.g * 78 + user_message.g * 22) / 100),
+            static_cast<uint8_t>((background.b * 78 + user_message.b * 22) / 100)
+        }.ansi_bg();
         assistant_message_fg = assistant_message.ansi_fg();
         tool_read_fg = tool_read.ansi_fg();
         tool_write_fg = tool_write.ansi_fg();

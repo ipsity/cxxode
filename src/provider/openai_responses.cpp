@@ -1,5 +1,7 @@
 #include "provider/codec.hpp"
 
+#include <map>
+
 namespace ode {
 namespace {
 
@@ -16,7 +18,15 @@ public:
             if (events_.thinking) events_.thinking(data.value("delta", ""), "");
         } else if (type == "response.output_item.added") {
             const auto& item = data["item"];
-            if (item.value("type", "") == "function_call" && events_.tool_started) events_.tool_started(item.value("name", ""));
+            if (item.value("type", "") == "function_call") {
+                const auto name = item.value("name", "");
+                names_[data.value("output_index", 0)] = name;
+                if (events_.tool_started) events_.tool_started(name);
+            }
+        } else if (type == "response.function_call_arguments.delta") {
+            const auto name = names_.find(data.value("output_index", 0));
+            const auto delta = data.value("delta", "");
+            if (name != names_.end() && events_.tool_arguments) events_.tool_arguments(name->second, delta);
         } else if (type == "response.output_item.done") {
             items_.push_back(data["item"]);
         } else if (type == "response.completed" || type == "response.incomplete") {
@@ -81,6 +91,7 @@ private:
     const stream_events& events_;
     model_reply reply_;
     std::vector<json> items_;
+    std::map<int, std::string> names_;
     bool completed_ = false;
     bool incomplete_ = false;
     bool refused_ = false;

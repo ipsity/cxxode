@@ -54,6 +54,22 @@ TEST_CASE("anthropic stream with tool call") {
     CHECK(calls[0]->input["path"] == "a.txt");
 }
 
+TEST_CASE("anthropic stream reports tool argument deltas before parsing completes") {
+    std::vector<std::string> names;
+    std::vector<std::string> deltas;
+    stream_events events;
+    events.tool_started = [&](const std::string& name) { names.push_back(name); };
+    events.tool_arguments = [&](const std::string& name, std::string_view delta) {
+        CHECK(name == "read");
+        deltas.emplace_back(delta);
+    };
+    const std::string full = std::string(anthropic_tool_stream) + "data: {\"type\":\"message_stop\"}\n\n";
+    const auto result = decode_stream(protocol::anthropic, full, events);
+    REQUIRE(result.complete);
+    CHECK(names == std::vector<std::string>{"read"});
+    CHECK(deltas == std::vector<std::string>{"{\"path\":", "\"a.txt\"}"});
+}
+
 TEST_CASE("anthropic stream without message_stop is incomplete") {
     auto r = decode_stream(protocol::anthropic, anthropic_tool_stream);
     CHECK_FALSE(r.complete);
@@ -68,8 +84,15 @@ TEST_CASE("chat completions stream with split tool arguments") {
         "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
         "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3}}\n\n"
         "data: [DONE]\n\n";
-    auto r = decode_stream(protocol::openai_chat, s);
+    std::vector<std::string> argument_deltas;
+    stream_events events;
+    events.tool_arguments = [&](const std::string& name, std::string_view delta) {
+        CHECK(name == "bash");
+        argument_deltas.emplace_back(delta);
+    };
+    auto r = decode_stream(protocol::openai_chat, s, events);
     CHECK(r.complete);
+    CHECK(argument_deltas == std::vector<std::string>{"{\"command\"", ":\"ls\"}"});
     CHECK(r.stop == stop_reason::tool_use);
     CHECK(r.content.plain_text() == "ok");
     auto calls = r.content.tool_uses();

@@ -1,40 +1,106 @@
 # cxxode
 
-Windows 原生终端 coding agent，C++20，单个 `ode.exe`。直接读取 Claude Code 的 Skills、斜杠命令、Hooks、MCP、Subagents 和 Plugins。
+**ode** 是面向 Windows 10 1809+ / Windows 11 x64 的原生终端 coding agent。它使用 C++20 构建为单个 `ode.exe`，支持交互式终端、打印模式和 JSONL RPC，并可读取 Claude Code 格式的 Skills、斜杠命令、Hooks、MCP、Subagents 与 Plugins。
 
-设计与路线：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+- [下载最新 Windows x64 版本](https://github.com/ipsity/lay-code/releases/latest)
+- [设计与系统行为](docs/ARCHITECTURE.md)
 
-## 构建
+## 快速开始
 
-需要 MSYS2 UCRT64 的 g++、CMake 3.24+ 和 Ninja。
+1. 从 [GitHub Releases](https://github.com/ipsity/lay-code/releases/latest) 下载 `ode-<version>-windows-x64.zip`，解压并将 `ode.exe` 放入 PATH。
+2. 在终端运行 `ode login`，按提示保存 API 密钥。
+3. 进入项目目录运行 `ode`。
 
+密钥保存在 `%USERPROFILE%\.ode\settings.json`。该文件以明文保存，请勿将其提交到版本控制。`ode logout [provider]` 可删除密钥；旧版 ode 保存在 Windows 凭据管理器中的密钥可通过 `ode login [provider] --import-windows-credential` 显式导入。环境变量中的 provider 密钥不会用于连接解析。
+
+## 使用方式
+
+```text
+ode                         当前目录启动交互会话
+ode "检查这个项目的错误处理"  以首条提示启动交互会话
+ode -c                      继续当前工作区最近的会话
+ode -p "解释这个项目"        打印模式；回答写入 stdout，工具状态写入 stderr
+ode --rpc                   通过 stdin/stdout 使用 JSONL RPC
+ode models                  列出当前 provider 可用模型
+ode --help                  查看全部启动参数
 ```
+
+常用参数：
+
+- `-C DIR`：指定工作区目录。
+- `--provider NAME`：选择 provider。
+- `--model NAME`：覆盖本次启动的模型，也支持 `opus`、`sonnet`、`haiku`、`fable` 别名。
+- `--permission plan|default|yolo`：选择本次启动的权限档位。
+- `--no-color` 或 `NO_COLOR=1`：关闭 ANSI 颜色。
+
+交互模式常用命令：`/help`、`/model`、`/mode`、`/theme`、`/resume`、`/compact`、`/undo`、`/login`、`/logout`、`/cost`、`/clear`、`/exit`。`Shift+Tab` 可切换权限档位。工具执行前仍会按当前权限规则验证和询问；`/undo` 可恢复最近一轮修改的文件。
+
+## Provider 配置
+
+内置 provider 为 Anthropic、OpenAI 和 DeepSeek。首次使用推荐通过 `ode login [provider]` 输入密钥。provider、模型和连接设置位于用户级 `%USERPROFILE%\.ode\settings.json`。例如：
+
+```json
+{
+  "provider": "anthropic",
+  "providers": {
+    "anthropic": {
+      "model": "claude-sonnet-4-6"
+    }
+  }
+}
+```
+
+自定义服务可在用户级设置中定义协议、地址和认证方式：
+
+```json
+{
+  "provider": "my-gateway",
+  "providers": {
+    "my-gateway": {
+      "protocol": "openai-chat",
+      "base_url": "https://api.example.com/v1",
+      "auth": "bearer",
+      "model": "my-model"
+    }
+  }
+}
+```
+
+`protocol` 支持 `anthropic`、`openai-chat` 和 `openai-responses`。`auth` 支持 `api-key`、`bearer`、`none`；密钥也可由 `ode login my-gateway` 写入。工作区 `.ode/settings.json` 可选择已在用户配置中定义的 provider 和模型，不用于保存密钥。顶层 `model` 可覆盖当前配置层所选 provider 的模型；用 `model_provider` 可指定它所属的 provider。
+
+HTTP 请求默认使用 Windows 代理设置。需要对特定主机直连时，可在 `NO_PROXY` 或用户设置的 `env` 中指定主机名/域名列表。
+
+## 权限与文件安全
+
+权限档位为 `plan`、`default` 和 `yolo`。工具调用仍经过输入校验、Hooks 和权限判断；流式接收中的工具参数只用于显示接收进度，**只有完整参数解析并授权后才会执行**。
+
+相对路径按工作区解析。`C:/...` 和 `C:\...` 是 Windows 绝对路径；Git Bash 的 `/c/...`、`/d/...` 会转换为对应盘符路径；`c/...` 是工作区内的相对目录。Write/Edit 会检查模型读取文件后的变化，并在写入前保留可供 `/undo` 使用的备份。
+
+## Claude Code 扩展
+
+**ode** 可从用户级和工作区的 `.claude`、`.ode` 目录读取兼容配置，包括 Skills、斜杠命令、Hooks、MCP、Subagents 和 Plugins。MCP stdio 使用换行分隔的 JSON-RPC。Skill 仅加载指令文本；其中请求的 Bash、Write、Edit、MCP 等工具仍分别经过权限检查。
+
+Lua 5.4 扩展位于 `%USERPROFILE%\.ode\init.lua`，插件可提供 `ode/init.lua`。Lua 插件是进程内可信代码；不可信扩展应使用 MCP 隔离。
+
+## 从源码构建
+
+需要 MSYS2 UCRT64、g++、CMake 3.24+ 和 Ninja。依赖已随仓库提供，构建和测试不需要联网：
+
+```text
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+发布构建使用 `release` preset：
+
+```text
 cmake --preset release
 cmake --build --preset release
 ```
 
-产物是 `build/release/ode.exe`，复制到 PATH 中的任意目录即可。
+产物为 `build/release/ode.exe`。推送 `v*` tag 后，Windows CI 会运行发布构建和离线测试，并创建只含 `ode.exe` 的 Windows x64 ZIP Release。
 
-## 使用
+## 历史版本
 
-```
-ode login anthropic        # 保存或更新用户 ~/.ode/settings.json 中的 api_key
-ode                        # 在当前目录开始交互会话
-ode -p "解释这个项目"       # 打印模式
-ode -c                     # 继续上一次会话
-ode --help
-```
-
-在 `%USERPROFILE%\.ode\settings.json` 定义 provider 的协议、`base_url` 和默认模型。工作区 `.ode/settings.json` 可以选择已定义的 provider 并覆盖模型。`.claude` 配置继续用于兼容 Hooks、MCP 等功能，provider 连接配置统一放在 `.ode`。
-
-内置 provider 需要登录。自定义 provider 可以设置 `auth` 为 `api-key`、`bearer` 或 `none`，省略时通常允许无密钥连接。`ode login <provider>` 将密钥明文写到用户 `settings.json` 的 `providers.<name>.api_key`，也可以直接编辑这个字段。旧版本保存在 Windows 凭据管理器的密钥，可用 `ode login <provider> --import-windows-credential` 显式导入。原来保存在 `credentials.json` 或环境变量中的密钥，可重新录入。
-
-HTTP 请求默认使用 Windows 代理设置。需要直连特定 API 时，可在环境变量 `NO_PROXY` 中列出逗号分隔的主机名或域名，也可以在 `~/.ode/settings.json` 的 `env` 中设置它。
-
-## Lua 扩展
-
-`ode.exe` 内嵌 Lua 5.4。个人脚本放在 `%USERPROFILE%\.ode\init.lua`，插件脚本放在已安装插件的 `ode/init.lua`。安装和运行步骤见 [Lua 示例插件](.claude/plugins/example-plugin/README.md)。
-
-## 历史
-
-旧文档和安装脚本可在 `v0.3.3` 标签的 `archive/` 中查阅。V1 源码可在 `v1-final` 标签查阅，原 `legacy/` 目录也保存在 `v0.3.3` 标签中。
+旧文档和安装脚本可在 `v0.3.3` 标签的 `archive/` 中查阅。V1 源码可在 `v1-final` 标签查阅；原 `legacy/` 目录也保存在 `v0.3.3` 标签中。

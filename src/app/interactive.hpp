@@ -23,7 +23,7 @@ struct ev_text { std::string text; };
 struct ev_thinking { std::string text; };
 struct ev_request {};
 struct ev_request_done { request_timing timing; };
-struct ev_tool_preparing { std::string name; steady::time_point started; };
+struct ev_tool_preparing { std::string name; steady::time_point started; std::size_t argument_bytes = 0; };
 struct ev_tool_start { std::string name, label, command; steady::time_point started; };
 struct ev_progress { std::string text; };
 struct ev_tool_done {
@@ -150,6 +150,9 @@ private:
 
     bool busy_ = false;
     bool thinking_ = false;
+    bool responding_ = false;
+    steady::time_point thinking_status_started_{};
+    steady::time_point response_started_{};
     bool quit_ = false;
     bool editing_fork_ = false;         // True when editing a forked message
     steady::time_point last_escape_{};  // For double-escape detection
@@ -160,6 +163,7 @@ private:
     steady::time_point busy_since_;
     std::string stream_;               // assistant text not yet committed
     std::string think_stream_;
+    std::string request_summary_;
     std::size_t hidden_thinking_chars_ = 0;
     bool show_thinking_ = true;
     bool think_started_ = false;

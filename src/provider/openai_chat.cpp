@@ -45,7 +45,11 @@ public:
                             slot.name = f["name"];
                             if (events_.tool_started) events_.tool_started(slot.name);
                         }
-                        if (f.contains("arguments") && f["arguments"].is_string()) slot.arguments += f["arguments"].get<std::string>();
+                        if (f.contains("arguments") && f["arguments"].is_string()) {
+                            const auto delta = f["arguments"].get<std::string>();
+                            slot.arguments += delta;
+                            if (events_.tool_arguments) events_.tool_arguments(slot.name, delta);
+                        }
                     }
                 }
             }

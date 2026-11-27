@@ -76,6 +76,8 @@ std::optional<fs::path> git_bash();
 // Helpers shared by the tools and tests.
 fs::path resolve(const fs::path& root, std::string_view path);
 std::string display_path(const fs::path& root, const fs::path& path);
+// Returns the normalized native absolute target so tool results are unambiguous across shells.
+std::string display_absolute_path(const fs::path& path);
 bool inside(const fs::path& root, const fs::path& path);
 struct write_target {
     fs::path path;

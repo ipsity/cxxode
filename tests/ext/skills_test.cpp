@@ -62,6 +62,20 @@ TEST_CASE("load_skills finds and parses skill files") {
     std::filesystem::remove_all(temp);
 }
 
+TEST_CASE("skill loading is read-only and does not require execute permission") {
+    const auto temp = std::filesystem::temp_directory_path() / "ode-skill-access-test";
+    const auto path = temp / ".claude" / "skills" / "example" / "SKILL.md";
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path) << "---\nname: example\ndescription: Example\n---\n\nUse Read.\n";
+
+    const auto tools = make_skill_tools(load_skills(temp));
+    REQUIRE(tools.size() == 1);
+    CHECK(tools.front().access == tool_access::read);
+
+    std::error_code ec;
+    std::filesystem::remove_all(temp, ec);
+}
+
 TEST_CASE("skills_system_prompt formats skills list") {
     std::vector<skill> skills = {
         {"review", "Review code changes", {}, ""},

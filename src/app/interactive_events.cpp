@@ -54,6 +54,8 @@ void interactive_ui::apply(ev_text& e) {
     if (e.text.empty()) return;
     flush_thinking(true);
     thinking_ = false;
+    if (!responding_) response_started_ = steady::now();
+    responding_ = true;
     // Skip leading blank lines so the reply starts right under the tool list.
     if (stream_.empty() && last_section_ != "assistant") {
         const auto first = e.text.find_first_not_of("\r\n");
@@ -67,23 +69,20 @@ void interactive_ui::apply(ev_text& e) {
 
 std::vector<std::string> interactive_ui::thinking_rows(std::string_view line, int columns) const {
     const ui::prefix prefix{paint(tone::dim, "  ┊ "), text::width("  ┊ ")};
-    return ui::layout({{std::string(line), tone::dim}}, columns, prefix, prefix);
+    return ui::layout({{std::string(line), tone::thinking}}, columns, prefix, prefix);
 }
 
 void interactive_ui::flush_thinking(bool all) {
-    std::size_t start = 0;
-    while (true) {
-        const auto end = think_stream_.find('\n', start);
-        if (end == std::string::npos) break;
-        screen_.commit(thinking_rows(std::string_view(think_stream_).substr(start, end - start), size_.columns - 1));
-        start = end + 1;
-    }
-    think_stream_.erase(0, start);
     if (!all) return;
-    if (!think_stream_.empty()) {
-        screen_.commit(thinking_rows(think_stream_, size_.columns - 1));
-        think_stream_.clear();
+    std::size_t start = 0;
+    while (start < think_stream_.size()) {
+        const auto end = think_stream_.find('\n', start);
+        const auto stop = end == std::string::npos ? think_stream_.size() : end;
+        screen_.commit(thinking_rows(std::string_view(think_stream_).substr(start, stop - start), size_.columns - 1));
+        start = end == std::string::npos ? stop : end + 1;
     }
+    if (!think_stream_.empty()) screen_.commit(std::string{});
+    think_stream_.clear();
     if (hidden_thinking_chars_ != 0) {
         note("✻ 思考 " + std::to_string(hidden_thinking_chars_) + " 字");
         hidden_thinking_chars_ = 0;
@@ -113,22 +112,41 @@ void interactive_ui::apply(ev_request&) {
     flush_stream(true);
     preparing_tool_.reset();
     thinking_ = true;
+    thinking_status_started_ = steady::now();
+    request_summary_.clear();
+    responding_ = false;
 }
 
 void interactive_ui::apply(ev_request_done& e) {
-    if (e.timing.compact) return;
-    auto message = "模型响应 " + format_elapsed(e.timing.elapsed);
-    if (e.timing.first_output) message += " · 首输出 " + format_elapsed(*e.timing.first_output);
-    if (e.timing.provider) {
-        message += " · 编码 " + format_elapsed(e.timing.provider->encode);
-        message += " · 网络/流 " + format_elapsed(e.timing.provider->http);
+    if (e.timing.compact) {
+        request_summary_.clear();
+        thinking_ = false;
+        responding_ = false;
+        return;
     }
-    note(message, ui::tone::dim);
+    request_summary_ = "✻ 思考完成 " + format_elapsed(e.timing.elapsed);
+    if (e.timing.first_output) request_summary_ += " · 首输出 " + format_elapsed(*e.timing.first_output);
+    if (e.timing.provider) {
+        request_summary_ += " · 编码 " + format_elapsed(e.timing.provider->encode);
+        request_summary_ += " · 网络/流 " + format_elapsed(e.timing.provider->http);
+    }
+    if (hidden_thinking_chars_ != 0) {
+        request_summary_ += " · 思考 " + std::to_string(hidden_thinking_chars_) + " 字";
+        hidden_thinking_chars_ = 0;
+    }
+    thinking_ = false;
+    responding_ = false;
 }
 
 void interactive_ui::apply(ev_tool_preparing& e) {
-    preparing_tool_ = std::move(e);
+    flush_thinking(true);
+    if (e.started != steady::time_point{}) {
+        preparing_tool_ = std::move(e);
+    } else if (preparing_tool_ && preparing_tool_->name == e.name) {
+        preparing_tool_->argument_bytes = e.argument_bytes;
+    }
     thinking_ = false;
+    responding_ = false;
 }
 
 void interactive_ui::show_shell_command(std::string_view command) {
@@ -162,9 +180,9 @@ void interactive_ui::flush_command_output(bool all) {
 }
 
 void interactive_ui::apply(ev_tool_start& e) {
+    flush_thinking(true);
     preparing_tool_.reset();
     thinking_ = false;
-    flush_thinking(true);
     flush_stream(true);
     running_.push_back({e.name, e.label, e.started});
     if (e.name == "Bash") {
@@ -208,10 +226,11 @@ void interactive_ui::apply(ev_tool_done& e) {
     const auto summary = e.summary.empty() ? std::string{} : "  " + e.summary;
     const int fixed = 4 + text::width(head) + text::width(duration) + text::width(summary);
     const auto label = bash ? std::string{} : text::keep_head(e.label, std::max(0, columns - fixed));
-    const auto dot = paint(e.error ? tone::error : tone::dim, "●");
+    const auto status = e.error ? paint(tone::failure, "✗ 失败") : paint(tone::success, "✓ 成功");
 
-    screen_.commit(" " + dot + " " + paint(tone::dim, head + duration) +
-                   (label.empty() ? "" : " " + paint(tone::accent, label)) + paint(e.error ? tone::error : tone::dim, summary));
+    screen_.commit(" " + status + "  " + paint(tone::bold, head) + paint(tone::dim, duration) +
+                   (label.empty() ? "" : " " + paint(tone::accent, label)) +
+                   paint(e.error ? tone::failure : tone::dim, summary));
 
     if (!e.detail.empty()) {
         std::size_t start = 0;
@@ -326,6 +345,7 @@ void interactive_ui::apply(ev_done& e) {
     preparing_tool_.reset();
     busy_ = false;
     thinking_ = false;
+    responding_ = false;
     if (worker_.joinable()) worker_.join();
     const auto& r = e.result;
     if (lua_key_) {

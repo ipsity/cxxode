@@ -56,6 +56,15 @@ TEST_CASE("glob matching") {
     CHECK(glob_match("a?c", "abc"));
 }
 
+TEST_CASE("Windows Git Bash drive paths resolve to the actual drive") {
+    const auto root = fs::path("D:/cxxode");
+    CHECK(resolve(root, "c/output/file.html") == root / "c/output/file.html");
+    CHECK(resolve(root, "D:/c/output/file.html").generic_string() == "D:/c/output/file.html");
+    CHECK(resolve(root, "/c/Users/legion/Desktop/file.html").generic_string() == "C:/Users/legion/Desktop/file.html");
+    CHECK(resolve(root, "/d/output/file.html").generic_string() == "D:/output/file.html");
+    CHECK(resolve(root, "relative/file.html") == root / "relative/file.html");
+}
+
 TEST_CASE("read numbers lines and paginates") {
     fixture f;
     f.dir.put("a.txt", "one\r\ntwo\r\nthree\r\n");
@@ -98,6 +107,15 @@ TEST_CASE("overwrite preview includes additions after many removed lines") {
     CHECK(r.detail.ends_with("… -1 more lines\n+ new\n"));
     CHECK(r.detail.find("header") == std::string::npos);
     CHECK(r.detail.find("footer") == std::string::npos);
+}
+
+TEST_CASE("write reports directory creation failures instead of claiming success") {
+    fixture f;
+    f.dir.put("not-a-directory", "file");
+    const auto result = f.run("Write", {{"file_path", "not-a-directory/child.txt"}, {"content", "content"}});
+    CHECK(result.is_error);
+    CHECK(result.text.find("Could not write") != std::string::npos);
+    CHECK(f.dir.get("not-a-directory") == "file");
 }
 
 TEST_CASE("edit refuses a file changed since it was read") {

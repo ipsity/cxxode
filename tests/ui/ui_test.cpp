@@ -2,6 +2,7 @@
 #include "ui/editor.hpp"
 #include "ui/render.hpp"
 #include "ui/text.hpp"
+#include "ui/theme.hpp"
 
 #include <doctest.h>
 
@@ -52,6 +53,11 @@ TEST_CASE("live rows fit the console without counting color escapes") {
     CHECK(ui::clip_styled_line(colored, 0).empty());
 }
 
+TEST_CASE("user message background is blended with the theme background") {
+    const auto t = dark_theme();
+    CHECK(t.user_message_bg.starts_with("\x1b[48;2;23;70;79m"));
+}
+
 TEST_CASE("layout wraps between words and inside CJK runs") {
     ui::color_enabled() = false;
     auto rows = ui::layout({{"hello world again", ui::tone::normal}}, 11, {"", 0}, {"", 0});
@@ -62,6 +68,21 @@ TEST_CASE("layout wraps between words and inside CJK runs") {
     REQUIRE(rows.size() == 2);
     CHECK(rows[0] == "一二三");
     CHECK(rows[1] == "四五");
+    ui::color_enabled() = true;
+}
+
+TEST_CASE("thinking tone renders dim italic text") {
+    ui::color_enabled() = true;
+    CHECK(ui::sgr(ui::tone::thinking) == "\x1b[0;2;3m");
+}
+
+TEST_CASE("tool outcome tones are high contrast and bold") {
+    ui::color_enabled() = true;
+    CHECK(ui::sgr(ui::tone::success) == "\x1b[0;1;38;2;80;200;120m");
+    CHECK(ui::sgr(ui::tone::failure) == "\x1b[0;1;38;2;255;80;80m");
+    ui::color_enabled() = false;
+    CHECK(ui::paint(ui::tone::success, "✓ 成功") == "✓ 成功");
+    CHECK(ui::paint(ui::tone::failure, "✗ 失败") == "✗ 失败");
     ui::color_enabled() = true;
 }
 

@@ -57,7 +57,8 @@ std::vector<tool> make_skill_tools(const std::vector<skill>& skills) {
     if (skills.empty()) return {};
     tool t;
     t.name = "skill";
-    t.description = "Invoke a predefined skill by name. Skills are specialized workflows or commands.";
+    t.description = "Load the instructions of a predefined skill by name. Loading a skill has no side effects; "
+                   "any Bash, Write, Edit, or other tools requested by its instructions are checked separately.";
     t.schema = {
         {"type", "object"},
         {"properties", {
@@ -66,7 +67,7 @@ std::vector<tool> make_skill_tools(const std::vector<skill>& skills) {
         }},
         {"required", {"name"}}
     };
-    t.access = tool_access::execute;
+    t.access = tool_access::read;
     t.run = [skills](const json& input, tool_context&) -> tool_output {
         const auto name = input.value("name", std::string{});
         if (name.empty()) return {"Skill name is required.", true, "缺少名称", ""};

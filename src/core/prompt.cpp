@@ -24,7 +24,7 @@ std::string build_system_prompt(const fs::path& root, std::string_view shell,
 - Bash: Run shell commands.
 - Edit: Replace an exact string in an existing file.
 - Write: Create or overwrite a file.
-- Glob: Find files by path pattern.
+- After writing to a path outside the workspace, verify the exact target exists and contains the intended content before reporting success. Never claim a file was saved based only on a shell command being issued.
 - Grep: Search file contents by pattern.
 
 Additional tools may be available.
