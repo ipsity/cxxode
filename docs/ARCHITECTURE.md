@@ -26,7 +26,7 @@ Windows 原生终端 coding agent，C++20，单个静态链接的 `ode.exe`。
 1. **分层失效**。`core` 依赖 `config`、`hooks`、`ui`（`core/rpc.cpp` 引用 `ui/term.hpp`）。`config` 与 `hooks` 互相引用。`commands` 引用 `app`，而 `app` 又引用 `commands`。`skills/make_tools.cpp` 依赖 `agents` 和 `mcp`。
 2. **投机代码约 3700 行**。`src/innovation/`、`src/performance/`、`ui/dialog_renderer.hpp` 没有任何调用方。`SmartToolScheduler` 从未启用，`ToolAccess access_control` 没有使用者。`ui/theme.*` 和 `theme/theme.*` 是两套主题实现。
 3. **生态兼容实际不可用**：
-   - MCP stdio 用了 `Content-Length` 帧格式。MCP 规范规定 stdio 消息以换行分隔，现有 MCP server 无法通信。
+   - 工具注册表原先同时承担可调用工具和模型声明列表，MCP 工具会全部进入模型请求。
    - Hooks 只认 `{"PreToolUse":[{"command":...}]}`。Claude Code 的格式是 `{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":...}]}]}`，所以用户现有的 hooks 会被静默跳过。stdin 字段名也和 Claude Code 不同（`tool`/`input` 对 `tool_name`/`tool_input`）。
 4. **自动压缩没有实现**。上下文超过 80% 时只会提示用户手动执行 `/compact`。
 5. **文档失控**。70 多份阶段报告（DAY/WEEK/PHASE/COMPLETE）互相矛盾，README 写的体积和启动数据也与实测不符。
@@ -50,7 +50,7 @@ base       cancel_token、json 别名、UTF-8 / 字符串小工具
 ### 依赖规则
 
 - 每层只依赖它下面的层，同层之间互不依赖。`ext` 内部的模块也互不引用，需要组合的地方放到 `main.cpp` 里装配。
-- `core` 不认识 hooks、MCP、skills。它只认两类东西：一个 `std::vector<tool>`，和一组 `tool_hooks` 回调（pre/post/prompt/stop）。`ext/hooks` 负责把 settings 里的配置转成这组回调。
+- `core` 不认识 hooks、MCP、skills。它只认工具注册表和一组 `tool_hooks` 回调（pre/post/prompt/stop）。`ext/hooks` 负责把 settings 里的配置转成这组回调。
 - `core` 不直接输出任何内容，所有输出都通过 `agent_events` 回调交给前端。
 - `nlohmann::json` 只允许出现在 `provider`、`config`、`session`、`ext/mcp`、`ext/hooks`、`ext/lua` 和 `app/rpc` 的协议边界。`tool` 的输入是个例外，它本身就是 JSON Schema 对象，保留 `json`。
 - 修改依赖关系时以 CMake 为准：每一层是一个 `STATIC` 库，`target_link_libraries` 只链接下层。违反分层就会链接失败，这样不用靠人工审查。
@@ -111,11 +111,14 @@ RPC 的 `request_finished` 记录本地构造请求的 `build_ms`（包括复制
 |---|---|
 | settings.json | `permissions.allow/deny/defaultMode`、`hooks`、`mcpServers`、`env`、`model`。`.mcp.json` 也要读 |
 | Hooks | `{事件: [{matcher, hooks: [{type:"command", command, timeout}]}]}`。stdin 字段：`session_id`、`transcript_path`、`cwd`、`hook_event_name`、`tool_name`、`tool_input`、`tool_response`、`prompt`。退出码 2 表示阻止，stderr 回传给模型。stdout 输出的 JSON 中要支持 `decision`/`reason`。命令通过 `bash`（找不到时用 `cmd /c`）执行 |
-| MCP | stdio 传输，**换行分隔的 JSON-RPC**。支持 `initialize`、`tools/list`、`tools/call`，工具名格式为 `mcp__<server>__<tool>`。M3 再加 Streamable HTTP |
+| MCP | stdio 传输，**换行分隔的 JSON-RPC**。支持 `initialize`、`tools/list`、`tools/call`，工具名格式为 `mcp__<server>__<tool>`。服务配置 `exposure` 为 `direct`、`deferred` 或 `codemode`，默认 `codemode`。`direct` 工具进入模型请求；`deferred` 工具由 `tool_search` 搜索并加入后续请求；`codemode` 工具只经 Lua CodeMode 脚本调用。所有工具定义都保留在注册表中。M3 再加 Streamable HTTP |
+
 | Skills | `skills/<name>/SKILL.md`。系统提示里只放 name 和 description，正文由 `Skill` 工具按需加载 |
 | 斜杠命令 | `commands/*.md`，支持 `$ARGUMENTS`、`$1..$9` 和 frontmatter 里的 `description`、`allowed-tools` |
 | Subagents | `agents/*.md`，frontmatter 包含 `name`、`description`、`tools`、`model`。通过 `Task` 工具调用，子 agent 只返回最终文本 |
 | Plugins | `.claude-plugin/plugin.json` 所在目录，里面包含上面几类文件。安装就是解压到 `~/.ode/plugins/<name>/` |
+
+CodeMode 使用内嵌 Lua。脚本可通过 `search_tools`、`describe_tool`、`tools.call` 和 `tools.parallel` 发现并调用注册工具；嵌套调用仍经过 Agent 的权限与 Hook 管线。每个批次最多并发 4 个工具，结果按脚本提交顺序返回。脚本执行环境不提供文件、进程和网络 API。
 
 ## 6. Lua 扩展
 

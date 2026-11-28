@@ -53,7 +53,8 @@ add_library(ode_tools STATIC
     src/tools/files.cpp
     src/tools/edit_tools.cpp
     src/tools/search_tools.cpp
-    src/tools/bash_tool.cpp)
+    src/tools/bash_tool.cpp
+    src/tools/registry.cpp)
 add_library(ode_core STATIC
     src/core/version.cpp
     src/core/permission.cpp
@@ -70,6 +71,7 @@ add_library(ode_ext STATIC
     src/ext/agents.cpp)
 add_library(ode_app STATIC
     src/app/app.cpp
+    src/app/tool_registry.cpp
     src/app/format.cpp
     src/app/commands.cpp
     src/app/login.cpp
@@ -120,6 +122,7 @@ if(BUILD_TESTING)
         tests/app/palette_test.cpp
         tests/provider/provider_test.cpp
         tests/tools/tools_test.cpp
+        tests/tools/registry_test.cpp
         tests/ui/ui_test.cpp
         tests/ext/agents_test.cpp
         tests/ext/skills_test.cpp

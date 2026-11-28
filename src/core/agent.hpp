@@ -87,9 +87,9 @@ public:
     // Restores files changed by the most recent turn that changed files.
     std::vector<std::string> undo(std::vector<std::string>* failed = nullptr);
     bool can_undo() const { return !backups_.empty(); }
-    const std::vector<tool>& tools() const { return tools_; }
+    const std::vector<tool>& tools() const { return tools_.all(); }
     const tool* find_tool(std::string_view name) const;
-    void set_extensions(std::vector<tool> tools, agent_hooks hooks);
+    void set_extensions(tool_registry tools, agent_hooks hooks);
     tool_output run_local(const std::function<tool_output(tool_context&)>& action,
                           agent_events& events, cancel_token& cancel);
 
@@ -102,18 +102,28 @@ private:
                    turn_backup& backup, std::span<const std::string> allowed_tools, std::vector<std::string>& steering);
     void run_tool_batch(std::span<const block* const> calls, agent_events& events, cancel_token& cancel,
                         message& results, turn_backup& backup, std::span<const std::string> allowed_tools,
-                        bool file_writes);
+                        bool file_writes, std::span<tool_output> outputs = {},
+                        std::optional<std::chrono::steady_clock::time_point> deadline = {});
+    std::vector<tool_output> invoke_tool_batch(const std::vector<tool_invocation>& calls,
+                                               agent_events& events, cancel_token& cancel,
+                                               turn_backup& backup,
+                                               std::map<fs::path, file_stamp>& seen,
+                                               std::span<const std::string> allowed_tools,
+                                               std::optional<std::chrono::steady_clock::time_point> deadline);
     tool_output run_one(const block& call, agent_events& events, cancel_token& cancel, turn_backup& backup,
-                        std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools);
+                        std::map<fs::path, file_stamp>& seen, std::span<const std::string> allowed_tools,
+                        std::optional<std::chrono::steady_clock::time_point> deadline = {});
     tool_output run_tool(const tool& t, const json& input, agent_events& events, cancel_token& cancel,
                          turn_backup* backup, std::map<fs::path, file_stamp>& seen,
-                         std::span<const std::string> allowed_tools);
+                         std::span<const std::string> allowed_tools,
+                         std::optional<std::chrono::steady_clock::time_point> deadline = {});
     tool_context make_context(tool_access access, agent_events& events, cancel_token& cancel,
                               turn_backup* backup, std::map<fs::path, file_stamp>& seen,
-                              std::span<const std::string> allowed_tools);
+                              std::span<const std::string> allowed_tools, bool delegates_tool_permissions = false,
+                              std::optional<std::chrono::steady_clock::time_point> deadline = {});
 
     provider& provider_;
-    std::vector<tool> tools_;
+    tool_registry tools_;
     permission_rules& rules_;
     std::mutex permission_mutex_;
     fs::path root_;
