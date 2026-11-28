@@ -31,28 +31,39 @@ std::vector<model_info> fallback_models(const provider_config& config) {
 
 } // namespace
 
-model_list list_models(const provider_config& config) {
-    http_request req;
-    req.method = "GET";
-    req.headers = {{"accept", "application/json"}};
+std::string models_url(const provider_config& config) {
     auto base = config.base_url;
     while (!base.empty() && base.back() == '/') base.pop_back();
     const bool anthropic = config.kind == protocol::anthropic;
     if (anthropic || !base.ends_with("/v1")) base += "/v1";
     if (!anthropic && base == "https://api.deepseek.com/v1") base.resize(base.size() - 3);
-    req.url = base + "/models";
+    return base + "/models";
+}
 
+model_list list_models(const provider_config& config, cancel_token* setup_cancel) {
+    http_request req;
+    req.method = "GET";
+    req.headers = {{"accept", "application/json"}};
+    req.url = models_url(config);
+    const bool anthropic = config.kind == protocol::anthropic;
     if (anthropic) req.headers.emplace_back("anthropic-version", "2023-06-01");
     if (!config.api_key.empty()) {
         if (anthropic && !config.bearer) req.headers.emplace_back("x-api-key", config.api_key);
         else req.headers.emplace_back("authorization", "Bearer " + config.api_key);
     }
 
-    cancel_token cancel;
+    cancel_token local_cancel;
+    if (setup_cancel) {
+        req.timeout_ms = 8000;
+        req.follow_redirects = false;
+    }
     std::string body;
-    const auto result = http_send(req, [&](std::string_view chunk) { body += chunk; }, cancel);
-    if (result.status != 200) {
-        const auto error = result.status == 0 ? "无法连接模型列表接口" : "模型列表请求失败（HTTP " + std::to_string(result.status) + "）";
+    const auto result = http_send(req, [&](std::string_view chunk) { body += chunk; },
+                                  setup_cancel ? *setup_cancel : local_cancel);
+    if (result.cancelled) return {{}, "已取消获取模型"};
+    if (result.status != 200 || !result.error.empty()) {
+        const auto error = result.status == 0 || result.status == 200 ? "无法读取模型列表（连接失败或超时）"
+            : "模型列表请求失败（HTTP " + std::to_string(result.status) + "）";
         return {fallback_models(config), error};
     }
 

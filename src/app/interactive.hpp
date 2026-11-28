@@ -2,6 +2,7 @@
 
 #include "app/app.hpp"
 #include "app/screen.hpp"
+#include "provider/models.hpp"
 #include "ui/editor.hpp"
 #include "ui/render.hpp"
 
@@ -64,6 +65,20 @@ private:
     void logout_command(std::string_view arg);
     bool switch_to_saved_provider(const std::string& name);
     void save_login();
+    void show_login_methods();
+    void show_login_providers();
+    void show_custom_providers();
+    void select_login_provider(const std::string& name, std::function<void()> on_back);
+    enum class setup_field { name, base_url, api_key, model };
+    void show_setup_field(setup_field field);
+    void show_setup_protocols();
+    void show_setup_auth();
+    void handle_provider_setup(const ui::key& k);
+    void submit_setup_field();
+    void fetch_setup_models();
+    void finish_setup_models();
+    void show_setup_models();
+    void confirm_provider_setup();
     void start_turn(std::string text, std::vector<std::string> allowed_tools = {});
     void start_job(std::function<turn_result(agent_events&, cancel_token&)> job, bool compact, bool needs_provider = true);
     void drain();
@@ -126,13 +141,25 @@ private:
         std::string title;                     // Selection title
         std::function<void(std::size_t)> on_select;  // Callback when confirmed
         std::function<void()> on_cancel;       // Callback when cancelled
+        std::optional<ui::editor> search{};
+        std::vector<std::size_t> matching_items() const;
     };
     std::optional<selection_state> selection_;
     struct login_state {
         std::string provider;
         std::string key;
+        std::function<void()> on_back{};
     };
     std::optional<login_state> login_;
+    struct provider_setup {
+        provider_entry entry;
+        std::optional<setup_field> field;
+        ui::editor input;
+        model_list available;
+        std::string error;
+        bool fetching = false;
+    };
+    std::optional<provider_setup> setup_;
     std::optional<ui::key> lua_key_;
     bool lua_key_handled_ = false;
 
@@ -146,6 +173,7 @@ private:
     std::deque<ui_event> queue_;
     std::vector<std::string> steering_;  // guarded by mutex_
     std::thread worker_;
+    std::optional<model_list> setup_models_result_;  // Read by the UI after joining the worker.
     cancel_token cancel_;
 
     bool busy_ = false;

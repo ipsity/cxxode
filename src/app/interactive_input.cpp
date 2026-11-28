@@ -1,12 +1,33 @@
 #include "app/interactive.hpp"
 #include "ext/lua/host.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 
 namespace ode {
 
 using namespace std::chrono_literals;
 using ui::key_kind;
+
+std::vector<std::size_t> interactive_ui::selection_state::matching_items() const {
+    auto query = search ? search->text() : std::string{};
+    const auto lower = [](unsigned char c) { return static_cast<char>(std::tolower(c)); };
+    std::ranges::transform(query, query.begin(), lower);
+    std::vector<std::size_t> matches;
+    matches.reserve(items.size());
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (query.empty()) {
+            matches.push_back(i);
+            continue;
+        }
+        auto label = items[i];
+        if (i < details.size()) label += " " + details[i];
+        std::ranges::transform(label, label.begin(), lower);
+        if (label.find(query) != std::string::npos) matches.push_back(i);
+    }
+    return matches;
+}
 
 void interactive_ui::cancel() {
     cancel_.cancel();
@@ -68,16 +89,35 @@ void interactive_ui::handle(const ui::key& k, bool allow_lua) {
         handle_login(k);
         return;
     }
+    if (setup_ && (setup_->field || setup_->fetching)) {
+        handle_provider_setup(k);
+        return;
+    }
     // Selection mode takes priority
     if (selection_) {
+        if (k.kind == key_kind::ctrl && k.letter == 'c') {
+            selection_.reset();
+            setup_.reset();
+            return;
+        }
+        if (auto& search = selection_->search; search &&
+            (k.kind == key_kind::character || k.kind == key_kind::backspace)) {
+            if (k.kind == key_kind::backspace) search->backspace();
+            else if (k.text.find_first_of("\r\n") == std::string::npos) search->insert(k.text);
+            selection_->selected_index = 0;
+            return;
+        }
+        const auto matches = selection_->matching_items();
         if (k.kind == key_kind::up) {
+            if (matches.empty()) return;
             if (selection_->selected_index > 0) selection_->selected_index--;
-            else selection_->selected_index = selection_->items.size() - 1;  // Wrap to bottom
+            else selection_->selected_index = matches.size() - 1;
         } else if (k.kind == key_kind::down) {
-            selection_->selected_index = (selection_->selected_index + 1) % selection_->items.size();
+            if (!matches.empty()) selection_->selected_index = (selection_->selected_index + 1) % matches.size();
         } else if (k.kind == key_kind::enter) {
-            auto callback = selection_->on_select;
-            auto index = selection_->selected_index;
+            if (matches.empty()) return;
+            auto callback = std::move(selection_->on_select);
+            const auto index = matches[selection_->selected_index];
             selection_.reset();
             if (callback) callback(index);
         } else if (k.kind == key_kind::escape) {
@@ -280,7 +320,9 @@ void interactive_ui::handle(const ui::key& k, bool allow_lua) {
 
 void interactive_ui::handle_login(const ui::key& k) {
     if (k.kind == key_kind::escape || (k.kind == key_kind::ctrl && k.letter == 'c')) {
+        auto on_back = std::move(login_->on_back);
         login_.reset();
+        if (k.kind == key_kind::escape && on_back) on_back();
     } else if (k.kind == key_kind::enter) {
         save_login();
     } else if (k.kind == key_kind::character) {
